@@ -132,6 +132,40 @@ async function boot() {
 
   els.boot.classList.add('hidden');
   reportReturn(catchup, isNew);
+  registerServiceWorker();
+}
+
+/**
+ * Registers the service worker, which makes the game installable to the home
+ * screen and openable with no connection.
+ *
+ * Worth doing beyond convenience: Safari clears script-writable storage for
+ * sites that go unvisited for a stretch, and a home-screen web app is treated
+ * more durably than a tab. Installing is the main protection for the save.
+ */
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+
+  // Skipped during local development: the worker serves assets cache-first, so
+  // with it running an edited file keeps showing the old version until the
+  // cache is cleared, which is a miserable way to work. Append ?sw=1 to test
+  // the installable build locally.
+  const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+  const forced = new URLSearchParams(location.search).has('sw');
+  if (local && !forced) {
+    // Tidy up after a previous ?sw=1 run, so a stale worker can't linger and
+    // start masking edits later.
+    navigator.serviceWorker.getRegistrations()
+      .then((regs) => regs.forEach((r) => r.unregister()))
+      .catch(() => {});
+    return;
+  }
+
+  // Relative path, so it works from a GitHub Pages subpath as well as a root.
+  navigator.serviceWorker.register('sw.js').catch((err) => {
+    // Not fatal — the game runs fine unregistered, just not offline.
+    console.warn('service worker registration failed', err);
+  });
 }
 
 /**

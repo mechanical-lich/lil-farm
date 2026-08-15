@@ -30,8 +30,10 @@ for development.
   3x2 footprint, overhanging roof, and animal capacity.
 - **M5 — complete.** Cows and chickens: free-range wandering, trough seeking,
   production gated on food and water, and the never-die rule.
-- **Next: M6 polish** — offline-return summary, PWA install, save export/import,
-  land expansion.
+- **PWA — complete.** Installable to the home screen, works offline, icons
+  generated from the game's own art. See [deploying.md](deploying.md).
+- **Next: M6 polish** — offline-return summary, save export/import, land
+  expansion.
 
 118 headless tests pass via `npm test`.
 
@@ -61,6 +63,10 @@ exposes `state`, `camera`, `save()`, `wipe()`, and `give()` for poking at a live
 >
 > `lilfarm.give()` tops up a farm already in progress (`give({wood: 200})`, or
 > `give({}, 500)` for money) without wiping what you were testing on.
+
+**Deploying:** see [deploying.md](deploying.md). Everything is relative so the
+game runs from a GitHub Pages subpath; the two things to remember before a
+deploy are turning `TESTING` off and bumping `CACHE_VERSION` in `sw.js`.
 
 ### Tilesheet notes (don't rediscover these)
 
