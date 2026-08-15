@@ -3,7 +3,7 @@
 import { COLORS } from '../config.js';
 import { drawGround, drawCrops, drawObjects, drawUnowned } from './tilerender.js';
 import {
-  entitiesByRow, drawTaskMarkers, drawTillAnchor, drawPlacementGhost,
+  entitiesByRow, drawTaskMarkers, drawTillAnchor, drawPlacementGhost, drawEmotes,
 } from './entityrender.js';
 
 export class Renderer {
@@ -55,6 +55,7 @@ export class Renderer {
     // scenery rather than always being painted on top of it.
     drawObjects(ctx, this.sheets, state, view, entitiesByRow(state, alpha));
     drawUnowned(ctx, state, view);
+    drawEmotes(ctx, this.sheets, state, view, alpha);
     if (overlay?.tillAnchor) drawTillAnchor(ctx, overlay.tillAnchor, state.tickCount);
     if (overlay?.pending) drawPlacementGhost(ctx, this.sheets, overlay.pending);
 

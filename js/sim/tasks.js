@@ -8,7 +8,7 @@ import { emitUnlessSuspended } from '../engine/events.js';
 import { OBJ, GROUND, objDef, isTilled } from '../world/tiledefs.js';
 import { cropAt, isRipe, isStalled, cropDef } from './crops.js';
 import { buildDef, canPlaceAt, structureAt, demolishWork, troughAnchorAt } from './build.js';
-import { animalDef, TROUGH_CAPACITY } from './animals.js';
+import { animalDef, TROUGH_CAPACITY, isReady } from './animals.js';
 
 /** Work is measured in ticks (1 tick = 1 second). */
 export const TASK_TYPES = {
@@ -267,7 +267,7 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
     default: {
       // Tap-anywhere convenience: the most useful thing this tile needs.
       // Animals and troughs come first — they're what you tap them for.
-      const ready = state.animals?.find((a) => a.ready && a.x === x && a.y === y);
+      const ready = state.animals?.find((a) => isReady(a) && a.x === x && a.y === y);
       if (ready) {
         return {
           type: 'collect', x, y, work: WORK.collect,

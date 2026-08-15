@@ -19,6 +19,7 @@ export const ITEMS = {
   eggplant: { name: 'Eggplant', sell: 45 },
   egg: { name: 'Egg', sell: 25 },
   milk: { name: 'Milk', sell: 60 },
+  wool: { name: 'Wool', sell: 100 },
 };
 
 export function itemName(id) {

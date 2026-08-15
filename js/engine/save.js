@@ -24,6 +24,17 @@ const migrations = {
     data.version = 3;
     return data;
   },
+
+  // Milked and sheared animals bank several units instead of stopping at one.
+  // A cow standing there ready was owed its milk; don't quietly pocket it.
+  3: (data) => {
+    for (const a of data.animals || []) {
+      a.stock = a.ready ? 1 : 0;
+      delete a.ready;
+    }
+    data.version = 4;
+    return data;
+  },
 };
 
 export function loadSave() {

@@ -13,7 +13,7 @@ import { itemName, addItem } from './sim/inventory.js';
 import { canAfford, buildDef, canPlaceAt } from './sim/build.js';
 import { drawBuilding } from './render/tilerender.js';
 import { drawAnimalSprite } from './render/entityrender.js';
-import { animalDef } from './sim/animals.js';
+import { animalDef, animalAt, petAnimal, isReady } from './sim/animals.js';
 import { buyAnimal, canPlaceAnimal } from './sim/shop.js';
 import { PLOT, plotBounds } from './world/land.js';
 import { attachInput } from './ui/input.js';
@@ -393,6 +393,22 @@ function queueTileTask(state, toolbar, x, y, { announce }) {
   if (!state.grid.isOwned(x, y)) {
     if (announce) toast("You don't own that land — buy it from the shop", 'warn');
     return;
+  }
+
+  // Tapping an animal that doesn't want anything is petting it. Not a task:
+  // the farmer isn't sent to do this, the player is doing it themselves. An
+  // animal with something to give still hands it over first — you'd rather have
+  // the egg than the cuddle, and the cuddle is still there afterwards.
+  if (tool === 'auto' && announce) {
+    const animal = animalAt(state, x, y);
+    if (animal && !isReady(animal)) {
+      const name = animalDef(animal.type).name.toLowerCase();
+      const { gained } = petAnimal(state, animal);
+      toast(gained
+        ? `The ${name} loves the attention`
+        : `The ${name} has had plenty of fuss for now`);
+      return;
+    }
   }
 
   const spec = taskForTile(state, x, y, tool, {

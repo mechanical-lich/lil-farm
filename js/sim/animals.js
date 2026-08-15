@@ -18,10 +18,10 @@ import { CROPS } from './crops.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 
 /**
- * `laysOnGround` is the difference between the two: a chicken with food, water
- * and time drops an egg where it stands, to be picked up like anything else
- * lying in the grass. A cow is milked directly, which is what you'd expect of
- * a cow. Both still need feeding to make any progress at all.
+ * `laysOnGround` is what sets the chicken apart: a hen with food, water and
+ * time drops an egg where it stands, to be picked up like anything else lying
+ * in the grass. Cows and sheep are milked and sheared directly, which is what
+ * you'd expect. All of them need feeding to make any progress at all.
  */
 export const ANIMALS = {
   chicken: {
@@ -31,9 +31,30 @@ export const ANIMALS = {
   },
   cow: {
     name: 'Cow', price: 500, sprite: 'cow',
-    produces: 'milk', produceTicks: 3600,         // 1 hr
+    produces: 'milk', produceTicks: 1800,         // 30 min
+  },
+  // The overnight animal. Wool is slower than milk and worth more, which makes
+  // a sheep the better buy for someone who checks in twice a day and the worse
+  // one for someone watching — the same shape as the slow crops.
+  sheep: {
+    name: 'Sheep', price: 800, sprite: 'sheep',
+    produces: 'wool', produceTicks: 4500,         // 75 min
   },
 };
+
+/**
+ * How much a milked or sheared animal banks before it stops working.
+ *
+ * Without this, a cow produced one thing and then stood idle however long you
+ * were away, which made the expensive animals far worse than chickens — a hen
+ * drops her egg on the ground and carries straight on, so eight hours away was
+ * $600 of eggs against $60 of milk. Banking closes that gap while keeping a
+ * ceiling, so an animal is still worth visiting and nothing runs away.
+ */
+export const PRODUCE_CAP = 4;
+
+/** Has this animal got anything for you? */
+export function isReady(a) { return (a.stock || 0) > 0; }
 
 /** How long one helping of food or water lasts an animal. */
 export const FOOD_DURATION = 3600;    // 1 hr
@@ -49,19 +70,143 @@ export const FEED_COST = 3;           // crops consumed to fill a feed trough
 /** Per-tick chance an idle, contented animal ambles a tile. */
 const WANDER_CHANCE = 0.06;
 
+// --- Affection ----------------------------------------------------------
+//
+// Petting is the only thing in the game the player does *for* an animal rather
+// than to get something out of it, so the payoff is deliberately gentle: a
+// well-loved animal is cheaper to keep and quicker to produce, and it never
+// gets worse. Affection does not decay. A system that punished you for a week
+// away would contradict the rule the rest of this file is built around.
+
+export const AFFECTION_MAX = 100;
+export const PET_GAIN = 20;
+
+/** An animal can only be so pleased to see you. Petting again is free but idle. */
+export const PET_COOLDOWN = 20 * 60;   // 20 min
+
+/** 0..1. Everything below scales off this rather than raw points. */
+export function affectionLevel(a) {
+  return Math.min(1, (a.affection || 0) / AFFECTION_MAX);
+}
+
+/**
+ * How fast food and water drain. A fully loved animal eats and drinks at 60%
+ * of the going rate, which is worth roughly one extra trough refill a day.
+ */
+export function upkeepRate(a) {
+  return 1 - 0.4 * affectionLevel(a);
+}
+
+/** How fast it works toward its next egg or milking: up to half as long again. */
+export function productionRate(a) {
+  return 1 + 0.5 * affectionLevel(a);
+}
+
+/**
+ * Pets an animal.
+ *
+ * This is the one thing in the game the player does themselves rather than
+ * queueing for the farmer: you tap the animal and it happens. Dispatching
+ * someone else to go and fuss your cow on your behalf would rather miss the
+ * point of it.
+ *
+ * Always succeeds — refusing the tap would be miserable — but only counts once
+ * per PET_COOLDOWN, so affection is earned by visiting often rather than by
+ * tapping fast.
+ *
+ * @returns {{gained: number}} how much affection it actually added
+ */
+export function petAnimal(state, animal) {
+  if (!animal) return { gained: 0 };
+
+  const last = animal.pettedAt;
+  const warm = last !== null && last !== undefined && last + PET_COOLDOWN > state.tickCount;
+  const gained = warm ? 0 : Math.min(PET_GAIN, AFFECTION_MAX - (animal.affection || 0));
+
+  animal.affection = (animal.affection || 0) + gained;
+  animal.pettedAt = state.tickCount;
+  showEmote(animal, state, gained > 0 ? 'hearts' : 'smile');
+
+  emitUnlessSuspended('animal:petted', {
+    id: animal.id, type: animal.type, x: animal.x, y: animal.y, gained,
+  });
+  return { gained };
+}
+
+// --- Emotes -------------------------------------------------------------
+//
+// Purely something to look at, but decided here rather than in the renderer so
+// it's part of the saved farm: come back after an hour and the animals are
+// already saying how they've been getting on, instead of standing blank until
+// the next roll.
+
+/** How long a bubble stays up. */
+export const EMOTE_TICKS = 6;
+
+/** How often an animal considers showing one. */
+export const EMOTE_INTERVAL = 20;
+
+export function showEmote(animal, state, id) {
+  animal.emote = id;
+  animal.emoteUntil = state.tickCount + EMOTE_TICKS;
+}
+
+export function currentEmote(animal, tickCount) {
+  return (animal.emoteUntil || 0) > tickCount ? animal.emote : null;
+}
+
+/**
+ * What an animal has to say. Needs come first — a thirsty animal saying how
+ * happy it is would be useless — and contentment is only chatty in proportion
+ * to how much it likes you.
+ */
+export function pickEmote(state, a) {
+  if (isThirsty(a) && isHungry(a)) return 'angry';
+  if (isThirsty(a)) return 'droplets';
+  if (isHungry(a)) return 'sad';
+  if (isReady(a)) return 'star';
+
+  const level = affectionLevel(a);
+  if (level >= 0.99) return 'heart';
+  if (level >= 0.6) return 'music';
+  if (level >= 0.3) return 'smile';
+  return state.rng.next() < 0.5 ? 'sleep' : 'dots';
+}
+
+/** Chance per interval that an animal pipes up. The fonder, the chattier. */
+function emoteChance(a) {
+  if (isNeglected(a)) return 0.5;      // a need should be hard to miss
+  return 0.1 + 0.4 * affectionLevel(a);
+}
+
+function updateEmote(state, a) {
+  if (state.tickCount % EMOTE_INTERVAL !== 0) return;
+  if ((a.emoteUntil || 0) > state.tickCount) return;
+  if (state.rng.next() >= emoteChance(a)) return;
+  showEmote(a, state, pickEmote(state, a));
+}
+
 export function animalDef(type) { return ANIMALS[type]; }
+
+export function animalAt(state, x, y) {
+  return (state.animals || []).find((a) => a.x === x && a.y === y) || null;
+}
 
 export function makeAnimal(state, type, x, y) {
   const animal = {
     id: state.nextAnimalId++,
     type,
     x, y, px: x, py: y,
+    affection: 0,
+    // null rather than -Infinity: JSON turns Infinity into null anyway, so the
+    // save would come back meaning something different from what was written.
+    pettedAt: null,
     // They arrive fed and watered; the player shouldn't be punished for the
     // gap between buying an animal and building a trough.
     food: FOOD_DURATION,
     water: WATER_DURATION,
     progress: 0,
-    ready: false,
+    stock: 0,
     facing: 'right',
     path: [],
   };
@@ -76,14 +221,19 @@ export function isThirsty(a) { return a.water <= 0; }
 export function isNeglected(a) { return isHungry(a) || isThirsty(a); }
 
 /** Collects milk or eggs. Resets the animal to start producing again. */
+/**
+ * Takes everything the animal has banked, in one go. Collecting one unit at a
+ * time would turn a full cow into four separate taps, which is exactly the
+ * fiddliness that picking eggs up off the ground already has.
+ */
 export function collectFrom(state, animal) {
-  if (!animal || !animal.ready) return null;
+  if (!animal || !isReady(animal)) return null;
   const def = animalDef(animal.type);
+  const qty = animal.stock;
 
-  addItem(state, def.produces, 1);
-  animal.ready = false;
-  animal.progress = 0;
-  return { [def.produces]: 1 };
+  addItem(state, def.produces, qty);
+  animal.stock = 0;
+  return { [def.produces]: qty };
 }
 
 // --- troughs ------------------------------------------------------------
@@ -150,14 +300,25 @@ export function updateAnimals(state) {
     a.px = a.x;
     a.py = a.y;
 
-    a.food = Math.max(0, a.food - 1);
-    a.water = Math.max(0, a.water - 1);
+    // Fractional drain, so affection can make upkeep genuinely cheaper without
+    // needing a separate clock. Stored rounded to keep saves tidy.
+    const rate = upkeepRate(a);
+    a.foodDebt = (a.foodDebt || 0) + rate;
+    a.waterDebt = (a.waterDebt || 0) + rate;
+    while (a.foodDebt >= 1) { a.foodDebt -= 1; a.food = Math.max(0, a.food - 1); }
+    while (a.waterDebt >= 1) { a.waterDebt -= 1; a.water = Math.max(0, a.water - 1); }
 
     // Production runs only while an animal has both. Missing either simply
     // pauses the clock — progress is never lost, and neither is the animal.
     const def = animalDef(a.type);
-    if (def && !a.ready && !isNeglected(a)) {
-      if (a.progress < def.produceTicks) a.progress++;
+    // A hen has nowhere to bank anything — her eggs go on the ground — so the
+    // cap only applies to animals you collect from directly.
+    const full = !def?.laysOnGround && (a.stock || 0) >= PRODUCE_CAP;
+    if (def && !full && !isNeglected(a)) {
+      if (a.progress < def.produceTicks) {
+        a.workDebt = (a.workDebt || 0) + productionRate(a);
+        while (a.workDebt >= 1 && a.progress < def.produceTicks) { a.workDebt -= 1; a.progress++; }
+      }
 
       if (a.progress >= def.produceTicks) {
         if (def.laysOnGround) {
@@ -166,12 +327,16 @@ export function updateAnimals(state) {
           // losing the egg.
           if (layEgg(state, a)) a.progress = 0;
         } else {
-          a.ready = true;
-          emitUnlessSuspended('animal:ready', { id: a.id, type: a.type, x: a.x, y: a.y });
+          a.stock = (a.stock || 0) + 1;
+          a.progress = 0;
+          emitUnlessSuspended('animal:ready', {
+            id: a.id, type: a.type, x: a.x, y: a.y, stock: a.stock,
+          });
         }
       }
     }
 
+    updateEmote(state, a);
     moveAnimal(state, a);
   }
 }

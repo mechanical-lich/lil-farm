@@ -1,4 +1,3 @@
 - Fun animations.  Farmer bounces as he walks, trees wiggle as they are chopped, etc.
 - Mushroom Journal.   I have created a mushrooms tilesheet with 4 mushroom types and 4 varations.  Spawn the mushrooms on grass tiles at random.   Mushrooms have various rarities and can be sold at different prices.   A journal records what mushrooms you've found and how many of each.    
-- Animal affection system.  Player can select a petting action.  When they click on animals it pets them makes a heart animation and raises that animals affection.    The higher the affection the the less resources the animal requires to produce it's product.   Higher affection also reduces the amount of time it takes to create product.   IE an high affection chicken needs less food and water and lays eggs more frequently.   Every so often based on their affection level, an animal shows an emote.   
 - Organize sell menu by item type. Group crops, products, seeds, etc together.  

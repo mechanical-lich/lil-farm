@@ -44,6 +44,9 @@ for development.
 - **`TESTING` is off.** New farms get $50 and ten seeds, as intended.
 - **Weeds regrow — complete.** Capped, seeded, replayable; see `sim/weeds.js`.
 - **The status bar is the task button.** One fewer button in the bottom row.
+- **Affection and emotes — complete.** Tap an animal to pet it; see design.md.
+- **Sheep — complete.** The slow, valuable animal: wool over 75 minutes at $100.
+- **Milked animals bank up to 4 units** rather than stopping at one.
 
 **The settings panel and the save.** The farm lives in localStorage, which the
 browser is entitled to clear, so exporting a copy is the only real protection
@@ -112,7 +115,36 @@ version could take cabbage and eggplant out together, leaving a player checking
 in at bedtime with nothing but 4- and 5-minute crops — the slow crops are the
 entire point of an overnight field. Reported from real play.
 
-164 headless tests pass via `npm test`.
+**Petting is not a task.** Every other interaction queues work for the farmer;
+this one happens on the tap. It sits in `main.js` ahead of `taskForTile`, gated
+to the auto tool and to real taps (so drag-painting doesn't pet), and it defers
+to an animal that has something to collect.
+
+Affection has **no decay**, deliberately, and it changes rates rather than
+thresholds: `upkeepRate` and `productionRate` return multipliers that feed
+fractional debt counters on the animal (`foodDebt`, `workDebt`), so a 40%
+discount on upkeep doesn't need a second clock. `pettedAt` is `null` when never
+petted, **not `-Infinity`** — JSON turns Infinity into null, so the save would
+come back meaning something different from what was written and hand out a free
+helping of affection on every reload. There's a test pinning that.
+
+Emotes are chosen in `sim/`, so they replay deterministically and are part of
+the save. They're drawn *after* everything else rather than in the row pass:
+a bubble floats onto the row above the animal, where scenery would paint over
+it. It's a caption, not part of the scene.
+
+**`a.stock` replaced `a.ready`.** Milked and sheared animals bank up to
+`PRODUCE_CAP` units; `isReady(a)` is the one place that asks. This fixed a real
+hole: a cow used to produce one thing and stall, so eight hours away was $600 of
+eggs against $60 of milk, and the animals you pay most for were the worst ones
+to own overnight. Now it's $600 / $240 / $400 — and the hen's $600 costs 24
+separate pickups against one tap. Hens are deliberately exempt from the cap;
+their eggs go on the ground, so there's nothing to bank.
+
+The v3 -> v4 migration converts `ready` to `stock`, because a cow standing there
+ready had earned its milk and shouldn't quietly lose it on an update.
+
+179 headless tests pass via `npm test`.
 
 Tilling is a two-point row gesture and beds are drawn with the capsule art — see
 section 8. Adjacent rows stay visually separate rather than merging into a grid.

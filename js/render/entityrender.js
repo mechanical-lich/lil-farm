@@ -5,9 +5,9 @@
 // loop's alpha (0..1 progress toward the next tick).
 
 import { TILE } from '../config.js';
-import { SPRITES } from './sprites.js';
+import { SPRITES, EMOTES } from './sprites.js';
 import { blit } from './tilerender.js';
-import { animalDef, isNeglected, isThirsty } from '../sim/animals.js';
+import { animalDef, isNeglected, isThirsty, currentEmote, isReady } from '../sim/animals.js';
 
 /**
  * Everything that moves, bucketed by the tile row it should sort into.
@@ -19,6 +19,30 @@ import { animalDef, isNeglected, isThirsty } from '../sim/animals.js';
  *
  * @returns {Map<number, Array<(ctx, sheets) => void>>}
  */
+/**
+ * Emote bubbles, drawn after everything else rather than in the row pass.
+ *
+ * A bubble floats above the animal's head, which means it lands on the row
+ * above — where scenery on that row would paint straight over it. Sorting it
+ * with the animal would be wrong for the same reason. So it goes last, on top
+ * of the world: it's a caption, not part of the scene.
+ */
+export function drawEmotes(ctx, sheets, state, view, alpha) {
+  for (const a of state.animals || []) {
+    const id = currentEmote(a, state.tickCount);
+    if (!id || !EMOTES[id]) continue;
+    if (a.x < view.x0 - 1 || a.x > view.x1 + 1) continue;
+    if (a.y < view.y0 - 1 || a.y > view.y1 + 1) continue;
+
+    const x = lerp(a.px ?? a.x, a.x, alpha) * TILE;
+    const y = lerp(a.py ?? a.y, a.y, alpha) * TILE;
+    // A slow bob, so a bubble that hangs around for a few seconds still reads
+    // as alive rather than pasted on.
+    const bob = Math.floor(state.tickCount / 2) % 2 === 0 ? -1 : 0;
+    blit(ctx, sheets, EMOTES[id], Math.round(x), Math.round(y) - TILE + bob);
+  }
+}
+
 export function entitiesByRow(state, alpha) {
   const rows = new Map();
   const add = (y, fn) => {
@@ -105,7 +129,7 @@ function drawAnimal(ctx, sheets, state, a, pos) {
   const y = pos.y * TILE;
   blit(ctx, sheets, SPRITES[def.sprite], Math.round(x), Math.round(y) - 1, a.facing === 'left');
 
-  if (a.ready) {
+  if (isReady(a)) {
     // A gentle bob so a collectable animal catches the eye while panning.
     const bob = Math.sin(state.tickCount / 3) < 0 ? -1 : 0;
     drawBadge(ctx, x + TILE - 6, y - 3 + bob, '#ffe680', '#8a6a10');

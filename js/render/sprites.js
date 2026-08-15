@@ -1,14 +1,15 @@
-// Tilesheet atlas. Two Kenney sheets (CC0), each a 12x11 grid of 16px tiles:
+// Tilesheet atlas. Three Kenney sheets (CC0), all 16px tiles:
 //
-//   'farm' — assets/tilemap_packed.png       crops, soil beds, animals, barn
-//   'town' — assets/town_tilemap_packed.png  grass, dirt, paving, fences, trees
+//   'farm'   — assets/tilemap_packed.png       crops, soil beds, animals, barn
+//   'town'   — assets/town_tilemap_packed.png  grass, dirt, paving, fences, trees
+//   'emotes' — assets/emotes.png               speech bubbles over the animals
 //
 // Both share the same palette (#84c669 grass, #eaa56c dirt), so tiles from the
 // two sheets sit next to each other seamlessly.
 //
-// A sprite is [col, row] for the farm sheet, or [col, row, 'town'] for the town
-// sheet. Keeping the farm form unsuffixed means the sheet only has to be named
-// where it isn't the original one.
+// A sprite is [col, row] for the farm sheet, or [col, row, 'town'] / [col, row,
+// 'emotes'] for the others. Keeping the farm form unsuffixed means the sheet
+// only has to be named where it isn't the original one.
 //
 // Coordinates were catalogued from tools/atlas-viewer.html (append ?sheet=town
 // for the second sheet). If a sprite looks wrong in game, open that page — it
@@ -175,6 +176,31 @@ export const SPRITES = {
   duck: [3, 10],
 };
 
+/**
+ * Kenney's emote pack (CC0), a 5x6 grid of 16px speech bubbles in
+ * assets/emotes.png. Catalogued by eye from the sheet itself — only the ones
+ * the game actually uses are named; the rest are left for later.
+ *
+ *   row 0  swirl · music · sad face · sweat drop · ring
+ *   row 1  sparkles · HAHA · smiley · ellipsis · dollar
+ *   row 2  star · lightbulb · blank · two dots · scribble
+ *   row 3  ZZ · small hearts · !! · dot · impact
+ *   row 4  Z · broken heart · ! · cross · cheer
+ *   row 5  ? · heart · droplets · gloom cloud · angry face
+ */
+export const EMOTES = {
+  music: [1, 0, 'emotes'],
+  sad: [2, 0, 'emotes'],
+  smile: [2, 1, 'emotes'],
+  dots: [3, 1, 'emotes'],
+  star: [0, 2, 'emotes'],
+  sleep: [0, 3, 'emotes'],
+  hearts: [1, 3, 'emotes'],
+  heart: [1, 5, 'emotes'],
+  droplets: [2, 5, 'emotes'],
+  angry: [4, 5, 'emotes'],
+};
+
 /** Source rect in the sheet for a [col,row] pair. */
 export function srcRect([col, row]) {
   return { sx: col * TILE, sy: row * TILE, sw: TILE, sh: TILE };
@@ -233,15 +259,17 @@ function loadImage(src) {
 
 /**
  * Loads both tilesheets and prepares derived tiles.
- * @returns {Promise<{farm: HTMLImageElement, town: HTMLImageElement}>}
+ * @returns {Promise<{farm: HTMLImageElement, town: HTMLImageElement,
+ *   emotes: HTMLImageElement}>}
  */
 export async function loadSheets() {
-  const [farm, town] = await Promise.all([
+  const [farm, town, emotes] = await Promise.all([
     loadImage('assets/tilemap_packed.png'),
     loadImage('assets/town_tilemap_packed.png'),
+    loadImage('assets/emotes.png'),
   ]);
   buildCapsules(farm);
-  return { farm, town };
+  return { farm, town, emotes };
 }
 
 /** Resolves which sheet image a sprite reference belongs to. */

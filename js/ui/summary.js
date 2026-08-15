@@ -8,7 +8,7 @@
 // hungry animal or a bed still waiting on water.
 
 import { itemName } from '../sim/inventory.js';
-import { isNeglected, isThirsty } from '../sim/animals.js';
+import { isNeglected, isThirsty, isReady } from '../sim/animals.js';
 import { isStalled } from '../sim/crops.js';
 import { OBJ } from '../world/tiledefs.js';
 
@@ -43,10 +43,6 @@ export function buildSummary(state, catchup) {
   const eggs = counts['animal:laid'] || 0;
   if (eggs > 0) lines.push(`${eggs} ${eggs === 1 ? 'egg was' : 'eggs were'} laid`);
 
-  const milkable = counts['animal:ready'] || 0;
-  if (milkable > 0) {
-    lines.push(`${milkable} ${milkable === 1 ? 'animal is' : 'animals are'} ready to milk`);
-  }
 
   const weeds = counts['weed:grown'] || 0;
   if (weeds > 0) lines.push(`${weeds} ${weeds === 1 ? 'weed' : 'weeds'} sprang up`);
@@ -64,6 +60,15 @@ export function buildSummary(state, catchup) {
   const waiting = Object.values(state.crops || {}).filter(isStalled).length;
   if (waiting) {
     nudges.push(`${waiting} ${waiting === 1 ? 'seed is' : 'seeds are'} still waiting to be watered`);
+  }
+
+  // Waiting to be collected. Counted from the farm as it stands rather than
+  // from the events, because animals bank several units now — the number that
+  // matters is how much is sitting there, not how many times a cow filled up.
+  const banked = (state.animals || []).reduce((n, a) => n + (a.stock || 0), 0);
+  if (banked) {
+    const who = (state.animals || []).filter(isReady).length;
+    nudges.push(`${banked} to collect from ${who} ${who === 1 ? 'animal' : 'animals'}`);
   }
 
   // Eggs sit on the ground until someone picks them up, so they're easy to

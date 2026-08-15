@@ -117,9 +117,20 @@ There are tasks to fill food and water troughs.  Water is infinite, but food mus
 Animals can not open gates.
 
 ### How animals work
-- Two animals: a **chicken** ($120) produces an **egg** every 20 minutes, a **cow** ($500) is ready to **milk** every hour.  Both need food and water to make progress.
+- Three animals, in order of patience: a **chicken** ($120) drops an **egg** every 20 minutes, a **cow** ($500) is ready to **milk** after 30 minutes, and a **sheep** ($800) grows a **fleece** over 75 minutes.  All of them need food and water to make progress; the clock only runs while they have both.
+- **Wool is the slow, valuable one.**  A fleece sells for $100 against milk's $60, so a sheep is the animal for someone who looks in twice a day and the wrong one for someone watching the farm — the same shape as the slow crops being the seed you plant before bed.
+- **Milked and sheared animals bank up to 4 units** and then wait.  Without that a cow produced one thing and stood idle however long you were away, which made the animals you pay the most for far worse than chickens overnight.  A full cow fills in 2 hours and a sheep in 5, so the cow is the animal to own if you're watching and the sheep if you're not:
+
+  | 8 hours away | price | waiting | taps to collect |
+  |---|---|---|---|
+  | Chicken | $120 | $600 | 24 |
+  | Cow | $500 | $240 | 1 |
+  | Sheep | $800 | $400 | 1 |
+
+  Chickens still earn the most while you're gone, but every egg is a separate pickup and they litter the ground.  That's the trade: hens are the highest-yield and highest-effort animal, and the expensive ones are the ones you can leave.
+- **Collecting takes the whole bank in one tap.**  One tap per churn would recreate exactly the fiddliness that picking eggs up off the ground already has.
 - **Chickens are not collected from.**  A hen with enough food, water and time **drops an egg on the ground** where it stands, and the egg is picked up with the clear task like anything else lying in the grass.  Eggs don't block movement, and a hen with nowhere to put one simply waits rather than losing it.
-- **Cows are milked directly** — you tap the cow.  That difference is deliberate: you pick an egg up off the ground, you milk a cow.
+- **Cows and sheep are collected from directly** — you tap the animal.  That difference is deliberate: you pick an egg up off the ground, you milk a cow and you shear a sheep.
 - **Animals are free-range.**  Nothing forces you to fence them.  Fences and gates are how you *choose* to keep them near their troughs, since a gate stops an animal but not the farmer.
 - You need a **barn before you can buy an animal**, and each barn holds 4.
 - **You choose where a new animal goes.**  Pressing Buy closes the shop and hands you a ghost of the animal; tap to move it, then confirm.  Nothing is charged until you confirm a spot, so backing out is free — the same rule building follows.
@@ -127,7 +138,7 @@ Animals can not open gates.
 - Filling a **water trough is free** — the work is carrying it, not finding it.
 - Filling a **feed trough** consumes 3 units of food, chosen automatically: the **cheapest crop** you have enough of, so a stray tap never burns the eggplants.
 - **Feed can also be bought** from the shop at $15 a unit.  It's deliberately dearer than using your own crops — about $45 a trough against roughly $30 of carrots — and is only ever used as a **fallback** when no crop is spare.  It exists so an empty larder never means hungry animals, not as the everyday choice.  Feed resells for far less than it costs, so stockpiling it is convenience rather than a way to store value.
-- Tapping a cow that's ready milks it; tapping an egg picks it up; tapping a trough fills it.
+- Tapping an animal that's ready collects from it; tapping an egg picks it up; tapping a trough fills it.  Tapping an animal that wants nothing **pets** it — see Affection below.
 - Neglected animals show a marker (blue when thirsty, amber when hungry) and ready ones bob with a badge.
 
 ### Animals never die
@@ -137,6 +148,19 @@ Animals can not open gates.
 - Feeding and watering it again resumes production.  There is no permanent penalty and no way to lose an animal you paid for.
 - This is deliberately **different from crops**, which do die if they aren't watered in time.  The asymmetry is the point: a crop is a cheap, replaceable seed, while an animal is an expensive purchase.  In a game you're meant to be able to walk away from for days, coming back to a dead cow you bought would feel awful.  Do not "fix" this inconsistency by adding animal death.
 - A neglected animal must be visibly neglected — a hungry/thirsty marker — so an idle barn reads as "they need feeding", not as a bug.
+
+### Affection
+Tapping an animal that doesn't want anything **pets it**. This is the one thing the player does themselves rather than queueing for the farmer — sending someone else to go and fuss your cow rather misses the point.
+
+- An animal with something to give hands it over first. You'd rather have the egg than the cuddle, and the cuddle is still there afterwards.
+- A fuss only counts **once every 20 minutes**, so affection is earned by visiting often rather than by tapping fast. Petting again in between is still welcome, it just doesn't add anything.
+- Affection makes an animal **cheaper to keep** (down to 60% of the usual food and water) and **quicker to produce** (up to half as fast again).
+- **Affection never decays.** A week away must not undo something the player did deliberately — same reasoning as animals never dying.
+
+### Emotes
+Animals show a speech bubble now and again, from the Kenney emote sheet. What they say is decided in the simulation rather than the renderer, so it's part of the saved farm: come back after an hour and they're already saying how they've been getting on.
+
+Needs come first, because a thirsty animal telling you how happy it is would be useless: hungry *and* thirsty is an angry face, thirsty is droplets, hungry is a sad face, something to collect is a star. Only after all that does it say how it feels about you — a heart, music, a smile, or a bored "zzz" if it barely knows you. **The fonder an animal is, the more often it pipes up**, and a neglected one speaks up regardless.
 
 ## Coming back
 The whole premise is that the farm runs with the tab closed, so returning shows a **"while you were away" card** rather than silently presenting a changed field.

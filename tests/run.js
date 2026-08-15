@@ -27,10 +27,12 @@ import {
   ROTATION_TICKS, STAPLE_SEEDS, ROTATING_COUNT, ROTATING_TIERS, stockedSeedCrops, buyList,
   buy, sell, sellAll, buyAnimal, canBuyAnimal, canPlaceAnimal, MATERIALS,
 } from '../js/sim/shop.js';
-import { ITEMS } from '../js/sim/inventory.js';
+import { ITEMS, countItem } from '../js/sim/inventory.js';
 import {
   ANIMALS, TROUGH_CAPACITY, FEED_COST, FOOD_DURATION, WATER_DURATION, SEEK_THRESHOLD,
-  makeAnimal, collectFrom, isNeglected, fillWaterTrough, fillFeedTrough, pickFeed,
+  makeAnimal, collectFrom, isNeglected, fillWaterTrough, fillFeedTrough, pickFeed, animalDef,
+  petAnimal, pickEmote, currentEmote, animalAt, isReady, PRODUCE_CAP,
+  AFFECTION_MAX, PET_GAIN, PET_COOLDOWN, EMOTE_TICKS,
 } from '../js/sim/animals.js';
 import {
   BUILDABLES, canPlaceAt, canAfford, footprint, troughAnchorAt,
@@ -1454,7 +1456,7 @@ test('neglect pauses production without losing progress', () => {
 
   for (let i = 0; i < ANIMALS.chicken.produceTicks * 3; i++) tick(s);
   assertEqual(animal.progress, stalled, 'progress is frozen while neglected');
-  assert(!animal.ready, 'and it never becomes ready');
+  assert(!isReady(animal), 'and it never becomes ready');
 });
 
 test('feeding a stalled animal resumes production from where it stopped', () => {
@@ -1481,7 +1483,7 @@ test('a fed chicken lays an egg on the ground, not into the bag', () => {
 
   for (let i = 0; i < ANIMALS.chicken.produceTicks + 10; i++) tick(s);
 
-  assert(!animal.ready, 'a hen is never "ready to collect from"');
+  assert(!isReady(animal), 'a hen is never "ready to collect from"');
   assertEqual(s.inventory.egg, undefined, 'nothing goes straight into the bag');
 
   const eggs = [...s.grid.objects].filter((o) => o === OBJ.EGG).length;
@@ -1518,13 +1520,65 @@ test('a cow is still milked directly rather than dropping anything', () => {
   const { s, animal } = farmWithAnimal('cow', 8043);
   for (let i = 0; i < ANIMALS.cow.produceTicks + 10; i++) tick(s);
 
-  assert(animal.ready, 'the cow should be ready to milk');
+  assert(isReady(animal), 'the cow should be ready to milk');
   assertEqual([...s.grid.objects].filter((o) => o === OBJ.EGG).length, 0, 'and drops nothing');
 
   const gained = collectFrom(s, animal);
   assertEqual(gained, { milk: 1 }, 'milking yields milk');
   assertEqual(s.inventory.milk, 1, 'straight into the bag');
-  assertEqual(animal.progress, 0, 'and it starts over');
+  assertEqual(animal.stock, 0, 'and the churn is empty again');
+});
+
+test('a milked animal banks a few units instead of stopping at one', () => {
+  // Without this the expensive animals were far worse than chickens overnight:
+  // a hen drops her egg and carries on, while a cow produced one thing and
+  // stood idle for the rest of the night.
+  const { s, animal } = farmWithAnimal('cow', 8045);
+  const each = ANIMALS.cow.produceTicks;
+
+  for (let i = 0; i < each * 2 + 10; i++) tick(s);
+  assertEqual(animal.stock, 2, 'two milkings while you were away');
+
+  // ...but not forever. There's a ceiling, so an animal is still worth visiting.
+  for (let i = 0; i < each * 10; i++) tick(s);
+  assertEqual(animal.stock, PRODUCE_CAP, 'it fills up and then waits');
+
+  const gained = collectFrom(s, animal);
+  assertEqual(gained, { milk: PRODUCE_CAP }, 'and the whole lot comes in one tap');
+  assertEqual(s.inventory.milk, PRODUCE_CAP, 'not one tap per churn');
+});
+
+test('a full animal starts working again the moment you collect', () => {
+  const { s, animal } = farmWithAnimal('sheep', 8046);
+  for (let i = 0; i < ANIMALS.sheep.produceTicks * (PRODUCE_CAP + 2); i++) tick(s);
+  assertEqual(animal.stock, PRODUCE_CAP, 'full');
+
+  collectFrom(s, animal);
+  for (let i = 0; i < ANIMALS.sheep.produceTicks + 5; i++) tick(s);
+  assertEqual(animal.stock, 1, 'shearing it lets it get back to work');
+});
+
+test('hens are not capped — their eggs go on the ground', () => {
+  const { s } = farmWithAnimal('chicken', 8047);
+  for (let i = 0; i < ANIMALS.chicken.produceTicks * (PRODUCE_CAP + 3); i++) tick(s);
+
+  const eggs = [...s.grid.objects].filter((o) => o === OBJ.EGG).length;
+  assert(eggs > PRODUCE_CAP, `a hen keeps laying (${eggs} eggs), the cap is for banking`);
+});
+
+test('a save from before banking keeps the milk it was owed', () => {
+  const { s, animal } = farmWithAnimal('cow', 8048);
+  for (let i = 0; i < ANIMALS.cow.produceTicks + 5; i++) tick(s);
+  assertEqual(animal.stock, 1, 'a cow ready to milk');
+
+  // How that farm was written before animals could bank.
+  const old = JSON.parse(JSON.stringify(serialize(s)));
+  old.version = SAVE_VERSION - 1;
+  for (const a of old.animals) { a.ready = a.stock > 0; delete a.stock; }
+
+  const back = deserialize(migrate(old));
+  assert(isReady(back.animals[0]), 'the milk it had earned is still there');
+  assertEqual(back.animals[0].stock, 1, 'as one unit of stock');
 });
 
 test('a hen with nowhere to lay keeps its egg rather than losing it', () => {
@@ -2022,6 +2076,153 @@ test('a quiet absence with nothing to report shows nothing', () => {
   s.animals = [];
   assertEqual(buildSummary(s, { ticks: 3600, tally: { counts: {}, items: {} } }), null,
     'no work, no losses, nothing needing attention');
+});
+
+test('a sheep grows wool, sheared directly like a cow is milked', () => {
+  const { s, animal } = farmWithAnimal('sheep', 8200);
+  const def = animalDef('sheep');
+
+  for (let i = 0; i < def.produceTicks + 5; i++) tick(s);
+
+  assert(isReady(animal), 'the fleece is ready after its full time');
+  let dropped = 0;
+  s.grid.objects.forEach((o) => { if (o === OBJ.EGG) dropped++; });
+  assertEqual(dropped, 0, 'a sheep leaves nothing lying in the grass');
+
+  const gained = collectFrom(s, animal);
+  assertEqual(gained, { wool: 1 }, 'shearing yields wool');
+  assertEqual(countItem(s, 'wool'), 1, 'and it lands in the bag');
+});
+
+test('wool takes longer than milk and is worth more when it comes', () => {
+  // The point of a sheep: fewer, bigger collections. It's the animal for
+  // someone who looks in twice a day, the way the slow crops are the seed for
+  // someone planting before bed.
+  assert(animalDef('sheep').produceTicks > animalDef('cow').produceTicks,
+    'wool is slower than milk');
+  assert(ITEMS.wool.sell > ITEMS.milk.sell, 'and a fleece is worth more than a churn');
+
+  const cow = farmWithAnimal('cow', 8201);
+  const sheep = farmWithAnimal('sheep', 8201);
+  for (let i = 0; i < animalDef('cow').produceTicks + 5; i++) { tick(cow.s); tick(sheep.s); }
+
+  assert(isReady(cow.animal), 'the cow is ready first');
+  assert(!isReady(sheep.animal), 'the sheep is still growing its fleece');
+});
+
+// --- affection ----------------------------------------------------------
+
+test('petting an animal raises its affection, up to a limit', () => {
+  const { s, animal } = farmWithAnimal('cow', 8100);
+  assertEqual(animal.affection, 0, 'a new animal is unattached');
+
+  const first = petAnimal(s, animal);
+  assertEqual(first.gained, PET_GAIN, 'a fuss counts for something');
+  assertEqual(animal.affection, PET_GAIN, 'and lands on the animal');
+
+  for (let i = 0; i < 50; i++) {
+    s.tickCount += PET_COOLDOWN + 1;
+    petAnimal(s, animal);
+  }
+  assertEqual(animal.affection, AFFECTION_MAX, 'affection tops out rather than running away');
+});
+
+test('petting again straight away is welcome but does not count', () => {
+  // Affection is earned by visiting often, not by tapping fast.
+  const { s, animal } = farmWithAnimal('chicken', 8101);
+  petAnimal(s, animal);
+
+  const again = petAnimal(s, animal);
+  assertEqual(again.gained, 0, 'no second helping within the cooldown');
+  assertEqual(animal.affection, PET_GAIN, 'affection is unchanged');
+
+  s.tickCount += PET_COOLDOWN + 1;
+  assertEqual(petAnimal(s, animal).gained, PET_GAIN, 'but later it counts again');
+});
+
+test('a loved animal eats and drinks less', () => {
+  const plain = farmWithAnimal('cow', 8102);
+  const loved = farmWithAnimal('cow', 8102);
+  loved.animal.affection = AFFECTION_MAX;
+
+  for (let i = 0; i < 600; i++) { tick(plain.s); tick(loved.s); }
+
+  assert(loved.animal.food > plain.animal.food,
+    `loved ${loved.animal.food} should outlast plain ${plain.animal.food}`);
+  assert(loved.animal.water > plain.animal.water, 'and stay watered longer');
+});
+
+test('a loved animal produces faster', () => {
+  const plain = farmWithAnimal('cow', 8103);
+  const loved = farmWithAnimal('cow', 8103);
+  loved.animal.affection = AFFECTION_MAX;
+
+  for (let i = 0; i < 600; i++) { tick(plain.s); tick(loved.s); }
+
+  assert(loved.animal.progress > plain.animal.progress,
+    `loved ${loved.animal.progress} should be ahead of plain ${plain.animal.progress}`);
+});
+
+test('affection never decays, however long you are away', () => {
+  // Same reasoning as animals never dying: a week's absence must not undo
+  // something the player did deliberately.
+  const { s, animal } = farmWithAnimal('cow', 8104);
+  animal.affection = AFFECTION_MAX;
+
+  for (let i = 0; i < 7 * 24 * 60 * 60; i++) tick(s);
+
+  assertEqual(animal.affection, AFFECTION_MAX, 'still just as fond of you');
+});
+
+test('affection survives a save round trip', () => {
+  const { s, animal } = farmWithAnimal('chicken', 8105);
+  petAnimal(s, animal);
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual(back.animals[0].affection, PET_GAIN, 'affection is part of the farm');
+  // -Infinity would come back as null and read as "never petted", which would
+  // hand out a free helping of affection on every reload.
+  assertEqual(back.animals[0].pettedAt, s.tickCount, 'and so is when it was last petted');
+  assertEqual(petAnimal(back, back.animals[0]).gained, 0, 'so the cooldown still applies');
+});
+
+test('an animal says what it needs before it says how it feels', () => {
+  const { s, animal } = farmWithAnimal('cow', 8106);
+  animal.affection = AFFECTION_MAX;
+
+  animal.water = 0;
+  assertEqual(pickEmote(s, animal), 'droplets', 'thirst comes first');
+
+  animal.food = 0;
+  assertEqual(pickEmote(s, animal), 'angry', 'hungry *and* thirsty is worth saying loudly');
+
+  animal.water = 9999;
+  assertEqual(pickEmote(s, animal), 'sad', 'then hunger on its own');
+
+  animal.food = 9999;
+  animal.stock = 1;
+  assertEqual(pickEmote(s, animal), 'star', 'then something to collect');
+
+  animal.stock = 0;
+  assertEqual(pickEmote(s, animal), 'heart', 'and only then, how it feels about you');
+
+  animal.affection = 0;
+  assert(['sleep', 'dots'].includes(pickEmote(s, animal)), 'an indifferent animal is dull');
+});
+
+test('petting shows hearts, and emotes expire on their own', () => {
+  const { s, animal } = farmWithAnimal('chicken', 8107);
+  petAnimal(s, animal);
+  assertEqual(currentEmote(animal, s.tickCount), 'hearts', 'a fuss is worth a bubble');
+
+  assertEqual(currentEmote(animal, s.tickCount + EMOTE_TICKS), null, 'and it does not stick');
+});
+
+test('emotes are part of the sim, so they replay identically', () => {
+  const a = farmWithAnimal('cow', 8108);
+  const b = farmWithAnimal('cow', 8108);
+  for (let i = 0; i < 2000; i++) { tick(a.s); tick(b.s); }
+  assertEqual(serialize(b.s), serialize(a.s), 'two identical farms must stay identical');
 });
 
 // --- weeds regrowing ----------------------------------------------------
