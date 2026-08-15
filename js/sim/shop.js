@@ -24,10 +24,14 @@ export const STAPLE_SEEDS = ['carrot', 'wheat'];
 export const ROTATING_SEEDS = ['corn', 'tomato', 'cabbage', 'eggplant'];
 export const ROTATING_COUNT = 2;
 
-/** Construction materials, for fences and troughs in M4. */
+/** Everything sold by the sack rather than the seed packet. */
 export const MATERIALS = {
-  wood: { buy: 10 },
-  stone: { buy: 8 },
+  wood: { buy: 10, note: 'material' },
+  stone: { buy: 8, note: 'material' },
+  // Deliberately dearer than feeding your own crops: a full trough costs $45 in
+  // feed against roughly $30 of carrots. It exists so an empty larder never
+  // means hungry animals, not as the sensible everyday choice.
+  feed: { buy: 15, note: 'animal feed' },
 };
 
 /** Seeds resell at half price — enough to undo a mistake, never a money loop. */
@@ -83,11 +87,11 @@ export function buyList(state) {
     note: growLabel(CROPS[crop].growTicks),
   }));
 
-  const materials = Object.keys(MATERIALS).map((id) => ({
+  const materials = Object.entries(MATERIALS).map(([id, def]) => ({
     id,
     name: itemName(id),
     price: buyPrice(id),
-    note: 'material',
+    note: def.note,
   }));
 
   return [...seeds, ...materials];

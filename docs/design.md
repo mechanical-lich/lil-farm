@@ -103,7 +103,9 @@ Animals can not open gates.
 - You need a **barn before you can buy an animal**, and each barn holds 4.
 - **You choose where a new animal goes.**  Pressing Buy closes the shop and hands you a ghost of the animal; tap to move it, then confirm.  Nothing is charged until you confirm a spot, so backing out is free — the same rule building follows.
 - An animal whose food or water runs low walks to the nearest trough it can reach and takes a helping, which drains the trough.  If it can't reach one, it just carries on being hungry.
-- Filling a **water trough is free** — the work is carrying it, not finding it.  Filling a **feed trough** consumes 3 crops, automatically taken from the cheapest crop you have enough of, so a stray tap never burns the eggplants.
+- Filling a **water trough is free** — the work is carrying it, not finding it.
+- Filling a **feed trough** consumes 3 units of food, chosen automatically: the **cheapest crop** you have enough of, so a stray tap never burns the eggplants.
+- **Feed can also be bought** from the shop at $15 a unit.  It's deliberately dearer than using your own crops — about $45 a trough against roughly $30 of carrots — and is only ever used as a **fallback** when no crop is spare.  It exists so an empty larder never means hungry animals, not as the everyday choice.  Feed resells for far less than it costs, so stockpiling it is convenience rather than a way to store value.
 - Tapping a cow that's ready milks it; tapping an egg picks it up; tapping a trough fills it.
 - Neglected animals show a marker (blue when thirsty, amber when hungry) and ready ones bob with a badge.
 

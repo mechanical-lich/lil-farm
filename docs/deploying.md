@@ -20,7 +20,7 @@ the repository. It's already set up to work from a project subpath like
    With a bump, the sequence is: the browser always revalidates `sw.js` itself,
    the new worker installs and claims the page, and the game reloads itself once
    so the player lands on the new build. Without a bump none of that happens.
-3. `npm test` — 131 headless tests, no dependencies.
+3. `npm test` — 135 headless tests, no dependencies.
 
 ## Turning Pages on
 

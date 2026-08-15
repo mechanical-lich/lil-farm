@@ -14,6 +14,7 @@
 import { findPath, besideBox } from '../world/pathfind.js';
 import { OBJ } from '../world/tiledefs.js';
 import { addItem, countItem, removeItem, ITEMS } from './inventory.js';
+import { CROPS } from './crops.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 
 /**
@@ -104,35 +105,42 @@ export function fillWaterTrough(state, x, y) {
 }
 
 /**
- * Which crop to put in a feed trough: the cheapest one the player has enough
- * of. Picking automatically avoids yet another picker in the UI, and choosing
- * the cheapest means a stray "fill" never burns the eggplants.
+ * What goes into a feed trough, chosen automatically so the player doesn't need
+ * yet another picker.
+ *
+ * Home-grown crops first, cheapest of them, so a stray "fill" never burns the
+ * eggplants. **Bought feed is only the fallback** — it costs more than the crops
+ * it replaces, and exists so an empty larder doesn't mean hungry animals.
+ *
+ * Testing membership against CROPS rather than a list of exclusions means wood,
+ * stone, eggs, milk and feed itself are all ineligible without naming them.
  */
-export function pickFeedCrop(state) {
+export function pickFeed(state) {
   let best = null;
   for (const [id, qty] of Object.entries(state.inventory)) {
     if (qty < FEED_COST) continue;
-    const def = ITEMS[id];
-    if (!def || !def.sell) continue;
-    if (id === 'wood' || id === 'stone' || id === 'fiber') continue;
-    if (id === 'egg' || id === 'milk') continue;      // don't feed produce back
-    if (!best || def.sell < ITEMS[best].sell) best = id;
+    if (!CROPS[id]) continue;                          // crops only
+    if (!best || ITEMS[id].sell < ITEMS[best].sell) best = id;
   }
-  return best;
+  if (best) return best;
+
+  return countItem(state, 'feed') >= FEED_COST ? 'feed' : null;
 }
 
 export function fillFeedTrough(state, x, y) {
   const t = state.troughs[`${x},${y}`];
   if (!t || t.kind !== 'food') return { ok: false, reason: 'not a feed trough' };
 
-  const crop = pickFeedCrop(state);
-  if (!crop) return { ok: false, reason: `no crop to spare (need ${FEED_COST})` };
+  const food = pickFeed(state);
+  if (!food) {
+    return { ok: false, reason: `nothing to feed them — buy feed, or spare ${FEED_COST} crops` };
+  }
 
-  removeItem(state, crop, FEED_COST);
+  removeItem(state, food, FEED_COST);
   t.level = TROUGH_CAPACITY;
-  t.foodType = crop;
+  t.foodType = food;
   emitUnlessSuspended('world:changed', { x, y });
-  return { ok: true, crop };
+  return { ok: true, food };
 }
 
 // --- per-tick -----------------------------------------------------------

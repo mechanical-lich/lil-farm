@@ -17,12 +17,12 @@ import {
 } from '../js/sim/crops.js';
 import {
   ROTATION_TICKS, STAPLE_SEEDS, ROTATING_COUNT, stockedSeedCrops, buyList,
-  buy, sell, sellAll, buyAnimal, canBuyAnimal, canPlaceAnimal,
+  buy, sell, sellAll, buyAnimal, canBuyAnimal, canPlaceAnimal, MATERIALS,
 } from '../js/sim/shop.js';
 import { ITEMS } from '../js/sim/inventory.js';
 import {
   ANIMALS, TROUGH_CAPACITY, FEED_COST, FOOD_DURATION, WATER_DURATION, SEEK_THRESHOLD,
-  makeAnimal, collectFrom, isNeglected, fillWaterTrough, fillFeedTrough,
+  makeAnimal, collectFrom, isNeglected, fillWaterTrough, fillFeedTrough, pickFeed,
 } from '../js/sim/animals.js';
 import {
   BUILDABLES, canPlaceAt, canAfford, footprint, troughAnchorAt,
@@ -1532,17 +1532,59 @@ test('filling troughs: water is free, feed costs the cheapest crop you have', ()
 
   const fed = fillFeedTrough(s, 4, 6);
   assert(fed.ok, 'feeding should work');
-  assertEqual(fed.crop, 'carrot', 'it reaches for the cheapest crop');
+  assertEqual(fed.food, 'carrot', 'it reaches for the cheapest crop');
   assertEqual(s.inventory.carrot, 10 - FEED_COST, 'which is consumed');
   assertEqual(s.inventory.eggplant, 10, 'and the pricey crop is left alone');
 });
 
+test('bought feed is a fallback, never used while crops are to hand', () => {
+  const { s } = farmWithAnimal('chicken', 8091);
+  s.troughs['4,6'].level = 0;
+  s.inventory = { carrot: 10, feed: 10 };
+
+  assertEqual(pickFeed(s), 'carrot', 'crops come first even with feed in the bag');
+  const fed = fillFeedTrough(s, 4, 6);
+  assertEqual(fed.food, 'carrot', 'and that is what gets used');
+  assertEqual(s.inventory.feed, 10, 'the bought feed is untouched');
+});
+
+test('bought feed keeps animals fed when the larder is empty', () => {
+  const { s } = farmWithAnimal('chicken', 8092);
+  s.troughs['4,6'].level = 0;
+  s.inventory = { feed: 5 };                    // no crops at all
+
+  assertEqual(pickFeed(s), 'feed', 'feed is the fallback');
+  const fed = fillFeedTrough(s, 4, 6);
+  assert(fed.ok, 'the trough still fills');
+  assertEqual(fed.food, 'feed', 'using bought feed');
+  assertEqual(s.inventory.feed, 5 - FEED_COST, 'which is consumed');
+  assertEqual(s.troughs['4,6'].level, TROUGH_CAPACITY, 'to the brim');
+});
+
+test('feed is never eaten as a crop, and produce is never fed back', () => {
+  const { s } = farmWithAnimal('chicken', 8093);
+  // Only ineligible things in the bag: feed is a fallback, the rest never count.
+  s.inventory = { wood: 50, stone: 50, egg: 50, milk: 50, carrot_seed: 50 };
+  assertEqual(pickFeed(s), null, 'none of these are animal food');
+
+  s.inventory.feed = FEED_COST;
+  assertEqual(pickFeed(s), 'feed', 'but bought feed is');
+});
+
+test('feed costs more than growing it yourself', () => {
+  // The whole point of feed: convenience at a premium, not the sensible choice.
+  const cheapestCrop = Math.min(...Object.keys(CROPS).map((c) => ITEMS[c].sell));
+  assert(MATERIALS.feed.buy > cheapestCrop,
+    `feed at $${MATERIALS.feed.buy} should cost more than a $${cheapestCrop} crop`);
+});
+
 test('feeding is refused when there is nothing to spare', () => {
   const { s } = farmWithAnimal('chicken', 810);
-  s.inventory = { carrot: FEED_COST - 1 };
+  s.inventory = { carrot: FEED_COST - 1, feed: FEED_COST - 1 };
   const res = fillFeedTrough(s, 4, 6);
-  assert(!res.ok, 'cannot feed with less than a full helping');
+  assert(!res.ok, 'cannot feed with less than a full helping of either');
   assertEqual(s.inventory.carrot, FEED_COST - 1, 'and nothing is taken');
+  assertEqual(s.inventory.feed, FEED_COST - 1, 'from either source');
 });
 
 test('buying livestock is gated on barn capacity', () => {

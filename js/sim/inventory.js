@@ -8,6 +8,9 @@ export const ITEMS = {
   wood: { name: 'Wood', sell: 4 },
   stone: { name: 'Stone', sell: 3 },
   fiber: { name: 'Fiber', sell: 2 },
+  // Bought animal feed. Sells for far less than it costs, so stocking up is a
+  // convenience rather than a way to store value.
+  feed: { name: 'Feed', sell: 5 },
   carrot: { name: 'Carrot', sell: 10 },
   wheat: { name: 'Wheat', sell: 12 },
   corn: { name: 'Corn', sell: 16 },

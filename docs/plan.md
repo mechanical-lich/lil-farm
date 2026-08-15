@@ -44,7 +44,7 @@ menu rather than bolted onto the shop, alongside the debug/cheat switches that
 currently only exist on `window.lilfarm` (`give`, `wipe`) and the `TESTING` flag.
 Build the panel when export/import lands, and move those in.
 
-131 headless tests pass via `npm test`.
+135 headless tests pass via `npm test`.
 
 Tilling is a two-point row gesture and beds are drawn with the capsule art — see
 section 8. Adjacent rows stay visually separate rather than merging into a grid.
