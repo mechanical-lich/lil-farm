@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no, maximum-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#5b8c4a">
+<title>Lil Farm</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="ui">
+    <!-- Top bar: money and what the farmer is up to. -->
+    <div id="hud">
+      <div class="hud-chip" id="hud-money">$0</div>
+      <div class="hud-chip grow" id="hud-status">Idle</div>
+      <button class="hud-chip" id="inv-toggle">Bag 0</button>
+    </div>
+
+    <div id="debug"></div>
+
+    <div id="toasts"></div>
+
+    <!-- Bottom controls sit in thumb reach. -->
+    <div id="bottom">
+      <div id="confirm-bar">
+        <button id="confirm-place">✓ Place here</button>
+        <button id="cancel-place">✕ Cancel</button>
+      </div>
+      <div id="sub-row"></div>
+      <div id="toolbar"></div>
+      <div id="controls">
+        <button id="paint-toggle" title="Drag across the farm to queue lots of work">✋ Pan</button>
+        <button id="shop-toggle">🏪 Shop</button>
+        <button id="task-toggle" aria-expanded="false">Tasks <span id="task-count">0</span></button>
+      </div>
+    </div>
+
+    <!-- Panels slide up from the bottom. -->
+    <div class="panel" id="task-panel">
+      <div class="panel-head">
+        <h2>Task queue</h2>
+        <button id="task-close">Done</button>
+      </div>
+      <ul id="task-list"></ul>
+    </div>
+
+    <div class="panel" id="shop-panel">
+      <div class="panel-head">
+        <h2>Shop</h2>
+        <button id="shop-close">Done</button>
+      </div>
+      <div id="shop-tabs" class="tabs">
+        <button data-tab="buy" class="on">Buy</button>
+        <button data-tab="sell">Sell</button>
+      </div>
+      <div id="shop-note"></div>
+      <ul id="shop-list"></ul>
+    </div>
+
+    <div class="panel" id="inv-panel">
+      <div class="panel-head">
+        <h2>Bag</h2>
+        <button id="inv-close">Done</button>
+      </div>
+      <ul id="inv-list"></ul>
+    </div>
+  </div>
+
+  <div id="boot">
+    <div id="boot-text">Loading the farm…</div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

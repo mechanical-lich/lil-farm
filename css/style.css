@@ -1,0 +1,415 @@
+/* Mobile-first. The canvas fills the viewport; game UI is HTML layered on top,
+   which is far easier to make thumb-friendly than canvas-drawn widgets. */
+
+:root {
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --ink: #2b1d16;
+  --panel: #f4e4c1;
+  --panel-edge: #b98a54;
+  --accent: #5ec24f;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #5b8c4a;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+  font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+  color: var(--ink);
+}
+
+/* Stop iOS double-tap zoom and text selection while dragging on the world. */
+body {
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#game {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  touch-action: none;      /* we handle every gesture ourselves */
+}
+
+/* UI layer: transparent to pointer events except on actual controls. */
+#ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+#ui button,
+#ui .panel {
+  pointer-events: auto;
+}
+
+/* Every tappable thing clears Apple's 44px minimum target. */
+#ui button {
+  min-height: 44px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--panel);
+  border: 2px solid var(--panel-edge);
+  border-radius: 12px;
+  padding: 8px 14px;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.25);
+}
+
+#ui button:active { transform: translateY(2px); box-shadow: none; }
+
+/* --- HUD --------------------------------------------------------------- */
+
+#hud {
+  position: absolute;
+  top: calc(var(--safe-t) + 8px);
+  left: calc(var(--safe-l) + 8px);
+  right: calc(var(--safe-r) + 8px);
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.hud-chip {
+  background: var(--panel);
+  border: 2px solid var(--panel-edge);
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.25);
+  white-space: nowrap;
+}
+
+.hud-chip.grow {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  line-height: 1.7;
+}
+
+/* --- bottom controls --------------------------------------------------- */
+
+#bottom {
+  position: absolute;
+  left: calc(var(--safe-l) + 8px);
+  right: calc(var(--safe-r) + 8px);
+  bottom: calc(var(--safe-b) + 10px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#controls {
+  display: flex;
+  gap: 8px;
+}
+
+#controls button { flex: 1; }
+
+/* Tools scroll horizontally rather than wrapping, so the row stays one line
+   and the map keeps as much vertical space as possible. */
+#toolbar,
+#sub-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+
+#toolbar::-webkit-scrollbar,
+#sub-row::-webkit-scrollbar { display: none; }
+
+#toolbar button,
+#sub-row button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 6px 12px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+#toolbar button.on,
+#sub-row button.on {
+  background: var(--accent);
+  border-color: #3f8a34;
+  color: #10240c;
+}
+
+/* Placement confirmation, for structures too big to drop blind. */
+#confirm-bar {
+  display: none;
+  gap: 8px;
+}
+
+#confirm-bar.open { display: flex; }
+
+#confirm-bar button { flex: 1; }
+
+#confirm-place {
+  background: var(--accent);
+  border-color: #3f8a34;
+  color: #10240c;
+}
+
+#confirm-place:disabled {
+  opacity: 0.45;
+  background: var(--panel);
+  border-color: var(--panel-edge);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+#sub-row {
+  display: none;
+}
+
+#sub-row.open {
+  display: flex;
+}
+
+#sub-row b { font-variant-numeric: tabular-nums; opacity: 0.75; font-weight: 600; }
+
+/* Shown but dimmed: the player should see what a structure costs even when
+   they can't afford it yet. */
+#sub-row button.short {
+  opacity: 0.45;
+  box-shadow: none;
+}
+
+.sub-empty {
+  pointer-events: none;
+  background: var(--panel);
+  border: 2px solid var(--panel-edge);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-style: italic;
+  color: #7a604a;
+  white-space: nowrap;
+}
+
+#paint-toggle.on {
+  background: var(--accent);
+  border-color: #3f8a34;
+  color: #10240c;
+}
+
+#task-toggle.has-work { border-color: var(--accent); }
+
+#task-count {
+  display: inline-block;
+  min-width: 22px;
+  padding: 0 6px;
+  margin-left: 4px;
+  border-radius: 999px;
+  background: var(--panel-edge);
+  color: #fff;
+}
+
+/* --- sliding panels ---------------------------------------------------- */
+
+.panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 62%;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-top: 3px solid var(--panel-edge);
+  border-radius: 18px 18px 0 0;
+  padding: 10px 12px calc(var(--safe-b) + 12px);
+  transform: translateY(102%);
+  transition: transform 0.22s ease;
+  pointer-events: auto;
+  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.25);
+}
+
+.panel.open { transform: translateY(0); }
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.panel-head h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.panel li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-bottom: 1px solid rgba(185, 138, 84, 0.35);
+  font-size: 15px;
+}
+
+.panel li.active { background: rgba(94, 194, 79, 0.22); border-radius: 8px; }
+
+.panel li.empty {
+  justify-content: center;
+  color: #7a604a;
+  font-style: italic;
+  border-bottom: none;
+  padding: 14px 4px;
+}
+
+.task-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-meta { font-variant-numeric: tabular-nums; color: #7a604a; font-size: 13px; }
+
+.panel li button {
+  min-width: 44px;
+  min-height: 38px;
+  padding: 4px 10px;
+  border-radius: 9px;
+}
+
+#inv-list li { justify-content: space-between; }
+#inv-list b { font-variant-numeric: tabular-nums; }
+
+/* --- shop --------------------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.tabs button { flex: 1; }
+
+.tabs button.on {
+  background: var(--accent);
+  border-color: #3f8a34;
+  color: #10240c;
+}
+
+#shop-note {
+  font-size: 13px;
+  color: #7a604a;
+  padding: 0 2px 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.shop-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.shop-name em {
+  font-style: normal;
+  font-size: 12px;
+  color: #7a604a;
+}
+
+.shop-price {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+#shop-list button { min-width: 48px; }
+
+#shop-list button:disabled {
+  opacity: 0.4;
+  box-shadow: none;
+  transform: none;
+}
+
+/* --- toasts ------------------------------------------------------------ */
+
+#toasts {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--safe-b) + 130px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.toast {
+  background: rgba(30, 20, 14, 0.88);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 999px;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.toast.in { opacity: 1; transform: translateY(0); }
+.toast-warn { background: rgba(150, 60, 30, 0.92); }
+
+/* --- misc -------------------------------------------------------------- */
+
+#debug {
+  position: absolute;
+  top: calc(var(--safe-t) + 56px);
+  left: calc(var(--safe-l) + 10px);
+  font: 10px/1.4 ui-monospace, monospace;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  opacity: 0.75;
+}
+
+#boot {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #5b8c4a;
+  color: #fff;
+  font-size: 16px;
+  transition: opacity 0.25s ease;
+}
+
+#boot.hidden {
+  opacity: 0;
+  pointer-events: none;
+}

@@ -1,0 +1,21 @@
+// One simulation tick. Everything time-based in the game happens here.
+//
+// Hard rules for this file and everything it calls:
+//   - No DOM access, no rendering, no Math.random(), no Date.now().
+//   - Pure function of (state) -> mutated state.
+// Catch-up replays this thousands of times in a row; anything that breaks those
+// rules will either be slow, non-deterministic, or crash offline.
+
+import { TICK_MS } from '../config.js';
+import { updateFarmer } from './farmer.js';
+import { updateCrops } from './crops.js';
+
+/** @param {object} state */
+export function tick(state) {
+  state.tickCount++;
+  state.lastTickTime += TICK_MS;
+
+  updateFarmer(state);
+  updateCrops(state);
+  // M5+: updateAnimals(state);
+}

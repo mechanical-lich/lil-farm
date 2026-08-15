@@ -1,0 +1,14 @@
+{
+  "name": "lil-farm",
+  "version": "1.0.0",
+  "description": "A lil farm for a lil fun",
+  "license": "ISC",
+  "author": "Mechanical Lich",
+  "type": "module",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "node tests/run.js"
+  }
+}

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Atlas viewer</title>
+<style>
+  body { background: #222; color: #eee; font: 12px monospace; margin: 0; padding: 8px; }
+  canvas { image-rendering: pixelated; display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ?sheet=town shows the town sheet; default is the farm sheet.
+const TILE = 16, COLS = 12, ROWS = 11, Z = 6, PAD = 22;
+const which = new URLSearchParams(location.search).get('sheet') === 'town'
+  ? 'town_tilemap_packed.png' : 'tilemap_packed.png';
+document.title = `Atlas — ${which}`;
+const img = new Image();
+img.src = `../assets/${which}`;
+img.onload = () => {
+  const c = document.getElementById('c'), x = c.getContext('2d');
+  c.width = COLS * TILE * Z + PAD;
+  c.height = ROWS * TILE * Z + PAD;
+  x.fillStyle = '#222'; x.fillRect(0, 0, c.width, c.height);
+  x.imageSmoothingEnabled = false;
+  x.drawImage(img, 0, 0, COLS * TILE, ROWS * TILE, PAD, PAD, COLS * TILE * Z, ROWS * TILE * Z);
+  // grid
+  x.strokeStyle = 'rgba(255,0,255,0.55)'; x.lineWidth = 1;
+  x.fillStyle = '#ff0'; x.font = '13px monospace'; x.textAlign = 'center';
+  for (let col = 0; col <= COLS; col++) {
+    const px = PAD + col * TILE * Z + 0.5;
+    x.beginPath(); x.moveTo(px, PAD); x.lineTo(px, c.height); x.stroke();
+    if (col < COLS) x.fillText(col, PAD + col * TILE * Z + TILE * Z / 2, 15);
+  }
+  x.textAlign = 'right';
+  for (let row = 0; row <= ROWS; row++) {
+    const py = PAD + row * TILE * Z + 0.5;
+    x.beginPath(); x.moveTo(PAD, py); x.lineTo(c.width, py); x.stroke();
+    if (row < ROWS) x.fillText(row, PAD - 4, PAD + row * TILE * Z + TILE * Z / 2 + 5);
+  }
+};
+</script>
+</body>
+</html>

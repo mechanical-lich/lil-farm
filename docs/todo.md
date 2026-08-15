@@ -1,0 +1,5 @@
+- Tilled soil should tile based on their neighbors.   We have horizontal and veritcle directions.  Keep it in lanes though, no middle tiles.
+- Weeds randomly grow on grass tiles and need pulled
+- Fun animations.  Farmer bounces as he walks, trees wiggle as they are chopped, etc.
+- Flip sprite left/right based on direction
+- Mushroom Journal.   Create a tile sheet of different mushrooms.  Spawn the mushrooms on grass tiles at random.   Mushrooms have various rarities and can be sold at different prices.   A journal records what mushrooms you've found and how many of each.   
