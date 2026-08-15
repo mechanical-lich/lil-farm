@@ -37,14 +37,29 @@ for development.
   them (`startTally` / `stopTally` in `engine/events.js`), so replaying two days
   costs a few integer increments and the simulation stays unaware anyone is
   watching.
-- **Next: M6 remainder** — save export/import, land expansion.
+- **Settings panel — complete.** Backup, restore, and the debug switches that
+  used to live only on `window.lilfarm`, now reachable from a phone. See below.
+- **Next: M6 remainder** — land expansion.
 
-**Planned: a Settings panel.** Save export/import belongs in a general settings
-menu rather than bolted onto the shop, alongside the debug/cheat switches that
-currently only exist on `window.lilfarm` (`give`, `wipe`) and the `TESTING` flag.
-Build the panel when export/import lands, and move those in.
+**The settings panel and the save.** The farm lives in localStorage, which the
+browser is entitled to clear, so exporting a copy is the only real protection
+besides installing to the home screen. `validateSave()` in `engine/save.js` does
+the checking — parse, migrate, then assert the object actually has a map and a
+farmer, since `migrate()` only looks at the version and a stray JSON object would
+otherwise sail through and crash on load. It returns `{ok, reason, data}` and
+never writes anything; the panel decides.
 
-135 headless tests pass via `npm test`.
+Importing runs `autosaver.disable()` *before* writing and reloading. This is the
+same trap that made `wipe()` silently do nothing: the page fires `pagehide` on
+its way out and a live autosaver writes the in-memory farm straight back over
+what was just written. Any new code path that replaces or clears the save has to
+disable the autosaver first.
+
+Both destructive buttons use a two-tap confirm (`confirmable()`) rather than
+`confirm()`: it stays in the game's own styling and can't be dismissed by a
+stray swipe. Taps re-arm for 4s and reset when the panel closes.
+
+140 headless tests pass via `npm test`.
 
 Tilling is a two-point row gesture and beds are drawn with the capsule art — see
 section 8. Adjacent rows stay visually separate rather than merging into a grid.

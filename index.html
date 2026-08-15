@@ -41,6 +41,7 @@
         <button id="paint-toggle" title="Drag across the farm to queue lots of work">✋ Pan</button>
         <button id="shop-toggle">🏪 Shop</button>
         <button id="task-toggle" aria-expanded="false">Tasks <span id="task-count">0</span></button>
+        <button id="settings-toggle" title="Backup and settings" aria-label="Settings">⚙</button>
       </div>
     </div>
 
@@ -65,6 +66,29 @@
       </div>
       <div id="shop-note"></div>
       <ul id="shop-list"></ul>
+    </div>
+
+    <div class="panel" id="settings-panel">
+      <div class="panel-head">
+        <h2>Settings</h2>
+        <button id="settings-close">Done</button>
+      </div>
+      <div id="settings-note"></div>
+      <div class="settings-body">
+        <h3>Back up your farm</h3>
+        <p>Copy this somewhere safe. Browsers can clear saved data.</p>
+        <textarea id="settings-export" readonly rows="2"></textarea>
+        <button id="settings-copy">Copy farm</button>
+
+        <h3>Restore a farm</h3>
+        <p>Paste a backup here. This replaces the farm you have now.</p>
+        <textarea id="settings-import" rows="2" placeholder="Paste a saved farm…"></textarea>
+        <button id="settings-import-go" class="danger"></button>
+
+        <h3>Debug</h3>
+        <button id="settings-give">Top up supplies</button>
+        <button id="settings-reset" class="danger"></button>
+      </div>
     </div>
 
     <div class="panel" id="inv-panel">

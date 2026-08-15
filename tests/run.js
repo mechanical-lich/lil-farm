@@ -31,7 +31,7 @@ import {
 import { addItems } from '../js/sim/inventory.js';
 import { newGame, serialize, deserialize } from '../js/state.js';
 import { tick } from '../js/sim/tick.js';
-import { migrate, Autosaver } from '../js/engine/save.js';
+import { migrate, Autosaver, exportSave, validateSave } from '../js/engine/save.js';
 import { runCatchup } from '../js/engine/loop.js';
 import {
   on, suspend, resume, startTally, stopTally, emitUnlessSuspended,
@@ -1917,6 +1917,59 @@ test('a quiet absence with nothing to report shows nothing', () => {
   s.animals = [];
   assertEqual(buildSummary(s, { ticks: 3600, tally: { counts: {}, items: {} } }), null,
     'no work, no losses, nothing needing attention');
+});
+
+// --- save export / import -----------------------------------------------
+
+test('a farm survives a round trip through export and import', () => {
+  const s = farmWithMaterials(9100);
+  s.money = 777;
+  for (let i = 0; i < 50; i++) tick(s);
+
+  const text = exportSave(serialize(s));
+  assert(typeof text === 'string' && text.length > 0, 'export produces text');
+
+  const check = validateSave(text);
+  assert(check.ok, `import should accept our own export: ${check.reason}`);
+
+  const restored = deserialize(check.data);
+  assertEqual(serialize(restored), serialize(s), 'and restore the farm exactly');
+});
+
+test('an imported farm keeps ticking identically to the original', () => {
+  const s = farmWithMaterials(9101);
+  for (let i = 0; i < 30; i++) tick(s);
+
+  const restored = deserialize(validateSave(exportSave(serialize(s))).data);
+  for (let i = 0; i < 300; i++) { tick(s); tick(restored); }
+
+  assertEqual(serialize(restored), serialize(s), 'an imported save is not a lossy copy');
+});
+
+test('import refuses junk rather than half-loading it', () => {
+  // This replaces a farm that might be weeks old, so anything doubtful must be
+  // rejected outright.
+  assert(!validateSave('').ok, 'empty');
+  assert(!validateSave('   ').ok, 'whitespace');
+  assert(!validateSave('not json at all').ok, 'not json');
+  assert(!validateSave('[1,2,3]').ok, 'json, but not a save');
+  assert(!validateSave('{"hello":"world"}').ok, 'an object with no version');
+  assert(!validateSave(null).ok, 'not even a string');
+});
+
+test('import refuses a save from a newer version of the game', () => {
+  const data = serialize(newGame(9102));
+  data.version = SAVE_VERSION + 1;
+  const check = validateSave(JSON.stringify(data));
+  assert(!check.ok, 'a future save must not be misread');
+  assert(/version/i.test(check.reason), `the reason should say why: ${check.reason}`);
+});
+
+test('import refuses a versioned object that has no farm in it', () => {
+  // migrate() only checks the version, so this is the case that would otherwise
+  // sail through and crash on load.
+  const check = validateSave(JSON.stringify({ version: SAVE_VERSION, money: 10 }));
+  assert(!check.ok, 'no map and no farmer is not a save');
 });
 
 // --- offline shell ------------------------------------------------------

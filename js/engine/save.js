@@ -69,6 +69,44 @@ export function clearSave() {
 }
 
 /**
+ * Checks a pasted save without applying it.
+ *
+ * Run before writing anything: an import replaces a farm that may be weeks old,
+ * so a typo in the paste box must fail loudly rather than half-load. Migrations
+ * run here too, which is what lets a save from an older build be imported.
+ *
+ * @returns {{ok: boolean, reason?: string, data?: object}}
+ */
+export function validateSave(text) {
+  if (typeof text !== 'string' || text.trim() === '') {
+    return { ok: false, reason: 'nothing pasted' };
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { ok: false, reason: "that isn't a save file" };
+  }
+
+  const migrated = migrate(parsed);
+  if (!migrated) {
+    return { ok: false, reason: 'that save is from an incompatible version' };
+  }
+  // A structurally valid save always has a map and a farmer; without this a
+  // stray JSON object would sail through migrate() and crash on load instead.
+  if (!migrated.map || !migrated.farmer) {
+    return { ok: false, reason: "that save is missing its farm" };
+  }
+  return { ok: true, data: migrated };
+}
+
+/** The current farm as text, for the player to copy somewhere safe. */
+export function exportSave(serialized) {
+  return JSON.stringify(serialized);
+}
+
+/**
  * Throttled autosave. Writes at most once per AUTOSAVE_MIN_MS, and at least
  * once per AUTOSAVE_MAX_MS while the state is dirty.
  */

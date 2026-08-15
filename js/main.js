@@ -19,6 +19,7 @@ import { attachInput } from './ui/input.js';
 import { initToolbar, TOOLS } from './ui/toolbar.js';
 import { initTaskPanel } from './ui/taskpanel.js';
 import { initShopPanel } from './ui/shoppanel.js';
+import { initSettingsPanel } from './ui/settingspanel.js';
 import { initHud } from './ui/hud.js';
 import { initToasts, toast } from './ui/toast.js';
 import { buildSummary, showSummary } from './ui/summary.js';
@@ -62,6 +63,7 @@ async function boot() {
   });
 
   initToasts();
+  const autosaver = new Autosaver(() => serialize(state));
   const hud = initHud(state);
   initTaskPanel(state);
   initShopPanel(state, {
@@ -85,10 +87,14 @@ async function boot() {
       if (def) toast(def.hint);
     },
   });
+  initSettingsPanel(state, {
+    serialize: () => serialize(state),
+    autosaver,
+    onMessage: (msg, kind) => toast(msg, kind),
+  });
   const paintMode = wirePaintToggle();
   wirePlacementButtons();
   wirePanelTracking();
-  const autosaver = new Autosaver(() => serialize(state));
   wireLifecycle(autosaver, renderer);
 
   attachInput(els.canvas, camera, {

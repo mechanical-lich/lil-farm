@@ -51,6 +51,7 @@ const SHELL = [
   './js/ui/hud.js',
   './js/ui/toast.js',
   './js/ui/summary.js',
+  './js/ui/settingspanel.js',
 ];
 
 self.addEventListener('install', (event) => {

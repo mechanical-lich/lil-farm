@@ -132,6 +132,24 @@ The sliding panels (Shop, Tasks, Bag) only cover part of the screen, so the map 
 - **Tapping the map while a panel is open dismisses the panel** rather than acting on the tile.  One tap to get out, and it can't cost you anything.
 - Only one panel is up at a time; opening one closes the others.
 
+## Settings
+
+The gear button opens a settings panel, which is where anything that isn't
+playing the farm lives.
+
+**Back up your farm.** The whole save as text, with a Copy button. Browsers clear
+site data on their own schedule, so a player who cares about a long-running farm
+should keep a copy somewhere. If the clipboard is refused (iOS does this), the
+text is selected instead so it can be copied by hand.
+
+**Restore a farm.** Paste a backup and confirm. Anything doubtful is rejected
+outright with a reason — an import replaces a farm that might be weeks old, so
+half-loading is worse than failing. Saves from older versions are migrated on the
+way in; saves from a newer version are refused.
+
+**Debug.** Top up supplies, and start a new farm. These were console-only, which
+is no use on the phone the game is actually played on.
+
 ## Task management
 - Tasks should be cancelable. 
 - There should be a way to prioritize tasks to the top of the queue
