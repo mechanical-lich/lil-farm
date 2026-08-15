@@ -30,6 +30,7 @@ export const OBJ = {
   BARREL: 11,
   BUILDING: 12,
   EGG: 13,
+  MUSHROOM: 14,
 };
 
 export const OBJ_DEFS = {
@@ -57,6 +58,13 @@ export const OBJ_DEFS = {
   [OBJ.EGG]: {
     name: 'egg', blocks: false, clearable: true,
     task: 'pickup', work: 3, yields: { egg: 1 },
+  },
+  // Which mushroom is standing here lives in state.mushrooms, keyed by tile —
+  // the grid has one byte per tile and there are sixteen of them. `yields` is
+  // therefore left off: sim/mushrooms.js decides what goes in the bag.
+  [OBJ.MUSHROOM]: {
+    name: 'mushroom', blocks: false, clearable: true,
+    task: 'forage', work: 4,
   },
 };
 

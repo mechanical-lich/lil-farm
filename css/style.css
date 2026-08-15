@@ -265,6 +265,57 @@ body {
   color: #10240c;
 }
 
+/* --- the mushroom journal ---------------------------------------------- */
+
+.panel li.journal {
+  display: block;
+  border-bottom: none;
+  padding: 4px 0;
+}
+
+.shroom-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.shroom {
+  margin: 0;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+/* The sheet is one row of 16 at 16px; 48px cells are a clean 3x. */
+.shroom-art {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 2px;
+  image-rendering: pixelated;
+  background-image: url(../assets/mushrooms.png);
+  background-size: 768px 48px;
+  background-color: rgba(132, 198, 105, 0.45);
+  border: 2px solid var(--panel-edge);
+  border-radius: 8px;
+}
+
+.shroom figcaption { color: #7a604a; }
+.shroom figcaption b { display: block; color: var(--ink); font-size: 13px; }
+
+/* An empty slot shows the frame and nothing in it, so the grid reads as a
+   collection with gaps rather than as a short list. */
+.shroom.unfound .shroom-art {
+  background-image: none;
+  background-color: rgba(185, 138, 84, 0.16);
+  border-style: dashed;
+}
+
+.shroom.unfound figcaption {
+  font-size: 18px;
+  font-weight: 700;
+  opacity: 0.45;
+}
+
 /* --- the land map ------------------------------------------------------ */
 
 .panel li.land-map {
@@ -404,8 +455,9 @@ body {
 
 /* Tabs, not a row of loose buttons: they sit on a shared baseline with square
    bottom corners so the selected one reads as joined to the list below it.
-   Note the #shop-tabs prefix — `#ui button` is an ID selector, so a bare
-   `.tabs button.on` rule loses to it and the selected tab never turns green. */
+   Note the ID prefixes below — `#ui button` is an ID selector, so a bare
+   `.tabs button.on` rule loses to it and the selected tab never turns green.
+   Every new tab row has to be added here, or it silently looks unselected. */
 .tabs {
   display: flex;
   gap: 4px;
@@ -413,7 +465,8 @@ body {
   border-bottom: 2px solid var(--panel-edge);
 }
 
-#shop-tabs button {
+#shop-tabs button,
+#inv-tabs button {
   flex: 1;
   border-radius: 10px 10px 0 0;
   border-bottom: none;
@@ -425,15 +478,18 @@ body {
   color: #7a604a;
 }
 
-#shop-tabs button.on {
+#shop-tabs button.on,
+#inv-tabs button.on {
   background: var(--accent);
   border-color: #3f8a34;
   color: #10240c;
 }
 
-#shop-tabs button:active { transform: none; }
+#shop-tabs button:active,
+#inv-tabs button:active { transform: none; }
 
-#shop-note {
+#shop-note,
+#inv-note {
   font-size: 13px;
   color: #7a604a;
   padding: 0 2px 6px;
@@ -529,6 +585,12 @@ body {
 .settings-body button {
   width: 100%;
   margin-bottom: 4px;
+}
+
+.settings-body .hint {
+  margin: 6px 0 4px;
+  font-size: 12px;
+  font-style: italic;
 }
 
 .settings-body button.danger {

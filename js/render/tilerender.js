@@ -4,6 +4,7 @@
 import { TILE } from '../config.js';
 import { GROUND, OBJ, isTilled } from '../world/tiledefs.js';
 import { SPRITES, TOWN, CAPSULES, srcRect, sheetFor } from './sprites.js';
+import { mushroomAt } from '../sim/mushrooms.js';
 import { hash2d } from '../engine/rng.js';
 import { cropStage, isStalled, spoilRemaining, SPOIL_TICKS } from '../sim/crops.js';
 
@@ -348,6 +349,13 @@ function drawObject(ctx, sheets, state, objId, x, y) {
     case OBJ.EGG:
       blit(ctx, sheets, SPRITES.egg, px, py);
       break;
+    case OBJ.MUSHROOM: {
+      // Which one grew here is state, not a hash of the tile — a mushroom is a
+      // find, and it has to still be the same find after a reload.
+      const m = mushroomAt(state, x, y);
+      if (m) blit(ctx, sheets, [m.sprite, 0, 'shrooms'], px, py);
+      break;
+    }
     default:
       break;
   }

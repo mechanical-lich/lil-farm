@@ -458,6 +458,10 @@ function wirePaintToggle() {
 
 /** Turns simulation events into player-visible feedback. */
 function wireToastFeedback() {
+  events.on('mushroom:found', ({ name, first }) => {
+    toast(first ? `New find: ${name}!` : `Picked a ${name.toLowerCase()}`);
+  });
+
   events.on('task:done', ({ gained }) => {
     if (!gained) return;
     const parts = Object.entries(gained).map(([id, n]) => `+${n} ${itemName(id)}`);

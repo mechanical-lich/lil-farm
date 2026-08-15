@@ -42,6 +42,20 @@ Cleared land doesn't stay clear. Weeds sprout again on open grass you own, slowl
 
 The same shape — slow, capped, seeded scatter over open grass — is what the mushrooms will want later.
 
+## Foraging and the mushroom journal
+Crops are something you make happen and animals are something you look after.  Mushrooms are the third thing — something you **find**.  Nothing is planted and nothing is tended: they come up on open grass across the land you own, and you pick them when you spot them.
+
+- **Four kinds, four colours each** — sixteen in all, one row of the sheet.  Buttons are common and cheap, then toadstools, then boletes, and a **morel is a genuine find** at $150.
+- The bag holds the **four kinds**, not the sixteen colours; sixteen rows in the sell list would be miserable.  The journal remembers every colour.
+- **Capped** at roughly six to a 40x40 cell, appearing about one every five minutes — rarer than weeds, because a find should feel like one.  Same rules as weeds otherwise: open grass only, never on a bed, a crop, or anything already standing there.
+- A new farm starts with **two already up beside the barn**, so foraging is something you find on your first look round rather than an hour in.
+- Picked with the **clear tool**, like an egg or a weed.  The queue names the one you're picking, so it reads "Pick red toadstool" rather than the same line four times over.
+
+### The journal
+A second tab in the bag panel, showing all sixteen as a 4x4 grid: the ones you've found with their picture and how many you've picked, the rest as empty slots with a question mark.  Showing the gaps is the point — a grid of question marks is what tells you there's more out there.
+
+**Selling never erases a find.**  The journal is a record of what you've seen, not a view of what you're carrying; cashing in a collection you spent a week building would be a rotten thing to do.
+
 ## Inventory
 Some tasks suchs as harvesting a crop, cutting a tree, milking a cow, collecting eggs, etc will add items to your inventory. 
 
@@ -188,6 +202,8 @@ playing the farm lives.
 site data on their own schedule, so a player who cares about a long-running farm
 should keep a copy somewhere. If the clipboard is refused (iOS does this), the
 text is selected instead so it can be copied by hand.
+
+**Backups from before an update.** Whenever the game updates its save format, the old save is copied aside first, untouched, before the migration rewrites it. Any that exist are offered here with one tap to drop them into the restore box — a safety copy nothing but a desktop console could reach would be no use on a phone.
 
 **Restore a farm.** Paste a backup and confirm. Anything doubtful is rejected
 outright with a reason — an import replaces a farm that might be weeks old, so

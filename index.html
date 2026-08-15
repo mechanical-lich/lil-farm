@@ -86,6 +86,7 @@
 
         <h3>Restore a farm</h3>
         <p>Paste a backup here. This replaces the farm you have now.</p>
+        <div id="settings-backups"></div>
         <textarea id="settings-import" rows="2" placeholder="Paste a saved farm…"></textarea>
         <button id="settings-import-go" class="danger"></button>
 
@@ -97,9 +98,14 @@
 
     <div class="panel" id="inv-panel">
       <div class="panel-head">
-        <h2>Bag</h2>
+        <h2 id="inv-title">Bag</h2>
         <button id="inv-close">Done</button>
       </div>
+      <div id="inv-tabs" class="tabs">
+        <button data-tab="bag" class="on">Bag</button>
+        <button data-tab="journal">Mushrooms</button>
+      </div>
+      <div id="inv-note"></div>
       <ul id="inv-list"></ul>
     </div>
   </div>

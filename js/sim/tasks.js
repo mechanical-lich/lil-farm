@@ -9,6 +9,7 @@ import { OBJ, GROUND, objDef, isTilled } from '../world/tiledefs.js';
 import { cropAt, isRipe, isStalled, cropDef } from './crops.js';
 import { buildDef, canPlaceAt, structureAt, demolishWork, troughAnchorAt } from './build.js';
 import { animalDef, TROUGH_CAPACITY, isReady } from './animals.js';
+import { mushroomAt } from './mushrooms.js';
 
 /** Work is measured in ticks (1 tick = 1 second). */
 export const TASK_TYPES = {
@@ -17,6 +18,7 @@ export const TASK_TYPES = {
   untill: { label: 'Clear', verb: 'Clearing' },
   demolish: { label: 'Remove', verb: 'Removing' },
   pickup: { label: 'Pick up', verb: 'Picking up' },
+  forage: { label: 'Pick', verb: 'Picking' },
   fill: { label: 'Fill', verb: 'Filling' },
   collect: { label: 'Collect', verb: 'Collecting' },
   till: { label: 'Till', verb: 'Tilling' },
@@ -186,7 +188,9 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
     type: def.task || 'clear',
     x, y,
     work: def.work || 10,
-    detail: def.name,
+    // A mushroom says which one it is, so the queue reads "Pick red toadstool"
+    // rather than the same line four times over.
+    detail: mushroomAt(state, x, y)?.name || def.name,
     // Blocking obstacles are worked on from an adjacent tile.
     adjacent: !!def.blocks,
   } : null);

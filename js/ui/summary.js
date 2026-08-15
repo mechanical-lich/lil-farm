@@ -44,6 +44,11 @@ export function buildSummary(state, catchup) {
   if (eggs > 0) lines.push(`${eggs} ${eggs === 1 ? 'egg was' : 'eggs were'} laid`);
 
 
+  const shrooms = counts['mushroom:grown'] || 0;
+  if (shrooms > 0) {
+    lines.push(`${shrooms} ${shrooms === 1 ? 'mushroom' : 'mushrooms'} came up`);
+  }
+
   const weeds = counts['weed:grown'] || 0;
   if (weeds > 0) lines.push(`${weeds} ${weeds === 1 ? 'weed' : 'weeds'} sprang up`);
 

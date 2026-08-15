@@ -5,6 +5,7 @@ import { SAVE_VERSION, MAP_W, MAP_H, START_MONEY, START_INVENTORY } from './conf
 import { Grid } from './world/grid.js';
 import { generateWorld, startingBarnAnchor } from './world/worldgen.js';
 import { placeStructure } from './sim/build.js';
+import { seedStartingMushrooms } from './sim/mushrooms.js';
 import { makeRng } from './engine/rng.js';
 
 /** @returns {object} a fresh game */
@@ -24,6 +25,8 @@ export function newGame(seed = (Date.now() ^ 0x5f3759df) >>> 0) {
     animals: [],
     nextAnimalId: 1,
     crops: {},
+    mushrooms: {},   // tile key -> mushroom id; see sim/mushrooms.js
+    journal: {},     // mushroom id -> how many you have ever picked
     wetUntil: {},    // tileKey -> tick at which watered soil dries out
     tillDir: {},     // tileKey -> 'h' | 'v', the axis of the row it was tilled in
     buildings: [],   // multi-tile structures; the grid only marks their footprint
@@ -40,6 +43,10 @@ export function newGame(seed = (Date.now() ^ 0x5f3759df) >>> 0) {
   // from day one rather than only after saving 50 wood and 20 stone.
   const barn = startingBarnAnchor(spawn);
   placeStructure(state, 'barn', barn.x, barn.y);
+
+  // A couple in plain sight by the barn, so foraging is something you find on
+  // the first look round rather than an hour in. See sim/mushrooms.js.
+  seedStartingMushrooms(state, spawn);
 
   return state;
 }
@@ -58,6 +65,8 @@ export function serialize(state) {
     animals: state.animals,
     nextAnimalId: state.nextAnimalId,
     crops: state.crops,
+    mushrooms: state.mushrooms,
+    journal: state.journal,
     wetUntil: state.wetUntil,
     tillDir: state.tillDir,
     buildings: state.buildings,
@@ -86,6 +95,8 @@ export function deserialize(data) {
     animals: data.animals || [],
     nextAnimalId: data.nextAnimalId || 1,
     crops: data.crops || {},
+    mushrooms: data.mushrooms || {},
+    journal: data.journal || {},
     wetUntil: data.wetUntil || {},
     tillDir: data.tillDir || {},
     buildings: data.buildings || [],

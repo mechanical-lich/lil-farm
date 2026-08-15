@@ -3,6 +3,7 @@
 //   'farm'   — assets/tilemap_packed.png       crops, soil beds, animals, barn
 //   'town'   — assets/town_tilemap_packed.png  grass, dirt, paving, fences, trees
 //   'emotes' — assets/emotes.png               speech bubbles over the animals
+//   'shrooms' — assets/mushrooms.png           one row of 16 foraged mushrooms
 //
 // Both share the same palette (#84c669 grass, #eaa56c dirt), so tiles from the
 // two sheets sit next to each other seamlessly.
@@ -260,16 +261,17 @@ function loadImage(src) {
 /**
  * Loads both tilesheets and prepares derived tiles.
  * @returns {Promise<{farm: HTMLImageElement, town: HTMLImageElement,
- *   emotes: HTMLImageElement}>}
+ *   emotes: HTMLImageElement, shrooms: HTMLImageElement}>}
  */
 export async function loadSheets() {
-  const [farm, town, emotes] = await Promise.all([
+  const [farm, town, emotes, shrooms] = await Promise.all([
     loadImage('assets/tilemap_packed.png'),
     loadImage('assets/town_tilemap_packed.png'),
     loadImage('assets/emotes.png'),
+    loadImage('assets/mushrooms.png'),
   ]);
   buildCapsules(farm);
-  return { farm, town, emotes };
+  return { farm, town, emotes, shrooms };
 }
 
 /** Resolves which sheet image a sprite reference belongs to. */

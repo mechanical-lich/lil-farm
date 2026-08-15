@@ -18,6 +18,11 @@ import { expandSaveToCells, centreCellIndex } from '../js/world/expand.js';
 import {
   updateWeeds, canSprout, countWeeds, WEED_INTERVAL, WEED_MAX_FRACTION,
 } from '../js/sim/weeds.js';
+import {
+  MUSHROOMS, MUSHROOMS_BY_ID, SPECIES, MUSHROOM_MAX_FRACTION, sprout, forage,
+  mushroomAt, rollSpecies, journalCount, journalFound, journalRows,
+  canSprout as canSproutShroom,
+} from '../js/sim/mushrooms.js';
 import { addTask, cancelTask, prioritizeTask, taskForTile, tillRow, queueTillRow } from '../js/sim/tasks.js';
 import {
   CROPS, SOIL_DRY_TICKS, plantCrop, waterTile, harvestCrop,
@@ -42,14 +47,16 @@ import {
 import { addItems } from '../js/sim/inventory.js';
 import { newGame as newGameRaw, serialize, deserialize } from '../js/state.js';
 import { tick } from '../js/sim/tick.js';
-import { migrate, Autosaver, exportSave, validateSave } from '../js/engine/save.js';
+import {
+  migrate, Autosaver, exportSave, validateSave, loadSave, listBackups, backupKey,
+} from '../js/engine/save.js';
 import { runCatchup } from '../js/engine/loop.js';
 import {
   on, suspend, resume, startTally, stopTally, emitUnlessSuspended,
 } from '../js/engine/events.js';
 import { buildSummary } from '../js/ui/summary.js';
 import {
-  TICK_MS, SAVE_VERSION, FARMER_SPEED, MAP_W, MAP_H, CELL_W, CELL_H,
+  TICK_MS, SAVE_VERSION, FARMER_SPEED, MAP_W, MAP_H, CELL_W, CELL_H, SAVE_KEY,
 } from '../js/config.js';
 
 let passed = 0;
@@ -981,6 +988,7 @@ function farmWithMaterials(seed = 500) {
   const s = newGame(seed);
   s.grid.ground.fill(GROUND.GRASS);
   s.grid.objects.fill(OBJ.NONE);
+  s.mushrooms = {};                      // see weedableFarm
   s.buildings = [];
   s.troughs = {};
   s.animals = [];
@@ -1418,6 +1426,7 @@ test('natural obstacles still clear normally, not as demolition', () => {
 /** A cleared farm with a barn, both troughs filled, and one animal. */
 function farmWithAnimal(type = 'chicken', seed = 800) {
   const s = farmWithMaterials(seed);
+  s.lastTickTime = 0;                    // see weedableFarm
   completeBuild(s, { buildKind: 'barn', x: 20, y: 2 });
   completeBuild(s, { buildKind: 'waterTrough', x: 4, y: 4 });
   completeBuild(s, { buildKind: 'feedTrough', x: 4, y: 6 });
@@ -2225,13 +2234,173 @@ test('emotes are part of the sim, so they replay identically', () => {
   assertEqual(serialize(b.s), serialize(a.s), 'two identical farms must stay identical');
 });
 
+// --- mushrooms ----------------------------------------------------------
+
+test('the sheet is fully catalogued: four kinds, four colours each', () => {
+  assertEqual(MUSHROOMS.length, 16, 'sixteen mushrooms on the sheet');
+  assertEqual(new Set(MUSHROOMS.map((m) => m.sprite)).size, 16, 'each with its own sprite');
+  assertEqual(new Set(MUSHROOMS.map((m) => m.id)).size, 16, 'and its own name');
+  for (const [species, def] of Object.entries(SPECIES)) {
+    assertEqual(MUSHROOMS.filter((m) => m.species === species).length, 4,
+      `${species} should have four colours`);
+    assert(ITEMS[def.item], `${species} needs somewhere to go in the bag`);
+  }
+});
+
+test('a new farm has mushrooms already up, near the farmhouse', () => {
+  // Otherwise the first one appears somewhere on 1,600 tiles at some point in
+  // the first hour, which is a poor way to discover the game has foraging.
+  const s = newGameRaw(9100);
+  const keys = Object.keys(s.mushrooms);
+  assert(keys.length >= 1, 'at least one is waiting to be found');
+
+  for (const key of keys) {
+    const [x, y] = key.split(',').map(Number);
+    const away = Math.max(Math.abs(x - s.farmer.x), Math.abs(y - s.farmer.y));
+    assert(away <= 6, `${key} is ${away} tiles off — it should be in plain sight`);
+    assertEqual(s.grid.getObject(x, y), OBJ.MUSHROOM, 'and drawn on the grid');
+    assert(mushroomAt(s, x, y), 'and knows which mushroom it is');
+  }
+});
+
+test('rarer mushrooms are worth more', () => {
+  const byWeight = Object.values(SPECIES).slice().sort((a, b) => b.weight - a.weight);
+  for (let i = 1; i < byWeight.length; i++) {
+    assert(byWeight[i].sell > byWeight[i - 1].sell,
+      `${byWeight[i].name} is rarer than ${byWeight[i - 1].name}, so it must pay better`);
+  }
+});
+
+test('mushrooms come up on open grass, and are capped', () => {
+  const s = weedableFarm(9001);
+  const seeded = Object.keys(s.mushrooms).length;   // the starting few
+
+  for (let i = 0; i < 24 * 60 * 60; i++) tick(s);
+
+  const cap = Math.max(1, Math.floor(s.grid.owned.size * PLOT * PLOT * MUSHROOM_MAX_FRACTION));
+  const grown = Object.keys(s.mushrooms).length;
+  assert(grown > seeded, 'a day should turn up more than the farm started with');
+  assert(grown <= cap, `${grown} mushrooms against a cap of ${cap}`);
+
+  // Every one has a tile marked for it, or the renderer would draw nothing.
+  for (const key of Object.keys(s.mushrooms)) {
+    const [x, y] = key.split(',').map(Number);
+    assertEqual(s.grid.getObject(x, y), OBJ.MUSHROOM, `${key} is marked on the grid`);
+    assert(s.grid.isOwned(x, y), 'and is on land you own');
+  }
+});
+
+test('mushrooms never take a bed, a crop or an occupied tile', () => {
+  const s = weedableFarm(9002);
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y - 4;
+
+  s.grid.setGround(x, y, GROUND.TILLED);
+  assert(!canSproutShroom(s, x, y), 'not on a bed');
+
+  s.grid.setGround(x, y, GROUND.GRASS);
+  s.grid.setObject(x, y, OBJ.WEED);
+  assert(!canSproutShroom(s, x, y), 'not where a weed already is');
+
+  s.grid.setObject(x, y, OBJ.NONE);
+  assert(canSproutShroom(s, x, y), 'but open grass, yes');
+});
+
+test('picking a mushroom banks it and writes it into the journal', () => {
+  const s = weedableFarm(9003);
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y;
+  sprout(s, x, y, 'red_toadstool');
+
+  // The clear tool is what picks it up, like anything else lying about.
+  const spec = taskForTile(s, x, y, 'clear');
+  assertEqual(spec.type, 'forage', 'the clear tool offers to pick it');
+  assertEqual(spec.detail, 'Red toadstool', 'and says which one it is');
+
+  const gained = forage(s, x, y);
+  assertEqual(gained, { mushroom_toadstool: 1 }, 'a toadstool goes in the bag');
+  assertEqual(countItem(s, 'mushroom_toadstool'), 1, 'as its species, not its colour');
+  assertEqual(journalCount(s, 'red_toadstool'), 1, 'the journal remembers the colour');
+  assertEqual(s.grid.getObject(x, y), OBJ.NONE, 'and the tile is clear again');
+  assertEqual(s.mushrooms[`${x},${y}`], undefined, 'with nothing left behind');
+});
+
+test('selling mushrooms never erases what you found', () => {
+  // The journal is a record of finds, not a view of the bag. Cashing in a
+  // collection you spent a week building would be a rotten thing to do.
+  const s = weedableFarm(9004);
+  sprout(s, s.farmer.x + 1, s.farmer.y, 'ash_morel');
+  forage(s, s.farmer.x + 1, s.farmer.y);
+
+  sellAll(s, 'mushroom_morel');
+  assertEqual(countItem(s, 'mushroom_morel'), 0, 'sold');
+  assertEqual(journalCount(s, 'ash_morel'), 1, 'still found');
+  assertEqual(journalFound(s), 1, 'and still counted in the journal');
+});
+
+test('the journal counts finds, not what you are carrying', () => {
+  const s = weedableFarm(9005);
+  for (let i = 0; i < 3; i++) {
+    sprout(s, s.farmer.x + 1, s.farmer.y, 'blue_button');
+    forage(s, s.farmer.x + 1, s.farmer.y);
+  }
+  assertEqual(journalCount(s, 'blue_button'), 3, 'three of that colour picked');
+  assertEqual(journalFound(s), 1, 'but only one kind discovered');
+
+  const rows = journalRows(s);
+  assertEqual(rows.length, 16, 'the journal lists every kind, found or not');
+  assertEqual(rows.filter((r) => r.found === 0).length, 15, 'the rest are still out there');
+});
+
+test('mushrooms and the journal survive a save round trip', () => {
+  const s = weedableFarm(9006);
+  sprout(s, s.farmer.x + 1, s.farmer.y, 'orange_bolete');
+  sprout(s, s.farmer.x + 2, s.farmer.y, 'pink_morel');
+  forage(s, s.farmer.x + 1, s.farmer.y);
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual(back.journal, s.journal, 'the journal is part of the farm');
+  assertEqual(back.mushrooms, s.mushrooms, 'and so is what is still growing');
+  // The one still standing must be the same one, not a fresh roll.
+  assertEqual(mushroomAt(back, s.farmer.x + 2, s.farmer.y).id, 'pink_morel',
+    'a find stays the find it was');
+});
+
+test('foraging replays identically, so catching up finds the same mushrooms', () => {
+  const a = weedableFarm(9007);
+  const b = weedableFarm(9007);
+  for (let i = 0; i < 6 * 60 * 60; i++) { tick(a); tick(b); }
+  assertEqual(serialize(b), serialize(a), 'two identical farms must stay identical');
+  assert(Object.keys(a.mushrooms).length > 0, 'and that run should have grown some');
+});
+
+test('common mushrooms turn up far more often than rare ones', () => {
+  const s = weedableFarm(9008);
+  const rolled = {};
+  for (let i = 0; i < 4000; i++) {
+    const id = rollSpecies(s);
+    const sp = MUSHROOMS_BY_ID[id].species;
+    rolled[sp] = (rolled[sp] || 0) + 1;
+  }
+  assert(rolled.button > rolled.toadstool, 'buttons beat toadstools');
+  assert(rolled.toadstool > rolled.bolete, 'toadstools beat boletes');
+  assert(rolled.bolete > (rolled.morel || 0), 'and a morel is a genuine find');
+  assert((rolled.morel || 0) > 0, 'though one does turn up eventually');
+});
+
 // --- weeds regrowing ----------------------------------------------------
 
 /** A farm with one plot, cleared of everything, so weeds are the only variable. */
 function weedableFarm(seed = 7000) {
   const s = newGameRaw(seed);
   s.grid.objects.fill(OBJ.NONE);
+  // The object grid and state.mushrooms have to agree: clearing the grid alone
+  // would leave mushrooms recorded on tiles that no longer show one.
+  s.mushrooms = {};
   s.buildings = [];
+  // newGame stamps Date.now(), so two farms built either side of a millisecond
+  // boundary aren't identical. Pin it, the way twinGames does.
+  s.lastTickTime = 0;
   return s;
 }
 
@@ -2566,6 +2735,98 @@ test('a migrated farm can buy the land next door', () => {
   assert(canBuyPlot(live, px, py + 1).ok, 'the cell to the south is for sale');
   assert(!canBuyPlot(live, px + 1, py + 1).ok, 'the corner still needs a neighbour first');
   assert(buyPlot(live, px, py + 1).ok, 'and the purchase goes through');
+});
+
+// --- backups before migrating -------------------------------------------
+
+/** A stand-in for localStorage, so the real load path can be exercised here. */
+function fakeStorage() {
+  const m = new Map();
+  return {
+    map: m,
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => m.set(k, String(v)),
+    removeItem: (k) => m.delete(k),
+    key: (i) => [...m.keys()][i],
+    get length() { return m.size; },
+  };
+}
+
+/** Runs fn with localStorage swapped out, then puts it back. */
+function withStorage(store, fn) {
+  const real = globalThis.localStorage;
+  globalThis.localStorage = store;
+  try { return fn(); } finally { globalThis.localStorage = real; }
+}
+
+test('migrating an old save keeps a copy of it first', () => {
+  // A migration rewrites a farm on a schema the code that wrote it never saw.
+  // The original has to survive that, or a bad migration is final.
+  const store = fakeStorage();
+  const old = oldWorldSave(newGameRaw(9200));
+  store.setItem(SAVE_KEY, JSON.stringify(old));
+
+  const loaded = withStorage(store, () => loadSave());
+  assertEqual(loaded.version, SAVE_VERSION, 'the farm came back migrated');
+
+  const kept = store.getItem(backupKey(1));
+  assert(kept, 'and the v1 original was kept');
+  assertEqual(JSON.parse(kept).version, 1, 'exactly as it was, unmigrated');
+  assertEqual(JSON.parse(kept).map.w, CELL_W, 'still the old 40x40 map');
+});
+
+test('a save that needs no migration is not backed up', () => {
+  // Otherwise every single load would rewrite the backup, and the copy from
+  // before the update — the one that matters — would be lost immediately.
+  const store = fakeStorage();
+  store.setItem(SAVE_KEY, JSON.stringify(serialize(newGameRaw(9201))));
+
+  withStorage(store, () => loadSave());
+  assertEqual(store.length, 1, 'only the save itself is stored');
+});
+
+test('a second load never overwrites a backup with a broken farm', () => {
+  // The scenario this exists for: the migration went wrong, and the player
+  // reloads hoping it sorts itself out. The good copy must still be there.
+  const store = fakeStorage();
+  const original = JSON.stringify(oldWorldSave(newGameRaw(9202)));
+  store.setItem(SAVE_KEY, original);
+
+  withStorage(store, () => loadSave());
+  store.setItem(SAVE_KEY, JSON.stringify({ version: 1, ruined: true }));
+  withStorage(store, () => loadSave());
+
+  assertEqual(store.getItem(backupKey(1)), original, 'the first copy is untouched');
+});
+
+test('backups are listed newest schema first, and are importable', () => {
+  const store = fakeStorage();
+  const old = oldWorldSave(newGameRaw(9203));
+  store.setItem(SAVE_KEY, JSON.stringify(old));
+  withStorage(store, () => loadSave());
+
+  const found = withStorage(store, () => listBackups());
+  assertEqual(found.length, 1, 'one backup');
+  assertEqual(found[0].version, 1, 'from v1');
+
+  // It has to be something the restore box will actually accept, or offering
+  // it to the player is a cruel joke.
+  const check = validateSave(found[0].text);
+  assert(check.ok, `the backup must import cleanly: ${check.reason}`);
+  const live = deserialize(check.data);
+  assert(live.grid.isOwned(live.farmer.x, live.farmer.y), 'and give back a playable farm');
+});
+
+test('a backup that cannot be written does not stop the farm loading', () => {
+  // Refusing to open someone's farm because there was no room for a safety
+  // copy would be a worse outcome than the risk it guards against.
+  const store = fakeStorage();
+  store.setItem(SAVE_KEY, JSON.stringify(oldWorldSave(newGameRaw(9204))));
+  const full = { ...store, setItem: (k) => { if (k !== SAVE_KEY) throw new Error('quota'); } };
+
+  const loaded = withStorage(full, () => loadSave());
+  assert(loaded, 'the farm still loads');
+  assertEqual(loaded.version, SAVE_VERSION, 'and is still migrated');
 });
 
 // --- save export / import -----------------------------------------------

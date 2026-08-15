@@ -47,6 +47,7 @@ for development.
 - **Affection and emotes — complete.** Tap an animal to pet it; see design.md.
 - **Sheep — complete.** The slow, valuable animal: wool over 75 minutes at $100.
 - **Milked animals bank up to 4 units** rather than stopping at one.
+- **Mushrooms and the journal — complete.** Foraging, 16 kinds; see design.md.
 
 **The settings panel and the save.** The farm lives in localStorage, which the
 browser is entitled to clear, so exporting a copy is the only real protection
@@ -144,7 +145,37 @@ their eggs go on the ground, so there's nothing to bank.
 The v3 -> v4 migration converts `ready` to `stock`, because a cow standing there
 ready had earned its milk and shouldn't quietly lose it on an update.
 
-179 headless tests pass via `npm test`.
+**Mushrooms reuse the weed spawner's shape** — capped, one-tick-in-N, `state.rng`
+only — which is exactly what that file said it was there to be. What's different
+is that *which* mushroom grew is state, not a hash of the tile: it lives in
+`state.mushrooms` keyed by tile, the way crops do, because the object grid is one
+byte per tile and there are sixteen. A find has to still be the same find after
+a reload.
+
+The journal (`state.journal`) counts finds and is deliberately **not** derived
+from the inventory, so selling a collection doesn't erase it. No migration was
+needed — both fields default to `{}` on load, so old saves open fine.
+
+**New tab rows must be added to the `#shop-tabs, #inv-tabs` selectors in
+style.css.** `#ui button` is an ID selector, so a bare `.tabs button.on` rule
+loses to it and the selected tab silently never highlights. This has now caught
+us twice.
+
+**Migrations back the save up first.** `loadSave` copies the raw text to
+`lilfarm.save.v1.backup.v<from>` before `migrate` touches it. Three rules, each
+with a test: only when a migration will actually run (or every load would
+overwrite the copy that matters); **never overwrite an existing backup** (the
+scenario is a bad migration followed by the player reloading, and the good copy
+has to survive that); and a backup that can't be written is a warning, not a
+failure — refusing to open someone's farm because there was no room for a safety
+copy is worse than the risk it guards against. The settings panel lists them.
+
+**`state.mushrooms` and the object grid must agree.** Anything that clears the
+object layer has to clear the mushroom map too, or a tile is recorded as having
+a mushroom that isn't drawn and can't be picked. The test helpers got this wrong
+first time.
+
+195 headless tests pass via `npm test`.
 
 Tilling is a two-point row gesture and beds are drawn with the capsule art — see
 section 8. Adjacent rows stay visually separate rather than merging into a grid.

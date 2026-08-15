@@ -16,6 +16,7 @@ import { addItems, removeItem } from './inventory.js';
 import { plantCrop, waterTile, harvestCrop, seedIdFor } from './crops.js';
 import { completeBuild, demolish } from './build.js';
 import { fillWaterTrough, fillFeedTrough, collectFrom } from './animals.js';
+import { forage } from './mushrooms.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 
 const WANDER_CHANCE = 0.08;   // per idle tick
@@ -207,6 +208,13 @@ function applyTaskResult(state, task) {
       if (!res.ok) {
         emitUnlessSuspended('task:failed', { task, reason: res.reason || 'could not fill it' });
       }
+      break;
+    }
+
+    case 'forage': {
+      // Which mushroom it was is looked up at the moment it's picked, not when
+      // the task was queued — that's the only place that knows.
+      gained = forage(state, task.x, task.y);
       break;
     }
 

@@ -20,6 +20,12 @@ export const ITEMS = {
   egg: { name: 'Egg', sell: 25 },
   milk: { name: 'Milk', sell: 60 },
   wool: { name: 'Wool', sell: 100 },
+  // Foraged. Four kinds rather than sixteen: the journal remembers every
+  // colour, the bag only needs to know what it's worth.
+  mushroom_button: { name: 'Button mushrooms', sell: 12 },
+  mushroom_toadstool: { name: 'Toadstools', sell: 28 },
+  mushroom_bolete: { name: 'Boletes', sell: 65 },
+  mushroom_morel: { name: 'Morels', sell: 150 },
 };
 
 export function itemName(id) {

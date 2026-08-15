@@ -56,7 +56,59 @@ export function loadSave() {
     return null;
   }
 
+  // A migration rewrites a farm that may be months old, on a schema the code
+  // that wrote it never saw. Keep the original first, untouched, so a bad
+  // migration is recoverable rather than final.
+  backupBeforeMigration(raw, data.version);
+
   return migrate(data);
+}
+
+/** Where the copy of a save from before version N's migration is kept. */
+export function backupKey(version) { return `${SAVE_KEY}.backup.v${version}`; }
+
+/**
+ * Copies the raw save aside before migrating it.
+ *
+ * Keyed by the version it came *from*, so migrating across several releases
+ * leaves one backup per generation rather than each overwriting the last. It
+ * never overwrites an existing backup: if a migration went wrong and the player
+ * reloads, the second load must not replace the good copy with the bad one.
+ *
+ * A backup that can't be written is a warning, not a failure — refusing to load
+ * someone's farm because there was no room for a safety copy would be a worse
+ * outcome than the risk it guards against.
+ */
+export function backupBeforeMigration(raw, version) {
+  if (typeof version !== 'number' || version >= SAVE_VERSION) return null;
+
+  const key = backupKey(version);
+  try {
+    if (localStorage.getItem(key) !== null) return key;   // already have one
+    localStorage.setItem(key, raw);
+    console.info(`kept a backup of your v${version} farm at ${key}`);
+    return key;
+  } catch (err) {
+    console.warn('could not back the save up before migrating', err);
+    return null;
+  }
+}
+
+/**
+ * Pre-migration backups that are still around, newest schema first.
+ * @returns {Array<{key: string, version: number, text: string}>}
+ */
+export function listBackups() {
+  const out = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      const match = key && key.match(new RegExp(`^${SAVE_KEY}\\.backup\\.v(\\d+)$`));
+      if (!match) continue;
+      out.push({ key, version: Number(match[1]), text: localStorage.getItem(key) });
+    }
+  } catch { /* storage unavailable; nothing to offer */ }
+  return out.sort((a, b) => b.version - a.version);
 }
 
 export function migrate(data) {

@@ -7,7 +7,7 @@
 
 import { on, emit } from '../engine/events.js';
 import { TESTING, START_INVENTORY } from '../config.js';
-import { exportSave, validateSave, writeSave, clearSave } from '../engine/save.js';
+import { exportSave, validateSave, writeSave, clearSave, listBackups } from '../engine/save.js';
 import { addItem } from '../sim/inventory.js';
 
 /**
@@ -21,6 +21,7 @@ export function initSettingsPanel(state, { serialize, autosaver, onMessage } = {
   const exportBox = document.getElementById('settings-export');
   const importBox = document.getElementById('settings-import');
   const note = document.getElementById('settings-note');
+  const backups = document.getElementById('settings-backups');
 
   let open = false;
   const setOpen = (v) => {
@@ -46,7 +47,37 @@ export function initSettingsPanel(state, { serialize, autosaver, onMessage } = {
     note.textContent = TESTING
       ? '⚠ Testing start is ON — new farms begin with everything'
       : `Save is ${Math.round(exportBox.value.length / 1024)} KB`;
+    renderBackups();
   }
+
+  /**
+   * The copies taken automatically before a version migration. They're the one
+   * thing here the player didn't ask for and might badly need, so they get a
+   * one-tap route into the restore box rather than living only in storage
+   * where nothing but a desktop console could reach them.
+   */
+  function renderBackups() {
+    const found = listBackups();
+    if (found.length === 0) { backups.innerHTML = ''; return; }
+
+    backups.innerHTML = `<p class="hint">Kept automatically before the game updated:</p>${
+      found.map((b) => `<button data-backup="${b.version}">Use the backup from before v${
+        b.version + 1} (${Math.round(b.text.length / 1024)} KB)</button>`).join('')}`;
+  }
+
+  backups.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-backup]');
+    if (!btn) return;
+    const wanted = Number(btn.dataset.backup);
+    const backup = listBackups().find((b) => b.version === wanted);
+    if (!backup) { onMessage?.('That backup is gone', 'warn'); return; }
+
+    // Dropped into the paste box rather than restored outright, so it goes
+    // through the same validate-and-confirm path as anything else.
+    importBox.value = backup.text;
+    importBox.scrollIntoView({ block: 'nearest' });
+    onMessage?.('Backup loaded below — check it, then Load this farm');
+  });
 
   // --- backup ----------------------------------------------------------
 

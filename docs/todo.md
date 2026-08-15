@@ -1,3 +1,2 @@
 - Fun animations.  Farmer bounces as he walks, trees wiggle as they are chopped, etc.
-- Mushroom Journal.   I have created a mushrooms tilesheet with 4 mushroom types and 4 varations.  Spawn the mushrooms on grass tiles at random.   Mushrooms have various rarities and can be sold at different prices.   A journal records what mushrooms you've found and how many of each.    
 - Organize sell menu by item type. Group crops, products, seeds, etc together.  
