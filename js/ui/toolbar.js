@@ -93,6 +93,19 @@ export function initToolbar(state, { onToolChange } = {}) {
   // honest about what's affordable right now.
   on('inventory:changed', () => { if (tool === 'plant' || tool === 'build') render(); });
   on('tasks:changed', () => { if (tool === 'build') renderBuildables(); });
+
+  // Opening a panel drops back to the harmless tool and closes the sub-picker.
+  // A panel only covers part of the screen, so leaving Build armed behind it
+  // means a tap on the visible strip of map quietly puts down a fence.
+  // Deliberately does not fire onToolChange: that announces the new tool, and
+  // a hint toast every time the shop opens is noise. Callers that need to tidy
+  // up on a panel opening listen for 'panel:open' themselves.
+  on('panel:open', () => {
+    if (tool === 'auto') return;
+    tool = 'auto';
+    render();
+  });
+
   render();
 
   return {

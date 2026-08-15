@@ -5,8 +5,9 @@
 // loop's alpha (0..1 progress toward the next tick).
 
 import { TILE } from '../config.js';
-import { SPRITES, srcRect } from './sprites.js';
+import { SPRITES } from './sprites.js';
 import { blit } from './tilerender.js';
+import { animalDef, isNeglected, isThirsty } from '../sim/animals.js';
 
 export function drawFarmer(ctx, sheets, state, alpha) {
   const f = state.farmer;
@@ -60,6 +61,46 @@ export function drawTillAnchor(ctx, anchor, tickCount) {
   ctx.strokeStyle = '#fff3b0';
   ctx.lineWidth = 1;
   ctx.strokeRect(x + 0.5, y + 0.5, TILE - 1, TILE - 1);
+}
+
+/**
+ * Animals, interpolated like the farmer. Two markers matter here: a neglected
+ * animal has stopped producing, and a ready one is waiting to be collected.
+ * Neither is ever fatal, so the neglect marker is a nudge rather than an alarm —
+ * but without it an idle barn is indistinguishable from a broken one.
+ */
+export function drawAnimals(ctx, sheets, state, alpha) {
+  for (const a of state.animals || []) {
+    const def = animalDef(a.type);
+    if (!def) continue;
+
+    const x = lerp(a.px ?? a.x, a.x, alpha) * TILE;
+    const y = lerp(a.py ?? a.y, a.y, alpha) * TILE;
+    blit(ctx, sheets, SPRITES[def.sprite], Math.round(x), Math.round(y) - 1);
+
+    if (a.ready) {
+      // A gentle bob so a collectable animal catches the eye while panning.
+      const bob = Math.sin(state.tickCount / 3) < 0 ? -1 : 0;
+      drawBadge(ctx, x + TILE - 6, y - 3 + bob, '#ffe680', '#8a6a10');
+    } else if (isNeglected(a)) {
+      drawBadge(ctx, x + TILE - 6, y - 2,
+        isThirsty(a) ? '#4aa3e0' : '#d9a441', 'rgba(0,0,0,0.45)');
+    }
+  }
+}
+
+/** One animal sprite at a tile, used for the placement ghost. */
+export function drawAnimalSprite(ctx, sheets, type, at) {
+  const def = animalDef(type);
+  if (!def) return;
+  blit(ctx, sheets, SPRITES[def.sprite], at.x * TILE, at.y * TILE - 1);
+}
+
+function drawBadge(ctx, x, y, fill, edge) {
+  ctx.fillStyle = edge;
+  ctx.fillRect(x - 1, y - 1, 6, 6);
+  ctx.fillStyle = fill;
+  ctx.fillRect(x, y, 4, 4);
 }
 
 /**

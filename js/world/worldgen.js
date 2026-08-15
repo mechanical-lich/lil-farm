@@ -5,6 +5,16 @@ import { GROUND, OBJ } from './tiledefs.js';
 import { MAP_W, MAP_H, GEN } from '../config.js';
 
 /**
+ * Where the farm's starting barn stands, relative to the farmer's spawn: three
+ * tiles wide, on the two rows directly above him, so he begins standing in his
+ * own yard looking at it. Its roof overhangs three rows higher still, which is
+ * well inside the cleared radius.
+ */
+export function startingBarnAnchor(spawn) {
+  return { x: spawn.x - 1, y: spawn.y - 2 };
+}
+
+/**
  * @param {ReturnType<import('../engine/rng.js').makeRng>} rng
  * @returns {{grid: Grid, spawn: {x:number, y:number}}}
  */
@@ -33,9 +43,10 @@ export function generateWorld(rng) {
   scatter(OBJ.BUSH, GEN.bush);
   scatter(OBJ.WEED, GEN.weed);
 
-  // A small patch of bare dirt under the spawn so the starting area reads as
-  // "your yard" rather than an arbitrary spot in a field.
-  for (let dy = -1; dy <= 1; dy++) {
+  // A patch of bare dirt in front of where the starting barn goes, so the
+  // opening view reads as "your yard" rather than an arbitrary spot in a field.
+  // Kept in step with BARN_ANCHOR below: the barn stands on the two rows above.
+  for (let dy = 0; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
       grid.setGround(spawn.x + dx, spawn.y + dy, GROUND.DIRT);
     }

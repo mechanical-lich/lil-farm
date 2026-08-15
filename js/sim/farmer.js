@@ -15,6 +15,7 @@ import { deferTask, completeTask } from './tasks.js';
 import { addItems, removeItem } from './inventory.js';
 import { plantCrop, waterTile, harvestCrop, seedIdFor } from './crops.js';
 import { completeBuild, demolish } from './build.js';
+import { fillWaterTrough, fillFeedTrough, collectFrom } from './animals.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 
 const WANDER_CHANCE = 0.08;   // per idle tick
@@ -194,6 +195,24 @@ function applyTaskResult(state, task) {
     case 'harvest':
       gained = harvestCrop(state, task.x, task.y);
       break;
+
+    case 'fill': {
+      const trough = state.troughs[`${task.x},${task.y}`];
+      if (!trough) break;
+      const res = trough.kind === 'water'
+        ? fillWaterTrough(state, task.x, task.y)
+        : fillFeedTrough(state, task.x, task.y);
+      if (!res.ok) {
+        emitUnlessSuspended('task:failed', { task, reason: res.reason || 'could not fill it' });
+      }
+      break;
+    }
+
+    case 'collect': {
+      const animal = state.animals.find((a) => a.id === task.animalId);
+      gained = collectFrom(state, animal);
+      break;
+    }
 
     case 'demolish': {
       // Half the materials come back, so a misplaced fence is a small loss

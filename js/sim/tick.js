@@ -9,6 +9,7 @@
 import { TICK_MS } from '../config.js';
 import { updateFarmer } from './farmer.js';
 import { updateCrops } from './crops.js';
+import { updateAnimals } from './animals.js';
 
 /** @param {object} state */
 export function tick(state) {
@@ -17,5 +18,5 @@ export function tick(state) {
 
   updateFarmer(state);
   updateCrops(state);
-  // M5+: updateAnimals(state);
+  updateAnimals(state);
 }

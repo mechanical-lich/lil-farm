@@ -7,7 +7,8 @@
 import { emitUnlessSuspended } from '../engine/events.js';
 import { OBJ, GROUND, objDef, isTilled } from '../world/tiledefs.js';
 import { cropAt, isRipe, isStalled, cropDef } from './crops.js';
-import { buildDef, canPlaceAt, structureAt, demolishWork } from './build.js';
+import { buildDef, canPlaceAt, structureAt, demolishWork, troughAnchorAt } from './build.js';
+import { animalDef, TROUGH_CAPACITY } from './animals.js';
 
 /** Work is measured in ticks (1 tick = 1 second). */
 export const TASK_TYPES = {
@@ -15,6 +16,8 @@ export const TASK_TYPES = {
   chop: { label: 'Chop', verb: 'Chopping' },
   untill: { label: 'Clear', verb: 'Clearing' },
   demolish: { label: 'Remove', verb: 'Removing' },
+  fill: { label: 'Fill', verb: 'Filling' },
+  collect: { label: 'Collect', verb: 'Collecting' },
   till: { label: 'Till', verb: 'Tilling' },
   plant: { label: 'Plant', verb: 'Planting' },
   water: { label: 'Water', verb: 'Watering' },
@@ -30,6 +33,8 @@ export const WORK = {
   harvest: 6,
   clearDead: 4,
   untill: 5,
+  fill: 8,
+  collect: 6,
 };
 
 /** A task the player cannot see the point of is a bug; keep labels concrete. */
@@ -257,6 +262,26 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
     case 'auto':
     default: {
       // Tap-anywhere convenience: the most useful thing this tile needs.
+      // Animals and troughs come first — they're what you tap them for.
+      const ready = state.animals?.find((a) => a.ready && a.x === x && a.y === y);
+      if (ready) {
+        return {
+          type: 'collect', x, y, work: WORK.collect,
+          detail: animalDef(ready.type).produces, animalId: ready.id,
+        };
+      }
+      const trough = troughAnchorAt(state, x, y);
+      if (trough) {
+        const t = state.troughs[`${trough.x},${trough.y}`];
+        if (t && (t.level || 0) < TROUGH_CAPACITY) {
+          return {
+            type: 'fill', x: trough.x, y: trough.y, work: WORK.fill,
+            detail: t.kind === 'water' ? 'water trough' : 'feed trough',
+            w: 2, h: 1, adjacent: true,
+          };
+        }
+        return null;
+      }
       if (crop) {
         if (crop.dead) return { type: 'harvest', x, y, work: WORK.clearDead, detail: 'dead crop' };
         if (isRipe(crop)) return { type: 'harvest', x, y, work: WORK.harvest, detail: cropDef(crop.type).name };

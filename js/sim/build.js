@@ -142,7 +142,20 @@ export function completeBuild(state, task) {
   }
   for (const [mat, n] of Object.entries(def.cost)) removeItem(state, mat, n);
 
-  const tiles = footprint(task.buildKind, task.x, task.y);
+  placeStructure(state, task.buildKind, task.x, task.y);
+  return true;
+}
+
+/**
+ * Puts a finished structure into the world. Deliberately free of any cost or
+ * validity checking — `completeBuild` handles payment, and worldgen uses this
+ * directly to stand up the barn a new farm starts with.
+ */
+export function placeStructure(state, kind, x, y) {
+  const def = buildDef(kind);
+  if (!def) return false;
+
+  const tiles = footprint(kind, x, y);
 
   if (def.ground != null) {
     for (const t of tiles) state.grid.setGround(t.x, t.y, def.ground);
@@ -152,20 +165,15 @@ export function completeBuild(state, task) {
   }
   // A trough's contents live on its anchor tile; the grid marks only block movement.
   if (def.trough) {
-    state.troughs[`${task.x},${task.y}`] = { kind: def.trough, level: 0, foodType: null };
+    state.troughs[`${x},${y}`] = { kind: def.trough, level: 0, foodType: null };
   }
   // Same idea one size up: the building record is the source of truth, the grid
   // marks are just an index so collision and taps keep working.
   if (def.building) {
-    state.buildings.push({
-      id: state.nextBuildingId++,
-      type: def.building,
-      x: task.x,
-      y: task.y,
-    });
+    state.buildings.push({ id: state.nextBuildingId++, type: def.building, x, y });
   }
 
-  emitUnlessSuspended('world:changed', { x: task.x, y: task.y });
+  emitUnlessSuspended('world:changed', { x, y });
   return true;
 }
 

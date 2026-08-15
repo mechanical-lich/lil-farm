@@ -19,6 +19,8 @@ The game is made up of 16x16 tiles.   Tiles can various things from a fence, gra
 ## New Game State
 When you first start the game you are given a plot of land that has to be cleaned up.   There will be rocks, trees, dead trees, and weeds.   You can queue tasks to remove obstacles, pull weeds, and cut trees.   
 
+A new farm starts with **one barn** already standing, on the two rows directly above the farmer, with his dirt yard in front of it.  It gives the opening view something to sit around instead of an empty field, and it means keeping animals is something to work toward from day one rather than only after saving 50 wood and 20 stone.  It can be demolished like any other barn if you'd rather put it somewhere else.
+
 ## Inventory
 Some tasks suchs as harvesting a crop, cutting a tree, milking a cow, collecting eggs, etc will add items to your inventory. 
 
@@ -93,6 +95,16 @@ There are tasks to fill food and water troughs.  Water is infinite, but food mus
 
 Animals can not open gates.
 
+### How animals work
+- Two animals: a **chicken** ($120) lays an **egg** every 20 minutes, a **cow** ($500) is ready to **milk** every hour.  Both need food and water to make progress.
+- **Animals are free-range.**  Nothing forces you to fence them.  Fences and gates are how you *choose* to keep them near their troughs, since a gate stops an animal but not the farmer.
+- You need a **barn before you can buy an animal**, and each barn holds 4.
+- **You choose where a new animal goes.**  Pressing Buy closes the shop and hands you a ghost of the animal; tap to move it, then confirm.  Nothing is charged until you confirm a spot, so backing out is free — the same rule building follows.
+- An animal whose food or water runs low walks to the nearest trough it can reach and takes a helping, which drains the trough.  If it can't reach one, it just carries on being hungry.
+- Filling a **water trough is free** — the work is carrying it, not finding it.  Filling a **feed trough** consumes 3 crops, automatically taken from the cheapest crop you have enough of, so a stray tap never burns the eggplants.
+- Tapping an animal that's ready collects from it; tapping a trough fills it.
+- Neglected animals show a marker (blue when thirsty, amber when hungry) and ready ones bob with a badge.
+
 ### Animals never die
 **Animals can not die, ever.**  Neglect costs you production, never the animal itself.
 
@@ -100,6 +112,14 @@ Animals can not open gates.
 - Feeding and watering it again resumes production.  There is no permanent penalty and no way to lose an animal you paid for.
 - This is deliberately **different from crops**, which do die if they aren't watered in time.  The asymmetry is the point: a crop is a cheap, replaceable seed, while an animal is an expensive purchase.  In a game you're meant to be able to walk away from for days, coming back to a dead cow you bought would feel awful.  Do not "fix" this inconsistency by adding animal death.
 - A neglected animal must be visibly neglected — a hungry/thirsty marker — so an idle barn reads as "they need feeding", not as a bug.
+
+## Panels and modes
+The sliding panels (Shop, Tasks, Bag) only cover part of the screen, so the map stays visible above them.  That made it easy to be "still in Build mode" while shopping and quietly put down a fence with a stray tap.
+
+- Opening any panel **drops the tool back to plain Tap** and closes the tool's sub-picker, so nothing destructive stays armed behind it.
+- Opening a panel also abandons a half-finished tilling row or placement ghost.
+- **Tapping the map while a panel is open dismisses the panel** rather than acting on the tile.  One tap to get out, and it can't cost you anything.
+- Only one panel is up at a time; opening one closes the others.
 
 ## Task management
 - Tasks should be cancelable. 

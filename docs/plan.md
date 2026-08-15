@@ -28,14 +28,24 @@ for development.
   dirt, cobblestone paving, proper fences with corners, and fuller trees.
 - **Barns — complete.** Multi-tile buildings with ghost-preview placement,
   3x2 footprint, overhanging roof, and animal capacity.
-- **Next: M5 animals.**
+- **M5 — complete.** Cows and chickens: free-range wandering, trough seeking,
+  production gated on food and water, and the never-die rule.
+- **Next: M6 polish** — offline-return summary, PWA install, save export/import,
+  land expansion.
 
-99 headless tests pass via `npm test`.
+118 headless tests pass via `npm test`.
 
 Tilling is a two-point row gesture and beds are drawn with the capsule art — see
 section 8. Adjacent rows stay visually separate rather than merging into a grid.
 The clear tool undoes an empty bed back to grass (task type `untill`), but refuses
 a bed with a crop in it.
+
+Panels (`shop` / `tasks` / `bag`) coordinate through `panel:open`, `panel:close` and
+`panel:dismiss` events rather than holding references to each other. Opening one
+resets the tool to `auto`, closes the sub-picker, and clears any pending placement;
+while one is open a map tap dismisses it instead of doing farm work. This exists
+because a panel covers only part of the screen, so leaving Build armed behind it let
+a stray tap on the visible strip queue work the player never intended.
 
 Farmer travel speed is `FARMER_SPEED` in `config.js` (tiles walked per tick,
 currently 3). Work durations are separate and unaffected by it.
@@ -329,7 +339,7 @@ closed ring, since fences block everyone. It's recoverable — the farmer can cl
 fence from whichever side he's on — and unreachable tasks defer rather than jam, so
 nothing breaks permanently. Not worth a placement-time reachability check.
 
-### M5 — Animals
+### M5 — Animals ✅
 - Buy cow/chicken from shop; animal wanders (random walk, fence/gate-constrained),
   seeks troughs when hungry/thirsty, drains trough levels.
 - Fill-trough tasks (water free, food consumes a crop type from inventory).
@@ -345,7 +355,19 @@ nothing breaks permanently. Not worth a placement-time reachability check.
   production ("your cow was thirsty") rather than staying silent.
 - **Done when:** a fenced, fed cow produces milk overnight (offline) and it can be
   collected and sold — and a cow left with empty troughs for a week is still there,
-  just unproductive.
+  just unproductive. **Both verified**, the second by ticking a full simulated week
+  with no troughs at all and asserting the animal is untouched.
+
+**Implementation notes.** `sim/animals.js` holds the lot. Production only advances
+while `!isNeglected(a)`; there is deliberately **no health value and no removal
+path** — an animal leaves only when sold. Progress is *paused*, never lost, so
+refeeding resumes exactly where it stopped (there's a test for that specific
+number). Animals path with `actor: 'animal'`, which is what makes gates one-way.
+Trough seeking re-plans only when the path empties and tries just the three
+nearest troughs, so a fenced-out animal doesn't scan the farm every tick.
+
+Feed cost picks the **cheapest** crop the player has enough of, which avoids
+adding another picker to the UI and stops a stray fill consuming the eggplants.
 
 ### M6 — Polish & ship
 - Offline-return summary ("While you were away: 6 tasks done, 12 corn harvested").
@@ -421,9 +443,20 @@ coops, or anything else later:
 - **Draw order:** buildings are drawn during the object row loop, at the row where
   their *bottom* row sits. That makes them y-sort against everything else — things
   lower on screen overlap them, things above are overlapped.
-- **Placement UI:** anything with `def.building` gets a ghost preview and an explicit
-  confirm rather than dropping on the tap. Worth the friction at 50 wood a go; troughs
-  and fences still place instantly.
+- **Placement UI** is generic (`beginPlacement` in `main.js`). A placement spec supplies
+  its own footprint, validity rule, ghost drawing, and confirm action, so the same flow
+  serves a barn (which queues a build task) and a livestock purchase (an immediate
+  transaction). Anything with `def.building` uses it, as does buying an animal — both
+  are expensive enough that dropping them blind is a bad trade. Troughs and fences
+  still place instantly on the tap.
+- **A new farm starts with one barn**, sited by `startingBarnAnchor()` in `worldgen.js`
+  and stood up by `placeStructure()` from `newGame()`. `placeStructure` is the
+  cost-free half of `completeBuild` — the split exists precisely so worldgen can put a
+  finished structure in the world without inventing a fake transaction.
+- **Nothing is charged until confirm**, for buildings and animals alike, so cancelling
+  a placement always costs nothing. `canBuyAnimal()` checks affordability *before*
+  sending the player off to pick a spot; `buyAnimal(state, type, x, y)` is what actually
+  takes the money.
 - Capacity comes from `animalCapacity()` = finished barns x `BARN_CAPACITY` (4).
 - **Tasks carry their footprint** (`task.w` / `task.h`, defaulting to 1x1). That lets
   the task marker outline the whole structure — a queued barn is outlined across all

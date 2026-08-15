@@ -7,7 +7,7 @@
 import { makeRng, hash2d } from '../js/engine/rng.js';
 import { Grid } from '../js/world/grid.js';
 import { GROUND, OBJ } from '../js/world/tiledefs.js';
-import { generateWorld } from '../js/world/worldgen.js';
+import { generateWorld, startingBarnAnchor } from '../js/world/worldgen.js';
 import { findPath, besideBox, insideBox } from '../js/world/pathfind.js';
 import { addTask, cancelTask, prioritizeTask, taskForTile, tillRow, queueTillRow } from '../js/sim/tasks.js';
 import {
@@ -16,9 +16,13 @@ import {
 } from '../js/sim/crops.js';
 import {
   ROTATION_TICKS, STAPLE_SEEDS, ROTATING_COUNT, stockedSeedCrops, buyList,
-  buy, sell, sellAll,
+  buy, sell, sellAll, buyAnimal, canBuyAnimal, canPlaceAnimal,
 } from '../js/sim/shop.js';
 import { ITEMS } from '../js/sim/inventory.js';
+import {
+  ANIMALS, TROUGH_CAPACITY, FEED_COST, FOOD_DURATION, WATER_DURATION, SEEK_THRESHOLD,
+  makeAnimal, collectFrom, isNeglected, fillWaterTrough, fillFeedTrough,
+} from '../js/sim/animals.js';
 import {
   BUILDABLES, canPlaceAt, canAfford, footprint, troughAnchorAt,
   completeBuild, demolish, structureAt, buildingAt, animalCapacity, BARN_CAPACITY,
@@ -141,6 +145,48 @@ test('worldgen leaves the spawn area clear and reachable', () => {
       );
     }
   }
+});
+
+test('a new farm starts with exactly one barn, in front of the farmer', () => {
+  const s = newGame(1234);
+
+  assertEqual(s.buildings.length, 1, 'one barn to start');
+  assertEqual(s.buildings[0].type, 'barn', 'and it is a barn');
+  assertEqual(animalCapacity(s), BARN_CAPACITY, 'so animals are possible from day one');
+
+  const barn = startingBarnAnchor({ x: s.farmer.x, y: s.farmer.y });
+  assertEqual([s.buildings[0].x, s.buildings[0].y], [barn.x, barn.y], 'sited off the spawn');
+
+  // The farmer must not begin standing inside his own barn.
+  assert(!insideBox(barn.x, barn.y, 3, 2, s.farmer.x, s.farmer.y), 'farmer is outside it');
+  assert(s.grid.isWalkable(s.farmer.x, s.farmer.y, 'farmer'), 'and on walkable ground');
+
+  for (const t of footprint('barn', barn.x, barn.y)) {
+    assertEqual(s.grid.getObject(t.x, t.y), OBJ.BUILDING, `footprint tile ${t.x},${t.y} marked`);
+  }
+});
+
+test('the starting barn sits on the map with room for its roof', () => {
+  // The roof draws three rows above the footprint; off the top of the map it
+  // would simply vanish.
+  for (const seed of [1, 2, 3, 99]) {
+    const s = newGame(seed);
+    const b = s.buildings[0];
+    assert(b.y - 3 >= 0, `seed ${seed}: roof would run off the top`);
+    assert(b.x >= 0 && b.x + 2 < s.grid.w, `seed ${seed}: barn hangs off the side`);
+  }
+});
+
+test('the starting barn can be demolished like any other', () => {
+  const s = newGame(4321);
+  const b = s.buildings[0];
+  s.inventory = {};
+
+  const res = demolish(s, b.x + 1, b.y + 1);
+  assert(res.ok, 'it comes down');
+  assertEqual(s.buildings.length, 0, 'and is gone');
+  assertEqual(animalCapacity(s), 0, 'taking its capacity with it');
+  assertEqual(res.refund, { wood: 25, stone: 10 }, 'refunding half, same as any barn');
 });
 
 test('worldgen actually scatters obstacles', () => {
@@ -830,11 +876,19 @@ test('a crop ripening while away spoils only after its 48 hours', () => {
 
 // --- construction -------------------------------------------------------
 
-/** A cleared farm with plenty of materials. */
+/**
+ * A blank farm with plenty of materials — no obstacles, and crucially none of
+ * the starting barn, so tests about buildings control their own world. Clearing
+ * the object grid alone would strip the barn's tiles but leave its record
+ * behind, which is worse than either extreme.
+ */
 function farmWithMaterials(seed = 500) {
   const s = newGame(seed);
   s.grid.ground.fill(GROUND.GRASS);
   s.grid.objects.fill(OBJ.NONE);
+  s.buildings = [];
+  s.troughs = {};
+  s.animals = [];
   s.inventory = { wood: 500, stone: 500 };
   return s;
 }
@@ -1249,7 +1303,10 @@ test('the auto tool never demolishes anything', () => {
     s.grid.objects.fill(OBJ.NONE);
     s.troughs = {};
     completeBuild(s, { buildKind: kind, x: 4, y: 4 });
-    assertEqual(taskForTile(s, 4, 4, 'auto'), null, `auto must leave a ${kind} alone`);
+    const t = taskForTile(s, 4, 4, 'auto');
+    // Auto may offer something useful here (filling a trough, say) — what it
+    // must never do is tear the structure down.
+    assert(t === null || t.type !== 'demolish', `auto must not demolish a ${kind}`);
   }
 });
 
@@ -1259,6 +1316,240 @@ test('natural obstacles still clear normally, not as demolition', () => {
   assertEqual(taskForTile(s, 4, 4, 'clear').type, 'chop', 'a tree is chopped, not demolished');
   s.grid.setObject(5, 4, OBJ.ROCK);
   assertEqual(taskForTile(s, 5, 4, 'clear').type, 'clear', 'a rock is cleared');
+});
+
+// --- animals ------------------------------------------------------------
+
+/** A cleared farm with a barn, both troughs filled, and one animal. */
+function farmWithAnimal(type = 'chicken', seed = 800) {
+  const s = farmWithMaterials(seed);
+  completeBuild(s, { buildKind: 'barn', x: 20, y: 2 });
+  completeBuild(s, { buildKind: 'waterTrough', x: 4, y: 4 });
+  completeBuild(s, { buildKind: 'feedTrough', x: 4, y: 6 });
+  s.troughs['4,4'].level = TROUGH_CAPACITY;
+  s.troughs['4,6'].level = TROUGH_CAPACITY;
+  const animal = makeAnimal(s, type, 6, 5);
+  return { s, animal };
+}
+
+test('animals never die, no matter how long they are neglected', () => {
+  // The rule the whole system is built around. A week of nothing must leave the
+  // animal standing there, just unproductive.
+  const { s, animal } = farmWithAnimal('cow', 801);
+  s.troughs = {};                       // no food, no water, anywhere
+
+  for (let i = 0; i < 7 * 24 * 60 * 60; i++) tick(s);
+
+  assertEqual(s.animals.length, 1, 'the cow is still here after a week');
+  assert(s.animals[0] === animal, 'and it is the same animal');
+  assert(isNeglected(animal), 'it is hungry and thirsty');
+  assert(!('health' in animal), 'there should be no health value to drain');
+});
+
+test('neglect pauses production without losing progress', () => {
+  const { s, animal } = farmWithAnimal('chicken', 802);
+  s.troughs = {};
+  // Run the rations down early, so it stalls well before it would be ready
+  // (a fed chicken lays in 20 minutes, long before it gets thirsty).
+  animal.food = 100;
+  animal.water = 100;
+
+  for (let i = 0; i < 100; i++) tick(s);
+  const stalled = animal.progress;
+  assert(stalled > 0, 'it produced while it still had rations');
+  assert(isNeglected(animal), 'and is now going without');
+
+  for (let i = 0; i < ANIMALS.chicken.produceTicks * 3; i++) tick(s);
+  assertEqual(animal.progress, stalled, 'progress is frozen while neglected');
+  assert(!animal.ready, 'and it never becomes ready');
+});
+
+test('feeding a stalled animal resumes production from where it stopped', () => {
+  const { s, animal } = farmWithAnimal('chicken', 803);
+  s.troughs = {};
+  animal.food = 50;
+  animal.water = 50;
+
+  for (let i = 0; i < 200; i++) tick(s);
+  const stalled = animal.progress;
+  assert(isNeglected(animal), 'stalled to begin with');
+
+  animal.food = FOOD_DURATION;
+  animal.water = WATER_DURATION;
+  for (let i = 0; i < 200; i++) tick(s);
+
+  assert(animal.progress > stalled, 'it picks up again');
+  assertEqual(animal.progress, stalled + 200, 'exactly where it left off, nothing lost');
+});
+
+test('a fed and watered animal becomes ready and can be collected', () => {
+  const { s, animal } = farmWithAnimal('chicken', 804);
+  animal.x = 5; animal.y = 5;
+
+  for (let i = 0; i < ANIMALS.chicken.produceTicks + 10; i++) tick(s);
+  assert(animal.ready, 'the chicken should be ready');
+
+  const gained = collectFrom(s, animal);
+  assertEqual(gained, { egg: 1 }, 'collecting yields an egg');
+  assertEqual(s.inventory.egg, 1, 'and it lands in the bag');
+  assert(!animal.ready, 'it starts over');
+  assertEqual(animal.progress, 0, 'from zero');
+});
+
+test('animals drink and eat from troughs, draining them', () => {
+  const { s, animal } = farmWithAnimal('cow', 805);
+  animal.x = 5; animal.y = 4;          // right next to the water trough
+  animal.water = 1;                     // parched
+
+  const before = s.troughs['4,4'].level;
+  for (let i = 0; i < 40; i++) tick(s);
+
+  assert(s.troughs['4,4'].level < before, 'the trough was drained');
+  assert(animal.water > SEEK_THRESHOLD, 'and the cow topped up');
+});
+
+test('an animal walks to a trough it can reach', () => {
+  const { s, animal } = farmWithAnimal('cow', 806);
+  animal.x = 12; animal.y = 12;        // some way off
+  animal.water = 1;
+
+  for (let i = 0; i < 600; i++) tick(s);
+  assert(animal.water > SEEK_THRESHOLD, 'it found its way to water');
+});
+
+test('a fenced-in animal cannot reach an outside trough, but still survives', () => {
+  const { s, animal } = farmWithAnimal('cow', 807);
+  // Wall the cow into a small pen well away from the troughs.
+  for (let x = 10; x <= 14; x++) { s.grid.setObject(x, 10, OBJ.FENCE); s.grid.setObject(x, 14, OBJ.FENCE); }
+  for (let y = 10; y <= 14; y++) { s.grid.setObject(10, y, OBJ.FENCE); s.grid.setObject(14, y, OBJ.FENCE); }
+  animal.x = 12; animal.y = 12;
+  animal.water = 1; animal.food = 1;
+
+  for (let i = 0; i < 5000; i++) tick(s);
+
+  assert(isNeglected(animal), 'it cannot reach the troughs');
+  assertEqual(s.animals.length, 1, 'but it is emphatically still alive');
+  assert(animal.x > 10 && animal.x < 14 && animal.y > 10 && animal.y < 14,
+    'and it stayed inside the pen');
+});
+
+test('a gate keeps an animal in while letting the farmer through', () => {
+  const { s, animal } = farmWithAnimal('cow', 808);
+  for (let x = 10; x <= 14; x++) { s.grid.setObject(x, 10, OBJ.FENCE); s.grid.setObject(x, 14, OBJ.FENCE); }
+  for (let y = 10; y <= 14; y++) { s.grid.setObject(10, y, OBJ.FENCE); s.grid.setObject(14, y, OBJ.FENCE); }
+  s.grid.setObject(10, 12, OBJ.GATE);
+  animal.x = 12; animal.y = 12;
+  animal.water = 1;
+
+  for (let i = 0; i < 3000; i++) tick(s);
+  assert(animal.x > 10 && animal.x < 14, 'the gate held the cow in');
+  assert(findPath(s.grid, { x: 2, y: 12 }, { x: 12, y: 12 }, { actor: 'farmer' }) !== null,
+    'while the farmer can still walk in to tend it');
+});
+
+test('filling troughs: water is free, feed costs the cheapest crop you have', () => {
+  const { s } = farmWithAnimal('chicken', 809);
+  s.troughs['4,4'].level = 0;
+  s.troughs['4,6'].level = 0;
+  s.inventory = { carrot: 10, eggplant: 10 };   // carrot is the cheaper one
+
+  assert(fillWaterTrough(s, 4, 4).ok, 'water always works');
+  assertEqual(s.troughs['4,4'].level, TROUGH_CAPACITY, 'and fills it up');
+
+  const fed = fillFeedTrough(s, 4, 6);
+  assert(fed.ok, 'feeding should work');
+  assertEqual(fed.crop, 'carrot', 'it reaches for the cheapest crop');
+  assertEqual(s.inventory.carrot, 10 - FEED_COST, 'which is consumed');
+  assertEqual(s.inventory.eggplant, 10, 'and the pricey crop is left alone');
+});
+
+test('feeding is refused when there is nothing to spare', () => {
+  const { s } = farmWithAnimal('chicken', 810);
+  s.inventory = { carrot: FEED_COST - 1 };
+  const res = fillFeedTrough(s, 4, 6);
+  assert(!res.ok, 'cannot feed with less than a full helping');
+  assertEqual(s.inventory.carrot, FEED_COST - 1, 'and nothing is taken');
+});
+
+test('buying livestock is gated on barn capacity', () => {
+  const s = farmWithMaterials(811);
+  s.money = 10000;
+
+  assert(!buyAnimal(s, 'chicken', 5, 5).ok, 'no barn, no animals');
+
+  completeBuild(s, { buildKind: 'barn', x: 20, y: 2 });
+  for (let i = 0; i < BARN_CAPACITY; i++) {
+    assert(buyAnimal(s, 'chicken', 5 + i, 5).ok, `chicken ${i + 1} fits`);
+  }
+  const overflow = buyAnimal(s, 'chicken', 5, 6);
+  assert(!overflow.ok, 'the barn is full');
+  assertEqual(s.animals.length, BARN_CAPACITY, 'and no extra animal appeared');
+
+  completeBuild(s, { buildKind: 'barn', x: 20, y: 6 });
+  assert(buyAnimal(s, 'cow', 5, 7).ok, 'a second barn makes room');
+});
+
+test('buying an animal costs money and puts it on the map', () => {
+  const s = farmWithMaterials(812);
+  s.money = 1000;
+  completeBuild(s, { buildKind: 'barn', x: 20, y: 2 });
+
+  const res = buyAnimal(s, 'cow', 7, 9);
+  assert(res.ok, 'purchase should succeed');
+  assertEqual(s.money, 1000 - ANIMALS.cow.price, 'money spent');
+  assertEqual(s.animals.length, 1, 'and a cow exists');
+  assertEqual([res.animal.x, res.animal.y], [7, 9], 'exactly where the player put it');
+});
+
+test('an animal is placed where the player says, and refused where it cannot stand', () => {
+  const s = farmWithMaterials(815);
+  s.money = 1000;
+  completeBuild(s, { buildKind: 'barn', x: 20, y: 2 });
+  s.grid.setObject(6, 6, OBJ.FENCE);
+
+  assert(!canPlaceAnimal(s, 6, 6), 'not on a fence');
+  assert(!canPlaceAnimal(s, 20, 2), 'not inside a barn');
+  assert(!canPlaceAnimal(s, -1, 5), 'not off the map');
+  assert(canPlaceAnimal(s, 8, 8), 'open ground is fine');
+
+  const bad = buyAnimal(s, 'cow', 6, 6);
+  assert(!bad.ok, 'buying onto a blocked tile is refused');
+  assertEqual(s.money, 1000, 'and costs nothing');
+  assertEqual(s.animals.length, 0, 'with no animal created');
+});
+
+test('checking affordability does not charge for the animal', () => {
+  // The shop asks canBuyAnimal() before sending the player off to pick a spot;
+  // backing out of that must cost nothing.
+  const s = farmWithMaterials(816);
+  s.money = 1000;
+  completeBuild(s, { buildKind: 'barn', x: 20, y: 2 });
+
+  assert(canBuyAnimal(s, 'cow').ok, 'affordable');
+  assertEqual(s.money, 1000, 'but no money has moved');
+  assertEqual(s.animals.length, 0, 'and no animal exists yet');
+});
+
+test('animals survive a save and reload mid-production', () => {
+  const { s } = farmWithAnimal('cow', 813);
+  for (let i = 0; i < 500; i++) tick(s);
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  for (let i = 0; i < 500; i++) { tick(s); tick(back); }
+
+  assertEqual(serialize(back), serialize(s), 'animals must replay identically');
+});
+
+test('production while away matches production while watching', () => {
+  // Offline catch-up is the whole premise; animals must obey it too.
+  const a = farmWithAnimal('chicken', 814);
+  const b = farmWithAnimal('chicken', 814);
+  b.s.lastTickTime = a.s.lastTickTime;
+
+  for (let i = 0; i < ANIMALS.chicken.produceTicks * 2; i++) tick(a.s);
+  for (let i = 0; i < ANIMALS.chicken.produceTicks * 2; i++) tick(b.s);
+
+  assertEqual(serialize(b.s), serialize(a.s), 'catch-up must match live play');
 });
 
 // --- shop ---------------------------------------------------------------

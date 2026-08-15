@@ -2,7 +2,9 @@
 
 import { COLORS } from '../config.js';
 import { drawGround, drawCrops, drawObjects } from './tilerender.js';
-import { drawFarmer, drawTaskMarkers, drawTillAnchor, drawPlacementGhost } from './entityrender.js';
+import {
+  drawFarmer, drawAnimals, drawTaskMarkers, drawTillAnchor, drawPlacementGhost,
+} from './entityrender.js';
 
 export class Renderer {
   constructor(canvas, sheets, camera) {
@@ -50,6 +52,7 @@ export class Renderer {
     drawTaskMarkers(ctx, state, view);
     drawCrops(ctx, this.sheets, state, view);
     drawObjects(ctx, this.sheets, state, view);
+    drawAnimals(ctx, this.sheets, state, alpha);
     drawFarmer(ctx, this.sheets, state, alpha);
     if (overlay?.tillAnchor) drawTillAnchor(ctx, overlay.tillAnchor, state.tickCount);
     if (overlay?.pending) drawPlacementGhost(ctx, this.sheets, overlay.pending);

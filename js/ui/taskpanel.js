@@ -14,12 +14,14 @@ export function initTaskPanel(state) {
 
   let open = false;
   const setOpen = (v) => {
+    if (open === v) return;
     open = v;
     root.classList.toggle('open', open);
     toggle.setAttribute('aria-expanded', String(open));
-    if (open) emit('panel:open', 'tasks');
+    emit(open ? 'panel:open' : 'panel:close', 'tasks');
   };
-  on('panel:open', (who) => { if (who !== 'tasks' && open) setOpen(false); });
+  on('panel:open', (who) => { if (who !== 'tasks') setOpen(false); });
+  on('panel:dismiss', () => setOpen(false));
   toggle.addEventListener('click', () => setOpen(!open));
   document.getElementById('task-close').addEventListener('click', () => setOpen(false));
 

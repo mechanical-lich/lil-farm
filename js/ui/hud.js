@@ -13,11 +13,13 @@ export function initHud(state) {
 
   let invOpen = false;
   const setInvOpen = (v) => {
+    if (invOpen === v) return;
     invOpen = v;
     invPanel.classList.toggle('open', invOpen);
-    if (invOpen) emit('panel:open', 'bag');
+    emit(invOpen ? 'panel:open' : 'panel:close', 'bag');
   };
-  on('panel:open', (who) => { if (who !== 'bag' && invOpen) setInvOpen(false); });
+  on('panel:open', (who) => { if (who !== 'bag') setInvOpen(false); });
+  on('panel:dismiss', () => setInvOpen(false));
   invBtn.addEventListener('click', () => { setInvOpen(!invOpen); renderInventory(); });
   document.getElementById('inv-close').addEventListener('click', () => setInvOpen(false));
 

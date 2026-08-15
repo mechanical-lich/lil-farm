@@ -6,10 +6,12 @@
 import { on, emit } from '../engine/events.js';
 import {
   buyList, sellList, buy, sell, sellAll, ticksUntilRotation,
+  animalList, canBuyAnimal,
 } from '../sim/shop.js';
+import { animalCapacity } from '../sim/build.js';
 import { countItem } from '../sim/inventory.js';
 
-export function initShopPanel(state, { onMessage } = {}) {
+export function initShopPanel(state, { onMessage, onPlaceAnimal } = {}) {
   const panel = document.getElementById('shop-panel');
   const list = document.getElementById('shop-list');
   const tabs = document.getElementById('shop-tabs');
@@ -20,6 +22,7 @@ export function initShopPanel(state, { onMessage } = {}) {
   let open = false;
 
   const setOpen = (v) => {
+    if (open === v) return;
     open = v;
     panel.classList.toggle('open', open);
     if (open) {
@@ -27,9 +30,12 @@ export function initShopPanel(state, { onMessage } = {}) {
       // may be up at a time or they hide each other.
       emit('panel:open', 'shop');
       render();
+    } else {
+      emit('panel:close', 'shop');
     }
   };
-  on('panel:open', (who) => { if (who !== 'shop' && open) setOpen(false); });
+  on('panel:open', (who) => { if (who !== 'shop') setOpen(false); });
+  on('panel:dismiss', () => setOpen(false));
 
   openBtn.addEventListener('click', () => setOpen(!open));
   document.getElementById('shop-close').addEventListener('click', () => setOpen(false));
@@ -48,9 +54,20 @@ export function initShopPanel(state, { onMessage } = {}) {
     const { act, id } = btn.dataset;
     const qty = btn.dataset.qty === 'all' ? null : Number(btn.dataset.qty);
 
-    const result = act === 'buy'
-      ? buy(state, id, qty)
-      : (qty === null ? sellAll(state, id) : sell(state, id, qty));
+    // Livestock doesn't complete here: the shop closes and hands off to the
+    // placement flow so the player chooses where the animal lives. Nothing is
+    // charged until they confirm a spot.
+    if (act === 'animal') {
+      const allowed = canBuyAnimal(state, id);
+      if (!allowed.ok) { onMessage?.(allowed.reason, 'warn'); return; }
+      setOpen(false);
+      onPlaceAnimal?.(id);
+      return;
+    }
+
+    let result;
+    if (act === 'buy') result = buy(state, id, qty);
+    else result = qty === null ? sellAll(state, id) : sell(state, id, qty);
 
     if (!result.ok) {
       onMessage?.(result.reason, 'warn');
@@ -69,10 +86,32 @@ export function initShopPanel(state, { onMessage } = {}) {
       btn.classList.toggle('on', btn.dataset.tab === tab);
     }
 
-    list.innerHTML = tab === 'buy' ? renderBuy() : renderSell();
-    note.textContent = tab === 'buy'
-      ? `New seeds in ${formatDuration(ticksUntilRotation(state))} · $${state.money}`
-      : `$${state.money}`;
+    list.innerHTML = tab === 'buy' ? renderBuy()
+      : tab === 'animals' ? renderAnimals()
+        : renderSell();
+
+    if (tab === 'buy') {
+      note.textContent = `New seeds in ${formatDuration(ticksUntilRotation(state))} · $${state.money}`;
+    } else if (tab === 'animals') {
+      const cap = animalCapacity(state);
+      note.textContent = cap === 0
+        ? 'Build a barn to keep animals · $' + state.money
+        : `Space for ${state.animals.length}/${cap} animals · $${state.money}`;
+    } else {
+      note.textContent = `$${state.money}`;
+    }
+  }
+
+  function renderAnimals() {
+    const rows = animalList(state).map((row) => `
+      <li>
+        <span class="shop-name">${esc(row.name)}
+          <em>gives ${esc(row.produces)}${row.owned ? ` · have ${row.owned}` : ''}</em>
+        </span>
+        <span class="shop-price">$${row.price}</span>
+        <button data-act="animal" data-id="${row.type}" ${row.affordable ? '' : 'disabled'}>Buy</button>
+      </li>`);
+    return rows.join('');
   }
 
   function renderBuy() {

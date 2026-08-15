@@ -12,6 +12,9 @@ import { addTask, taskForTile, taskLabel, queueTillRow } from './sim/tasks.js';
 import { itemName, addItem } from './sim/inventory.js';
 import { canAfford, buildDef, canPlaceAt } from './sim/build.js';
 import { drawBuilding } from './render/tilerender.js';
+import { drawAnimalSprite } from './render/entityrender.js';
+import { animalDef } from './sim/animals.js';
+import { buyAnimal, canPlaceAnimal } from './sim/shop.js';
 import { attachInput } from './ui/input.js';
 import { initToolbar, TOOLS } from './ui/toolbar.js';
 import { initTaskPanel } from './ui/taskpanel.js';
@@ -60,7 +63,16 @@ async function boot() {
   initToasts();
   const hud = initHud(state);
   initTaskPanel(state);
-  initShopPanel(state, { onMessage: (msg, kind) => toast(msg, kind) });
+  initShopPanel(state, {
+    onMessage: (msg, kind) => toast(msg, kind),
+    onPlaceAnimal: (type) => {
+      // Start the ghost on the farmer, so something is visible immediately and
+      // the player can see the animal before choosing where it goes.
+      beginPlacement(animalPlacement(state, type), state.farmer.x, state.farmer.y);
+      camera.centerOnTile(state.farmer.x, state.farmer.y);
+      toast(`Tap where your ${type} should go`);
+    },
+  });
   wireToastFeedback();
 
   const toolbar = initToolbar(state, {
@@ -73,7 +85,8 @@ async function boot() {
     },
   });
   const paintMode = wirePaintToggle();
-  wirePlacementButtons(state);
+  wirePlacementButtons();
+  wirePanelTracking();
   const autosaver = new Autosaver(() => serialize(state));
   wireLifecycle(autosaver, renderer);
 
@@ -160,14 +173,41 @@ function handleTillTap(state, x, y) {
  */
 const placement = { pending: null };
 
-function beginOrMovePlacement(state, kind, x, y) {
-  const def = buildDef(kind);
-  const [w, h] = def.size;
-  placement.pending = {
-    kind, x, y, w, h,
-    valid: canPlaceAt(state, kind, x, y),
-    draw: (ctx, sheets, at) => drawBuilding(ctx, sheets, { ...at, type: kind }),
-  };
+/**
+ * Which sliding panel is up, if any. Tracked here so a tap on the map can
+ * dismiss it instead of acting on the tile underneath.
+ */
+let openPanel = null;
+
+function wirePanelTracking() {
+  events.on('panel:open', (name) => {
+    openPanel = name;
+    // Opening a panel abandons any half-finished siting or row selection, so
+    // nothing is left armed behind it.
+    tillSelection.tillAnchor = null;
+    clearPlacement();
+  });
+  events.on('panel:close', (name) => {
+    if (openPanel === name) openPanel = null;
+  });
+}
+
+/**
+ * Starts siting something. The spec supplies its own footprint, validity rule,
+ * ghost drawing and what to do on confirm, so the same flow serves a barn (a
+ * queued build task) and a livestock purchase (an immediate transaction).
+ */
+function beginPlacement(spec, x, y) {
+  placement.pending = { ...spec, x, y, valid: spec.validate(x, y) };
+  renderConfirmBar();
+}
+
+function movePlacement(x, y) {
+  const p = placement.pending;
+  if (!p) return;
+  p.x = x;
+  p.y = y;
+  p.valid = p.validate(x, y);
   renderConfirmBar();
 }
 
@@ -179,20 +219,61 @@ function clearPlacement() {
 function renderConfirmBar() {
   const bar = document.getElementById('confirm-bar');
   const ok = document.getElementById('confirm-place');
-  bar.classList.toggle('open', placement.pending !== null);
-  if (placement.pending) ok.disabled = !placement.pending.valid;
+  const p = placement.pending;
+  bar.classList.toggle('open', p !== null);
+  if (p) {
+    ok.disabled = !p.valid;
+    ok.textContent = p.confirmLabel || '✓ Place here';
+  }
 }
 
-function wirePlacementButtons(state) {
+/** Siting a structure: confirming queues a build task for the farmer. */
+function buildingPlacement(state, kind) {
+  const def = buildDef(kind);
+  return {
+    w: def.size[0], h: def.size[1],
+    confirmLabel: `✓ Build ${def.name.toLowerCase()} here`,
+    validate: (x, y) => canPlaceAt(state, kind, x, y),
+    draw: (ctx, sheets, at) => drawBuilding(ctx, sheets, { ...at, type: kind }),
+    confirm: (x, y) => {
+      const spec = taskForTile(state, x, y, 'build', { buildKind: kind });
+      if (!spec) return { ok: false, reason: "that won't fit there" };
+      addTask(state, spec);
+      return { ok: true, message: `Queued: ${def.name}` };
+    },
+  };
+}
+
+/**
+ * Siting a livestock purchase. Money changes hands only on confirm, so backing
+ * out costs nothing — and the player gets to say where the animal lives rather
+ * than having it dumped wherever the farmer happened to be standing.
+ */
+function animalPlacement(state, type) {
+  const def = animalDef(type);
+  return {
+    w: 1, h: 1,
+    confirmLabel: `✓ Put ${def.name.toLowerCase()} here`,
+    validate: (x, y) => canPlaceAnimal(state, x, y),
+    draw: (ctx, sheets, at) => drawAnimalSprite(ctx, sheets, type, at),
+    confirm: (x, y) => {
+      const res = buyAnimal(state, type, x, y);
+      return res.ok
+        ? { ok: true, message: `${def.name} bought for $${res.spent}` }
+        : { ok: false, reason: res.reason };
+    },
+  };
+}
+
+function wirePlacementButtons() {
   document.getElementById('cancel-place').addEventListener('click', clearPlacement);
   document.getElementById('confirm-place').addEventListener('click', () => {
     const p = placement.pending;
     if (!p || !p.valid) return;
 
-    const spec = taskForTile(state, p.x, p.y, 'build', { buildKind: p.kind });
-    if (!spec) { toast("That won't fit there", 'warn'); return; }
-    addTask(state, spec);
-    toast(`Queued: ${buildDef(p.kind).name}`);
+    const res = p.confirm(p.x, p.y);
+    if (!res.ok) { toast(res.reason, 'warn'); return; }
+    toast(res.message);
     clearPlacement();
   });
 }
@@ -200,6 +281,21 @@ function wirePlacementButtons(state) {
 /** Queues the action the current tool implies for a tile, if any. */
 function queueTileTask(state, toolbar, x, y, { announce }) {
   const tool = toolbar.getTool();
+
+  // A panel only covers part of the screen. Tapping the map while one is open
+  // dismisses it rather than acting on the tile — otherwise a stray tap on the
+  // visible strip does farm work the player never meant to queue.
+  if (openPanel) {
+    if (announce) events.emit('panel:dismiss');
+    return;
+  }
+
+  // While something is being sited, taps reposition the ghost rather than doing
+  // whatever the current tool would normally do.
+  if (placement.pending) {
+    if (announce) movePlacement(x, y);
+    return;
+  }
 
   if (tool === 'till') {
     // Painting is meaningless here; the row gesture replaces it entirely.
@@ -218,7 +314,7 @@ function queueTileTask(state, toolbar, x, y, { announce }) {
     }
     // Buildings are sited with a preview; everything else drops on the tap.
     if (buildDef(kind).building) {
-      if (announce) beginOrMovePlacement(state, kind, x, y);
+      if (announce) beginPlacement(buildingPlacement(state, kind), x, y);
       return;
     }
   }
@@ -283,6 +379,8 @@ function wireToastFeedback() {
   });
 
   events.on('task:failed', ({ reason }) => toast(`Couldn't finish: ${reason}`, 'warn'));
+
+  events.on('animal:ready', ({ type }) => toast(`Your ${type} has something for you`));
 
   // The design doc calls for unreachable tasks to be retried later rather than
   // silently dropped; say so, or the player thinks the farmer is stuck.

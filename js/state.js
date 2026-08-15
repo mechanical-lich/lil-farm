@@ -3,7 +3,8 @@
 
 import { SAVE_VERSION, MAP_W, MAP_H, START_MONEY, START_INVENTORY } from './config.js';
 import { Grid } from './world/grid.js';
-import { generateWorld } from './world/worldgen.js';
+import { generateWorld, startingBarnAnchor } from './world/worldgen.js';
+import { placeStructure } from './sim/build.js';
 import { makeRng } from './engine/rng.js';
 
 /** @returns {object} a fresh game */
@@ -11,7 +12,7 @@ export function newGame(seed = (Date.now() ^ 0x5f3759df) >>> 0) {
   const rng = makeRng(seed);
   const { grid, spawn } = generateWorld(rng);
 
-  return {
+  const state = {
     version: SAVE_VERSION,
     seed,
     rng,
@@ -21,6 +22,7 @@ export function newGame(seed = (Date.now() ^ 0x5f3759df) >>> 0) {
     grid,
     farmer: { x: spawn.x, y: spawn.y, dir: 'down', taskId: null, path: [], trail: [], work: 0 },
     animals: [],
+    nextAnimalId: 1,
     crops: {},
     wetUntil: {},    // tileKey -> tick at which watered soil dries out
     tillDir: {},     // tileKey -> 'h' | 'v', the axis of the row it was tilled in
@@ -32,6 +34,14 @@ export function newGame(seed = (Date.now() ^ 0x5f3759df) >>> 0) {
     // See TESTING in config.js — a real farm starts with just a few seeds.
     inventory: { ...START_INVENTORY },
   };
+
+  // Every farm starts with one barn. It gives the opening view a centre to sit
+  // around, and means keeping animals is something the player can work toward
+  // from day one rather than only after saving 50 wood and 20 stone.
+  const barn = startingBarnAnchor(spawn);
+  placeStructure(state, 'barn', barn.x, barn.y);
+
+  return state;
 }
 
 /** Plain-JSON snapshot for localStorage. */
@@ -46,6 +56,7 @@ export function serialize(state) {
     map: state.grid.toJSON(),
     farmer: state.farmer,
     animals: state.animals,
+    nextAnimalId: state.nextAnimalId,
     crops: state.crops,
     wetUntil: state.wetUntil,
     tillDir: state.tillDir,
@@ -73,6 +84,7 @@ export function deserialize(data) {
     grid: Grid.fromJSON(data.map || { w: MAP_W, h: MAP_H, ground: [], objects: [] }),
     farmer: data.farmer,
     animals: data.animals || [],
+    nextAnimalId: data.nextAnimalId || 1,
     crops: data.crops || {},
     wetUntil: data.wetUntil || {},
     tillDir: data.tillDir || {},

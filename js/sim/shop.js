@@ -10,6 +10,8 @@ import { makeRng } from '../engine/rng.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 import { CROPS, seedIdFor, isSeedId, cropFromSeedId } from './crops.js';
 import { ITEMS, addItem, removeItem, countItem, itemName } from './inventory.js';
+import { ANIMALS, animalDef, makeAnimal } from './animals.js';
+import { animalCapacity } from './build.js';
 
 /** How long one shop rotation lasts. Six hours: slower than a play session, so
  *  the selection feels like it changes between visits rather than under you. */
@@ -102,6 +104,63 @@ export function sellList(state) {
 function growLabel(ticks) {
   const mins = Math.round(ticks / 60);
   return mins >= 60 ? `${(mins / 60).toFixed(mins % 60 ? 1 : 0)} hr` : `${mins} min`;
+}
+
+/**
+ * Livestock. Sold separately from items because buying one puts an animal in
+ * the world rather than something in the bag, and it's gated on barn space.
+ * @returns {{ok: boolean, reason?: string, spent?: number, animal?: object}}
+ */
+/**
+ * Whether a purchase could go ahead — checked before the player picks a spot,
+ * so we never send them off to choose a home for an animal they can't afford.
+ * @returns {{ok: boolean, reason?: string}}
+ */
+export function canBuyAnimal(state, type) {
+  const def = animalDef(type);
+  if (!def) return { ok: false, reason: 'no such animal' };
+
+  const capacity = animalCapacity(state);
+  if (capacity === 0) return { ok: false, reason: 'build a barn first' };
+  if (state.animals.length >= capacity) return { ok: false, reason: 'your barns are full' };
+  if (state.money < def.price) return { ok: false, reason: 'not enough money' };
+  return { ok: true };
+}
+
+/** Somewhere an animal could actually stand. */
+export function canPlaceAnimal(state, x, y) {
+  return state.grid.inBounds(x, y) && state.grid.isWalkable(x, y, 'animal');
+}
+
+/**
+ * Completes a purchase at a spot the player chose. Money is only taken here, so
+ * backing out of the placement costs nothing — the same rule building follows.
+ * @returns {{ok: boolean, reason?: string, spent?: number, animal?: object}}
+ */
+export function buyAnimal(state, type, x, y) {
+  const allowed = canBuyAnimal(state, type);
+  if (!allowed.ok) return allowed;
+  if (!canPlaceAnimal(state, x, y)) return { ok: false, reason: "it can't stand there" };
+
+  const def = animalDef(type);
+  state.money -= def.price;
+  const animal = makeAnimal(state, type, x, y);
+  emitUnlessSuspended('money:changed', { delta: -def.price });
+  emitUnlessSuspended('animal:bought', { type });
+  return { ok: true, spent: def.price, animal };
+}
+
+/** Display rows for the livestock tab. */
+export function animalList(state) {
+  const capacity = animalCapacity(state);
+  return Object.entries(ANIMALS).map(([type, def]) => ({
+    type,
+    name: def.name,
+    price: def.price,
+    produces: itemName(def.produces),
+    owned: state.animals.filter((a) => a.type === type).length,
+    affordable: state.money >= def.price && state.animals.length < capacity,
+  }));
 }
 
 /**
