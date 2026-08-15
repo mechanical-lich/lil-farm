@@ -16,6 +16,7 @@ export const TASK_TYPES = {
   chop: { label: 'Chop', verb: 'Chopping' },
   untill: { label: 'Clear', verb: 'Clearing' },
   demolish: { label: 'Remove', verb: 'Removing' },
+  pickup: { label: 'Pick up', verb: 'Picking up' },
   fill: { label: 'Fill', verb: 'Filling' },
   collect: { label: 'Collect', verb: 'Collecting' },
   till: { label: 'Till', verb: 'Tilling' },

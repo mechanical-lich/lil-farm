@@ -14,14 +14,6 @@ const migrations = {
   // 1: (data) => { data.newField = default; data.version = 2; return data; },
 };
 
-export function hasSave() {
-  try {
-    return localStorage.getItem(SAVE_KEY) !== null;
-  } catch {
-    return false;
-  }
-}
-
 export function loadSave() {
   let raw;
   try {

@@ -10,14 +10,6 @@ export const GROUND = {
   TILLED_WET: 4,    // ploughed and watered; dries back to TILLED over time
 };
 
-export const GROUND_DEFS = {
-  [GROUND.GRASS]: { name: 'grass', walkable: true },
-  [GROUND.DIRT]: { name: 'dirt', walkable: true },
-  [GROUND.TILLED]: { name: 'tilled soil', walkable: true },
-  [GROUND.ROAD]: { name: 'road', walkable: true },
-  [GROUND.TILLED_WET]: { name: 'watered soil', walkable: true },
-};
-
 export function isTilled(groundId) {
   return groundId === GROUND.TILLED || groundId === GROUND.TILLED_WET;
 }
@@ -37,6 +29,7 @@ export const OBJ = {
   TROUGH_FOOD: 10,
   BARREL: 11,
   BUILDING: 12,
+  EGG: 13,
 };
 
 export const OBJ_DEFS = {
@@ -57,12 +50,14 @@ export const OBJ_DEFS = {
   // walkability and tap handling work without knowing about buildings. The
   // building itself lives in state.buildings.
   [OBJ.BUILDING]: { name: 'building', blocks: true },
+  // Chickens lay on the ground rather than being collected from, so an egg is
+  // a thing lying in the grass. It's `clearable`, which means the existing
+  // clear/pick-up pipeline handles it with no special cases — and being
+  // non-blocking, animals and the farmer walk straight over it.
+  [OBJ.EGG]: {
+    name: 'egg', blocks: false, clearable: true,
+    task: 'pickup', work: 3, yields: { egg: 1 },
+  },
 };
 
 export function objDef(id) { return OBJ_DEFS[id] || OBJ_DEFS[OBJ.NONE]; }
-export function groundDef(id) { return GROUND_DEFS[id] || GROUND_DEFS[GROUND.GRASS]; }
-
-/** Things the player can queue a "clear this" task on. */
-export function isClearable(objId) {
-  return !!objDef(objId).clearable;
-}

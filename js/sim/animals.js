@@ -12,13 +12,21 @@
 // not the farmer.
 
 import { findPath, besideBox } from '../world/pathfind.js';
+import { OBJ } from '../world/tiledefs.js';
 import { addItem, countItem, removeItem, ITEMS } from './inventory.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 
+/**
+ * `laysOnGround` is the difference between the two: a chicken with food, water
+ * and time drops an egg where it stands, to be picked up like anything else
+ * lying in the grass. A cow is milked directly, which is what you'd expect of
+ * a cow. Both still need feeding to make any progress at all.
+ */
 export const ANIMALS = {
   chicken: {
     name: 'Chicken', price: 120, sprite: 'chicken',
     produces: 'egg', produceTicks: 1200,          // 20 min
+    laysOnGround: true,
   },
   cow: {
     name: 'Cow', price: 500, sprite: 'cow',
@@ -53,14 +61,11 @@ export function makeAnimal(state, type, x, y) {
     water: WATER_DURATION,
     progress: 0,
     ready: false,
+    facing: 'right',
     path: [],
   };
   state.animals.push(animal);
   return animal;
-}
-
-export function animalAt(state, x, y) {
-  return state.animals.find((a) => a.x === x && a.y === y) || null;
 }
 
 export function isHungry(a) { return a.food <= 0; }
@@ -68,13 +73,6 @@ export function isThirsty(a) { return a.water <= 0; }
 
 /** True when an animal is missing something and so isn't producing. */
 export function isNeglected(a) { return isHungry(a) || isThirsty(a); }
-
-/** Ticks of production still owed, or null once it's ready to collect. */
-export function produceRemaining(a) {
-  if (a.ready) return null;
-  const def = animalDef(a.type);
-  return def ? Math.max(0, def.produceTicks - a.progress) : null;
-}
 
 /** Collects milk or eggs. Resets the animal to start producing again. */
 export function collectFrom(state, animal) {
@@ -149,12 +147,20 @@ export function updateAnimals(state) {
 
     // Production runs only while an animal has both. Missing either simply
     // pauses the clock — progress is never lost, and neither is the animal.
-    if (!a.ready && !isNeglected(a)) {
-      a.progress++;
-      const def = animalDef(a.type);
-      if (def && a.progress >= def.produceTicks) {
-        a.ready = true;
-        emitUnlessSuspended('animal:ready', { id: a.id, type: a.type, x: a.x, y: a.y });
+    const def = animalDef(a.type);
+    if (def && !a.ready && !isNeglected(a)) {
+      if (a.progress < def.produceTicks) a.progress++;
+
+      if (a.progress >= def.produceTicks) {
+        if (def.laysOnGround) {
+          // Only reset once the egg is actually on the ground. If there's
+          // nowhere to put it the hen simply tries again next tick rather than
+          // losing the egg.
+          if (layEgg(state, a)) a.progress = 0;
+        } else {
+          a.ready = true;
+          emitUnlessSuspended('animal:ready', { id: a.id, type: a.type, x: a.x, y: a.y });
+        }
       }
     }
 
@@ -162,11 +168,39 @@ export function updateAnimals(state) {
   }
 }
 
+/**
+ * Drops an egg where the hen is standing, or on an adjacent free tile if that
+ * one is taken. Eggs don't stack, so a hen penned somewhere already covered in
+ * them just waits — nothing is lost, it simply can't lay until you tidy up.
+ *
+ * @returns {boolean} whether an egg was actually laid.
+ */
+function layEgg(state, a) {
+  const spots = [
+    { x: a.x, y: a.y },
+    { x: a.x + 1, y: a.y }, { x: a.x - 1, y: a.y },
+    { x: a.x, y: a.y + 1 }, { x: a.x, y: a.y - 1 },
+  ];
+
+  for (const s of spots) {
+    if (!state.grid.inBounds(s.x, s.y)) continue;
+    if (state.grid.getObject(s.x, s.y) !== OBJ.NONE) continue;
+    if (state.crops[`${s.x},${s.y}`]) continue;      // not on top of a crop
+
+    state.grid.setObject(s.x, s.y, OBJ.EGG);
+    emitUnlessSuspended('animal:laid', { id: a.id, type: a.type, x: s.x, y: s.y });
+    emitUnlessSuspended('world:changed', { x: s.x, y: s.y });
+    return true;
+  }
+  return false;
+}
+
 function moveAnimal(state, a) {
   // Already walking somewhere: keep going.
   if (a.path && a.path.length > 0) {
     const next = a.path.shift();
     if (state.grid.isWalkable(next.x, next.y, 'animal')) {
+      if (next.x !== a.x) a.facing = next.x > a.x ? 'right' : 'left';
       a.x = next.x;
       a.y = next.y;
       return;
@@ -233,6 +267,7 @@ function wander(state, a) {
   const nx = a.x + dx;
   const ny = a.y + dy;
   if (!state.grid.isWalkable(nx, ny, 'animal')) return;
+  if (dx !== 0) a.facing = dx > 0 ? 'right' : 'left';
   a.x = nx;
   a.y = ny;
 }

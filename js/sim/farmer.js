@@ -100,6 +100,9 @@ function step(state, f) {
     }
 
     f.dir = next.x > f.x ? 'right' : next.x < f.x ? 'left' : next.y > f.y ? 'down' : 'up';
+    // Facing only changes on horizontal movement, so walking straight up or
+    // down doesn't spin the sprite round.
+    if (next.x !== f.x) f.facing = next.x > f.x ? 'right' : 'left';
     f.x = next.x;
     f.y = next.y;
     f.trail.push({ x: f.x, y: f.y });
@@ -144,16 +147,15 @@ function applyTaskResult(state, task) {
 
   switch (task.type) {
     case 'clear':
-    case 'chop': {
+    case 'chop':
+    case 'pickup': {
       const obj = grid.getObject(task.x, task.y);
       const def = objDef(obj);
       gained = def.yields || null;
       addItems(state, gained);
       grid.setObject(task.x, task.y, OBJ.NONE);
-      // Felling a tree leaves bare earth where it stood.
-      if (obj === OBJ.TREE || obj === OBJ.DEAD_TREE) {
-        grid.setGround(task.x, task.y, GROUND.DIRT);
-      }
+      // Cleared land goes back to plain grass. Leaving bare earth behind made
+      // a tidied farm look scarred rather than cleared.
       emitUnlessSuspended('world:changed', { x: task.x, y: task.y });
       break;
     }
@@ -251,6 +253,7 @@ function wander(state) {
   if (!state.grid.isWalkable(nx, ny, 'farmer')) return;
 
   f.dir = dx > 0 ? 'right' : dx < 0 ? 'left' : dy > 0 ? 'down' : 'up';
+  if (dx !== 0) f.facing = dx > 0 ? 'right' : 'left';
   f.x = nx;
   f.y = ny;
   f.trail.push({ x: nx, y: ny });

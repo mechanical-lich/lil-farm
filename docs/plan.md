@@ -32,15 +32,40 @@ for development.
   production gated on food and water, and the never-die rule.
 - **PWA — complete.** Installable to the home screen, works offline, icons
   generated from the game's own art. See [deploying.md](deploying.md).
-- **Next: M6 polish** — offline-return summary, save export/import, land
-  expansion.
+- **Away summary — complete.** Returning shows what happened and what needs
+  attention. Built by *tallying* events during catch-up rather than dispatching
+  them (`startTally` / `stopTally` in `engine/events.js`), so replaying two days
+  costs a few integer increments and the simulation stays unaware anyone is
+  watching.
+- **Next: M6 remainder** — save export/import, land expansion.
 
-118 headless tests pass via `npm test`.
+**Planned: a Settings panel.** Save export/import belongs in a general settings
+menu rather than bolted onto the shop, alongside the debug/cheat switches that
+currently only exist on `window.lilfarm` (`give`, `wipe`) and the `TESTING` flag.
+Build the panel when export/import lands, and move those in.
+
+131 headless tests pass via `npm test`.
 
 Tilling is a two-point row gesture and beds are drawn with the capsule art — see
 section 8. Adjacent rows stay visually separate rather than merging into a grid.
 The clear tool undoes an empty bed back to grass (task type `untill`), but refuses
 a bed with a crop in it.
+
+**Movers are drawn inside the object pass, not after it.** `entitiesByRow()` buckets
+the farmer and animals by tile row, and `drawObjects` paints each row's movers right
+after that row's scenery. That's what stops an NPC standing on a barn's roof-overhang
+tiles from appearing to walk across the roof — on those rows they're drawn *before*
+the barn and end up behind it. Characters on the sheet all face right, so `blit()`
+takes a `flip` argument and each mover carries a `facing` updated only on horizontal
+movement.
+
+**The bottom UI rows must keep `pointer-events: auto`.** `#ui` is
+`pointer-events: none` so the map shows through it, and for a long time only the
+*buttons* inside were re-enabled. That broke two things visible only on a touch
+device: the horizontally scrolling rows couldn't be the target of a drag, so they
+never scrolled on iPhone; and a tap landing in the 6px gap between two buttons
+fell through to the canvas and did farm work. The rows also declare
+`touch-action: pan-x` so a horizontal drag is unambiguously a scroll.
 
 Panels (`shop` / `tasks` / `bag`) coordinate through `panel:open`, `panel:close` and
 `panel:dismiss` events rather than holding references to each other. Opening one

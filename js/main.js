@@ -21,6 +21,7 @@ import { initTaskPanel } from './ui/taskpanel.js';
 import { initShopPanel } from './ui/shoppanel.js';
 import { initHud } from './ui/hud.js';
 import { initToasts, toast } from './ui/toast.js';
+import { buildSummary, showSummary } from './ui/summary.js';
 import * as events from './engine/events.js';
 
 const els = {
@@ -131,7 +132,7 @@ async function boot() {
   });
 
   els.boot.classList.add('hidden');
-  reportReturn(catchup, isNew);
+  reportReturn(state, catchup, isNew);
   registerServiceWorker();
 }
 
@@ -160,6 +161,22 @@ function registerServiceWorker() {
       .catch(() => {});
     return;
   }
+
+  // A page that already has a controller and then gets a new one is looking at
+  // a fresh deploy: the new worker called skipWaiting and claimed this client,
+  // but the modules already running came from the old cache. Reload once so the
+  // player actually sees the update instead of the previous build.
+  //
+  // Guarded twice: `hadController` skips the very first install (where a
+  // controller appearing is normal, not an update), and `reloading` stops any
+  // chance of a loop.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading) return;
+    reloading = true;
+    location.reload();
+  });
 
   // Relative path, so it works from a GitHub Pages subpath as well as a root.
   navigator.serviceWorker.register('sw.js').catch((err) => {
@@ -444,16 +461,14 @@ function wireLifecycle(autosaver, renderer) {
   window.addEventListener('orientationchange', () => setTimeout(doResize, 200));
 }
 
-function reportReturn(catchup, isNew) {
+function reportReturn(state, catchup, isNew) {
   if (isNew) {
     toast('Welcome to your lil farm!');
     return;
   }
-  if (catchup.ticks > 60) {
-    const mins = Math.round(catchup.ticks / 60);
-    const label = mins >= 120 ? `${Math.round(mins / 60)} hours` : `${mins} minutes`;
-    toast(`Your farmer worked for ${label} while you were away`);
-  }
+  // A card rather than a toast: coming back to a farm that ran without you is
+  // the point of the whole design, and it deserves more than a line that fades.
+  showSummary(buildSummary(state, catchup));
 }
 
 function updateDebug(state, catchup, isNew) {

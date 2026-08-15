@@ -9,10 +9,38 @@ import { SPRITES } from './sprites.js';
 import { blit } from './tilerender.js';
 import { animalDef, isNeglected, isThirsty } from '../sim/animals.js';
 
-export function drawFarmer(ctx, sheets, state, alpha) {
-  const f = state.farmer;
+/**
+ * Everything that moves, bucketed by the tile row it should sort into.
+ *
+ * The object pass draws row by row, so handing it these lets a mover slot into
+ * the same ordering as scenery: someone standing on a tile the barn roof
+ * overhangs is drawn *before* the barn and ends up behind it, instead of
+ * appearing to walk across the roof.
+ *
+ * @returns {Map<number, Array<(ctx, sheets) => void>>}
+ */
+export function entitiesByRow(state, alpha) {
+  const rows = new Map();
+  const add = (y, fn) => {
+    const key = Math.round(y);
+    if (!rows.has(key)) rows.set(key, []);
+    rows.get(key).push(fn);
+  };
 
-  const pos = alongTrail(f, alpha);
+  for (const a of state.animals || []) {
+    const pos = { x: lerp(a.px ?? a.x, a.x, alpha), y: lerp(a.py ?? a.y, a.y, alpha) };
+    add(pos.y, (ctx, sheets) => drawAnimal(ctx, sheets, state, a, pos));
+  }
+
+  const f = state.farmer;
+  const fp = alongTrail(f, alpha);
+  add(fp.y, (ctx, sheets) => drawFarmerAt(ctx, sheets, state, fp, alpha));
+
+  return rows;
+}
+
+function drawFarmerAt(ctx, sheets, state, pos, alpha) {
+  const f = state.farmer;
   const x = pos.x * TILE;
   const y = pos.y * TILE;
 
@@ -23,7 +51,7 @@ export function drawFarmer(ctx, sheets, state, alpha) {
 
   // The farmer sprite is a head-and-shoulders tile; nudge it up slightly so it
   // sits on the tile rather than dead-center in it.
-  blit(ctx, sheets, SPRITES.farmerHat, Math.round(x), Math.round(y) - 2 + bob);
+  blit(ctx, sheets, SPRITES.farmerHat, Math.round(x), Math.round(y) - 2 + bob, f.facing === 'left');
 
   if (working) drawWorkBar(ctx, state, x, y);
 }
@@ -69,23 +97,21 @@ export function drawTillAnchor(ctx, anchor, tickCount) {
  * Neither is ever fatal, so the neglect marker is a nudge rather than an alarm —
  * but without it an idle barn is indistinguishable from a broken one.
  */
-export function drawAnimals(ctx, sheets, state, alpha) {
-  for (const a of state.animals || []) {
-    const def = animalDef(a.type);
-    if (!def) continue;
+function drawAnimal(ctx, sheets, state, a, pos) {
+  const def = animalDef(a.type);
+  if (!def) return;
 
-    const x = lerp(a.px ?? a.x, a.x, alpha) * TILE;
-    const y = lerp(a.py ?? a.y, a.y, alpha) * TILE;
-    blit(ctx, sheets, SPRITES[def.sprite], Math.round(x), Math.round(y) - 1);
+  const x = pos.x * TILE;
+  const y = pos.y * TILE;
+  blit(ctx, sheets, SPRITES[def.sprite], Math.round(x), Math.round(y) - 1, a.facing === 'left');
 
-    if (a.ready) {
-      // A gentle bob so a collectable animal catches the eye while panning.
-      const bob = Math.sin(state.tickCount / 3) < 0 ? -1 : 0;
-      drawBadge(ctx, x + TILE - 6, y - 3 + bob, '#ffe680', '#8a6a10');
-    } else if (isNeglected(a)) {
-      drawBadge(ctx, x + TILE - 6, y - 2,
-        isThirsty(a) ? '#4aa3e0' : '#d9a441', 'rgba(0,0,0,0.45)');
-    }
+  if (a.ready) {
+    // A gentle bob so a collectable animal catches the eye while panning.
+    const bob = Math.sin(state.tickCount / 3) < 0 ? -1 : 0;
+    drawBadge(ctx, x + TILE - 6, y - 3 + bob, '#ffe680', '#8a6a10');
+  } else if (isNeglected(a)) {
+    drawBadge(ctx, x + TILE - 6, y - 2,
+      isThirsty(a) ? '#4aa3e0' : '#d9a441', 'rgba(0,0,0,0.45)');
   }
 }
 

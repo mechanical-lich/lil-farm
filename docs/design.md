@@ -17,7 +17,7 @@ Two Kenney tilesheets (CC0), both 16x16 tiles and sharing a palette so they mix 
 The game is made up of 16x16 tiles.   Tiles can various things from a fence, grass, road, tilled soil, tree, etc.
 
 ## New Game State
-When you first start the game you are given a plot of land that has to be cleaned up.   There will be rocks, trees, dead trees, and weeds.   You can queue tasks to remove obstacles, pull weeds, and cut trees.   
+When you first start the game you are given a plot of land that has to be cleaned up.   There will be rocks, trees, dead trees, and weeds.   You can queue tasks to remove obstacles, pull weeds, and cut trees.   Cleared land goes back to **plain grass** — leaving bare earth behind made a tidied farm look scarred rather than cleared.
 
 A new farm starts with **one barn** already standing, on the two rows directly above the farmer, with his dirt yard in front of it.  It gives the opening view something to sit around instead of an empty field, and it means keeping animals is something to work toward from day one rather than only after saving 50 wood and 20 stone.  It can be demolished like any other barn if you'd rather put it somewhere else.
 
@@ -27,7 +27,7 @@ Some tasks suchs as harvesting a crop, cutting a tree, milking a cow, collecting
 ## Shop
 There is a shop where you can sell items in your inventory and buy new items such as crops from a rotating selection, livestock, and materials like lumber for construction.
 
-- Buy and sell are two tabs of one panel.  Quantities are coarse (1 / 5 / all) rather than a stepper, because tapping "+" ten times on a phone is miserable.
+- Buy, animals and sell are tabs of one panel, styled as tabs sitting on a shared baseline with the selected one filled green, matching how the tool buttons show selection.  Quantities are coarse (1 / 5 / all) rather than a stepper, because tapping "+" ten times on a phone is miserable.
 - The seed selection **rotates every 6 hours**.  Carrot and wheat are always stocked so the player can never be stranded with nothing to plant; two of the slower crops rotate alongside them.
 - The rotation is derived from the game clock rather than stored, so coming back after days away shows the right stock with no bookkeeping to replay.
 - Seeds resell at half price — enough to undo a misbuy, never a money loop.
@@ -96,13 +96,15 @@ There are tasks to fill food and water troughs.  Water is infinite, but food mus
 Animals can not open gates.
 
 ### How animals work
-- Two animals: a **chicken** ($120) lays an **egg** every 20 minutes, a **cow** ($500) is ready to **milk** every hour.  Both need food and water to make progress.
+- Two animals: a **chicken** ($120) produces an **egg** every 20 minutes, a **cow** ($500) is ready to **milk** every hour.  Both need food and water to make progress.
+- **Chickens are not collected from.**  A hen with enough food, water and time **drops an egg on the ground** where it stands, and the egg is picked up with the clear task like anything else lying in the grass.  Eggs don't block movement, and a hen with nowhere to put one simply waits rather than losing it.
+- **Cows are milked directly** — you tap the cow.  That difference is deliberate: you pick an egg up off the ground, you milk a cow.
 - **Animals are free-range.**  Nothing forces you to fence them.  Fences and gates are how you *choose* to keep them near their troughs, since a gate stops an animal but not the farmer.
 - You need a **barn before you can buy an animal**, and each barn holds 4.
 - **You choose where a new animal goes.**  Pressing Buy closes the shop and hands you a ghost of the animal; tap to move it, then confirm.  Nothing is charged until you confirm a spot, so backing out is free — the same rule building follows.
 - An animal whose food or water runs low walks to the nearest trough it can reach and takes a helping, which drains the trough.  If it can't reach one, it just carries on being hungry.
 - Filling a **water trough is free** — the work is carrying it, not finding it.  Filling a **feed trough** consumes 3 crops, automatically taken from the cheapest crop you have enough of, so a stray tap never burns the eggplants.
-- Tapping an animal that's ready collects from it; tapping a trough fills it.
+- Tapping a cow that's ready milks it; tapping an egg picks it up; tapping a trough fills it.
 - Neglected animals show a marker (blue when thirsty, amber when hungry) and ready ones bob with a badge.
 
 ### Animals never die
@@ -112,6 +114,13 @@ Animals can not open gates.
 - Feeding and watering it again resumes production.  There is no permanent penalty and no way to lose an animal you paid for.
 - This is deliberately **different from crops**, which do die if they aren't watered in time.  The asymmetry is the point: a crop is a cheap, replaceable seed, while an animal is an expensive purchase.  In a game you're meant to be able to walk away from for days, coming back to a dead cow you bought would feel awful.  Do not "fix" this inconsistency by adding animal death.
 - A neglected animal must be visibly neglected — a hungry/thirsty marker — so an idle barn reads as "they need feeding", not as a bug.
+
+## Coming back
+The whole premise is that the farm runs with the tab closed, so returning shows a **"while you were away" card** rather than silently presenting a changed field.
+
+- It reports what happened — jobs finished, what was collected, crops ripened, crops spoiled, animals with something to collect.
+- It also reports what needs attention *now*, in a warning colour: animals that are hungry or thirsty and so not producing, and seeds still waiting to be watered.  Since animals never die, this is the only place neglect ever surfaces.
+- Nothing to say means no card.  An absence under a minute isn't news either.
 
 ## Panels and modes
 The sliding panels (Shop, Tasks, Bag) only cover part of the screen, so the map stays visible above them.  That made it easy to be "still in Build mode" while shopping and quietly put down a fence with a stray tap.

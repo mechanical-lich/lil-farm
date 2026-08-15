@@ -20,7 +20,7 @@ export function newGame(seed = (Date.now() ^ 0x5f3759df) >>> 0) {
     lastTickTime: Date.now(),
     money: START_MONEY,
     grid,
-    farmer: { x: spawn.x, y: spawn.y, dir: 'down', taskId: null, path: [], trail: [], work: 0 },
+    farmer: { x: spawn.x, y: spawn.y, dir: 'down', facing: 'right', taskId: null, path: [], trail: [], work: 0 },
     animals: [],
     nextAnimalId: 1,
     crops: {},

@@ -48,10 +48,14 @@ export function initTaskPanel(state) {
     const rows = tasks.slice(0, MAX_ROWS).map((t) => {
       const active = t.id === state.farmer.taskId;
       const pct = t.work ? Math.round(((t.progress || 0) / t.work) * 100) : 0;
+      // A percentage alone doesn't say whether to wait or go do something else;
+      // the seconds left is the number the player actually wants.
+      const left = Math.max(0, (t.work || 0) - (t.progress || 0));
+      const meta = active ? `${pct}% · ${formatSeconds(left)} left` : formatSeconds(t.work);
       return `
         <li class="${active ? 'active' : ''}">
           <span class="task-name">${escapeHtml(taskLabel(t))}</span>
-          <span class="task-meta">${active ? `${pct}%` : `${t.work}s`}</span>
+          <span class="task-meta">${meta}</span>
           <button data-act="top" data-id="${t.id}" title="Do this next">↑</button>
           <button data-act="cancel" data-id="${t.id}" title="Cancel">✕</button>
         </li>`;
@@ -71,6 +75,14 @@ export function initTaskPanel(state) {
   setInterval(() => { if (open) render(); }, 500);
 
   return { render, setOpen: (v) => setOpen(v) };
+}
+
+/** Ticks are seconds; anything long enough gets minutes so it stays readable. */
+function formatSeconds(ticks) {
+  if (ticks < 60) return `${ticks}s`;
+  const mins = Math.floor(ticks / 60);
+  const secs = ticks % 60;
+  return secs ? `${mins}m ${secs}s` : `${mins}m`;
 }
 
 function escapeHtml(s) {

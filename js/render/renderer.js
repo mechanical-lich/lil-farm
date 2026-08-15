@@ -3,7 +3,7 @@
 import { COLORS } from '../config.js';
 import { drawGround, drawCrops, drawObjects } from './tilerender.js';
 import {
-  drawFarmer, drawAnimals, drawTaskMarkers, drawTillAnchor, drawPlacementGhost,
+  entitiesByRow, drawTaskMarkers, drawTillAnchor, drawPlacementGhost,
 } from './entityrender.js';
 
 export class Renderer {
@@ -51,9 +51,9 @@ export class Renderer {
     drawGround(ctx, this.sheets, state, view);
     drawTaskMarkers(ctx, state, view);
     drawCrops(ctx, this.sheets, state, view);
-    drawObjects(ctx, this.sheets, state, view);
-    drawAnimals(ctx, this.sheets, state, alpha);
-    drawFarmer(ctx, this.sheets, state, alpha);
+    // Movers are handed to the object pass so they sort by row alongside
+    // scenery rather than always being painted on top of it.
+    drawObjects(ctx, this.sheets, state, view, entitiesByRow(state, alpha));
     if (overlay?.tillAnchor) drawTillAnchor(ctx, overlay.tillAnchor, state.tickCount);
     if (overlay?.pending) drawPlacementGhost(ctx, this.sheets, overlay.pending);
 

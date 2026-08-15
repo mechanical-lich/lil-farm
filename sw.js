@@ -8,7 +8,7 @@
 // ⚠ Bump CACHE_VERSION on every deploy. Assets are served cache-first, so
 // without a bump a returning player keeps the old build indefinitely.
 
-const CACHE_VERSION = 'lil-farm-v1';
+const CACHE_VERSION = 'lil-farm-v2';
 
 const SHELL = [
   './',
@@ -50,6 +50,7 @@ const SHELL = [
   './js/ui/shoppanel.js',
   './js/ui/hud.js',
   './js/ui/toast.js',
+  './js/ui/summary.js',
 ];
 
 self.addEventListener('install', (event) => {

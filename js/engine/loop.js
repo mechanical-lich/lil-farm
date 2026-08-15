@@ -64,19 +64,23 @@ export class GameLoop {
  * progress instead of a frozen white screen. UI events are suspended for the
  * duration: firing thousands of "inventory changed" events would be pure waste.
  *
+ * Events fired during the replay are tallied rather than dispatched, so the
+ * caller can report what happened while the player was away.
+ *
  * @param {number} elapsedMs  wall-clock time since the last completed tick
  * @param {() => void} tick
  * @param {(done: number, total: number) => void} [onProgress]
- * @returns {Promise<{ticks: number, capped: boolean}>}
+ * @returns {Promise<{ticks: number, capped: boolean, tally: object|null}>}
  */
 export async function runCatchup(elapsedMs, tick, onProgress) {
   const wanted = Math.max(0, Math.floor(elapsedMs / TICK_MS));
   const total = Math.min(wanted, MAX_CATCHUP_TICKS);
   const capped = wanted > MAX_CATCHUP_TICKS;
 
-  if (total === 0) return { ticks: 0, capped: false };
+  if (total === 0) return { ticks: 0, capped: false, tally: null };
 
   events.suspend();
+  events.startTally();
   try {
     let done = 0;
     while (done < total) {
@@ -86,11 +90,13 @@ export async function runCatchup(elapsedMs, tick, onProgress) {
       if (onProgress) onProgress(done, total);
       if (done < total) await nextFrame();
     }
+    return { ticks: total, capped, tally: events.stopTally() };
   } finally {
+    // stopTally in the happy path above; this catches an early failure so a
+    // crash mid-replay can't leave the tally collecting forever.
+    events.stopTally();
     events.resume();
   }
-
-  return { ticks: total, capped };
 }
 
 function nextFrame() {

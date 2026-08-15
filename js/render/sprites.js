@@ -16,9 +16,6 @@
 
 import { TILE } from '../config.js';
 
-export const SHEET_COLS = 12;
-export const SHEET_ROWS = 11;
-
 /**
  * The soil capsule set — the art tilling is actually drawn with.
  *
@@ -86,7 +83,6 @@ export const TOWN = {
 };
 
 export const SPRITES = {
-
   // Nature
   deadTreeTop: [2, 0],
   deadTreeBottom: [2, 1],
@@ -167,11 +163,14 @@ export const SPRITES = {
   barnRoofCol0: 9,
   barnBodyCol0: 6,
 
+  // Eggs a hen has dropped, waiting to be picked up.
+  egg: [5, 10],
+
   // Characters
   farmer: [0, 9],
   farmerHat: [1, 9],
-  cow: [0, 10],
-  cowAlt: [1, 10],
+  sheep: [0, 10],
+  cow: [1, 10],
   chicken: [2, 10],
   duck: [3, 10],
 };
@@ -182,15 +181,6 @@ export function srcRect([col, row]) {
 }
 
 // --- Derived tiles ------------------------------------------------------
-// The sheet has no full-bleed dirt tile: every field piece is a rounded capsule
-// with grass on at least two edges. We synthesize solid dirt (and a tilled
-// variant) once at boot by mirror-tiling the pure-dirt interior of the vertical
-// mid piece, so large plowed fields don't show phantom grass seams.
-
-export const DERIVED = {
-  dirt: null,   // bare cleared earth, e.g. where a tree stood
-  road: null,   // deliberately built paths, in the paler dry tone
-};
 
 /**
  * The soil capsules with their baked-in grass background knocked out to
@@ -232,44 +222,6 @@ function buildCapsules(sheet) {
   }
 }
 
-// The soil capsule set exists in two moisture variants with identical pixel
-// layouts and shifted palettes: row 4 is wet (dark), row 5 is dry (pale).
-// These are the y-offsets of each variant's grass-free interior strip.
-const SOIL_STRIP = {
-  wet: { sy: 70 },
-  dry: { sy: 86 },
-};
-const STRIP_H = 6;
-
-/**
- * Builds a full-bleed 16x16 ground tile from a soil variant's interior strip.
- * The strip is the middle of a horizontal capsule run, so its left and right
- * edges already tile seamlessly; repeating it vertically gives solid ground
- * with the original speckled texture and no seams or mirror artifacts.
- */
-function buildSoilTile(sheet, variant) {
-  const c = document.createElement('canvas');
-  c.width = TILE;
-  c.height = TILE;
-  const ctx = c.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
-
-  const { sy } = SOIL_STRIP[variant];
-  for (let y = 0; y < TILE; y += STRIP_H) {
-    const h = Math.min(STRIP_H, TILE - y);
-    ctx.drawImage(sheet, 16, sy, TILE, h, 0, y, TILE, h);
-  }
-  return c;
-}
-
-export function buildDerivedTiles(sheet) {
-  // Paths and cleared earth are still a flat fill — they are arbitrary shapes,
-  // unlike tilled beds, and the capsule art cannot outline an arbitrary region.
-  DERIVED.dirt = buildSoilTile(sheet, 'wet');
-  DERIVED.road = buildSoilTile(sheet, 'dry');
-  buildCapsules(sheet);
-}
-
 function loadImage(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -288,7 +240,7 @@ export async function loadSheets() {
     loadImage('assets/tilemap_packed.png'),
     loadImage('assets/town_tilemap_packed.png'),
   ]);
-  buildDerivedTiles(farm);
+  buildCapsules(farm);
   return { farm, town };
 }
 

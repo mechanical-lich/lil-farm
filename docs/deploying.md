@@ -10,10 +10,17 @@ the repository. It's already set up to work from a project subpath like
    While it's `true` a new farm starts with $2000, 500 wood, 300 stone and 25 of
    every seed, which skips most of the game. The debug line reads
    `⚠ TESTING START` whenever it's on.
-2. **Bump `CACHE_VERSION` in `sw.js`** (`lil-farm-v1` → `v2`, and so on).
+2. **Bump `CACHE_VERSION` in `sw.js`** (`lil-farm-v2` → `v3`, and so on).
    Assets are served cache-first, so without a bump anyone who has already
-   opened the game keeps the old build indefinitely.
-3. `npm test` — 118 headless tests, no dependencies.
+   opened the game keeps the old build indefinitely — **including people using
+   the plain web page**, not just those who installed it. The service worker
+   registers for every visitor; installing to the home screen changes where the
+   game launches from, not how it caches.
+
+   With a bump, the sequence is: the browser always revalidates `sw.js` itself,
+   the new worker installs and claims the page, and the game reloads itself once
+   so the player lands on the new build. Without a bump none of that happens.
+3. `npm test` — 131 headless tests, no dependencies.
 
 ## Turning Pages on
 

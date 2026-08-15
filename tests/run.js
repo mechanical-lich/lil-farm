@@ -4,6 +4,7 @@
 // Anything under render/ or ui/ touches the DOM by design and is verified in
 // the browser instead.
 
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { makeRng, hash2d } from '../js/engine/rng.js';
 import { Grid } from '../js/world/grid.js';
 import { GROUND, OBJ } from '../js/world/tiledefs.js';
@@ -31,15 +32,30 @@ import { addItems } from '../js/sim/inventory.js';
 import { newGame, serialize, deserialize } from '../js/state.js';
 import { tick } from '../js/sim/tick.js';
 import { migrate, Autosaver } from '../js/engine/save.js';
+import { runCatchup } from '../js/engine/loop.js';
+import {
+  on, suspend, resume, startTally, stopTally, emitUnlessSuspended,
+} from '../js/engine/events.js';
+import { buildSummary } from '../js/ui/summary.js';
 import { TICK_MS, SAVE_VERSION, FARMER_SPEED } from '../js/config.js';
 
 let passed = 0;
 const failures = [];
+// Async tests are rare here (only the catch-up integration needs one), so they
+// are collected and awaited at the end rather than serialising the whole run.
+const pending = [];
 
 function test(name, fn) {
   try {
-    fn();
-    passed++;
+    const result = fn();
+    if (result && typeof result.then === 'function') {
+      pending.push(result.then(
+        () => { passed++; },
+        (err) => { failures.push({ name, err }); },
+      ));
+    } else {
+      passed++;
+    }
   } catch (err) {
     failures.push({ name, err });
   }
@@ -1382,18 +1398,76 @@ test('feeding a stalled animal resumes production from where it stopped', () => 
   assertEqual(animal.progress, stalled + 200, 'exactly where it left off, nothing lost');
 });
 
-test('a fed and watered animal becomes ready and can be collected', () => {
+test('a fed chicken lays an egg on the ground, not into the bag', () => {
   const { s, animal } = farmWithAnimal('chicken', 804);
   animal.x = 5; animal.y = 5;
 
   for (let i = 0; i < ANIMALS.chicken.produceTicks + 10; i++) tick(s);
-  assert(animal.ready, 'the chicken should be ready');
+
+  assert(!animal.ready, 'a hen is never "ready to collect from"');
+  assertEqual(s.inventory.egg, undefined, 'nothing goes straight into the bag');
+
+  const eggs = [...s.grid.objects].filter((o) => o === OBJ.EGG).length;
+  assert(eggs >= 1, 'there should be an egg lying about');
+  // It reset on laying and has been working again since, so it's well short of
+  // another egg rather than exactly zero.
+  assert(animal.progress < ANIMALS.chicken.produceTicks, 'and the hen started over');
+});
+
+test('an egg on the ground is picked up like anything else lying there', () => {
+  const s = farmWithMaterials(8041);
+  s.grid.setObject(6, 6, OBJ.EGG);
+
+  const spec = taskForTile(s, 6, 6, 'clear');
+  assert(spec !== null, 'the clear tool offers it');
+  assertEqual(spec.type, 'pickup', 'as a pick-up');
+  assert(s.grid.isWalkable(6, 6, 'farmer'), 'an egg never blocks the way');
+
+  s.farmer.x = 4; s.farmer.y = 6; s.farmer.taskId = null; s.farmer.path = [];
+  addTask(s, spec);
+  for (let i = 0; i < 200; i++) tick(s);
+
+  assertEqual(s.grid.getObject(6, 6), OBJ.NONE, 'the egg is gone from the ground');
+  assertEqual(s.inventory.egg, 1, 'and is in the bag');
+});
+
+test('the auto tool picks up eggs too', () => {
+  const s = farmWithMaterials(8042);
+  s.grid.setObject(6, 6, OBJ.EGG);
+  assertEqual(taskForTile(s, 6, 6, 'auto').type, 'pickup', 'tapping an egg picks it up');
+});
+
+test('a cow is still milked directly rather than dropping anything', () => {
+  const { s, animal } = farmWithAnimal('cow', 8043);
+  for (let i = 0; i < ANIMALS.cow.produceTicks + 10; i++) tick(s);
+
+  assert(animal.ready, 'the cow should be ready to milk');
+  assertEqual([...s.grid.objects].filter((o) => o === OBJ.EGG).length, 0, 'and drops nothing');
 
   const gained = collectFrom(s, animal);
-  assertEqual(gained, { egg: 1 }, 'collecting yields an egg');
-  assertEqual(s.inventory.egg, 1, 'and it lands in the bag');
-  assert(!animal.ready, 'it starts over');
-  assertEqual(animal.progress, 0, 'from zero');
+  assertEqual(gained, { milk: 1 }, 'milking yields milk');
+  assertEqual(s.inventory.milk, 1, 'straight into the bag');
+  assertEqual(animal.progress, 0, 'and it starts over');
+});
+
+test('a hen with nowhere to lay keeps its egg rather than losing it', () => {
+  const { s, animal } = farmWithAnimal('chicken', 8044);
+  animal.x = 5; animal.y = 5;
+  // Box the hen in with rocks so every candidate tile is occupied.
+  for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    s.grid.setObject(5 + dx, 5 + dy, OBJ.ROCK);
+  }
+
+  for (let i = 0; i < ANIMALS.chicken.produceTicks + 200; i++) tick(s);
+  assertEqual([...s.grid.objects].filter((o) => o === OBJ.EGG).length, 0, 'no egg could be laid');
+  assert(animal.progress >= ANIMALS.chicken.produceTicks, 'but the hen stays ready to lay');
+
+  // Clear a space and it lays immediately.
+  for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    s.grid.setObject(5 + dx, 5 + dy, OBJ.NONE);
+  }
+  tick(s);
+  assert([...s.grid.objects].filter((o) => o === OBJ.EGG).length >= 1, 'the egg arrives once there is room');
 });
 
 test('animals drink and eat from troughs, draining them', () => {
@@ -1703,7 +1777,140 @@ test('a new farm can afford to get started', () => {
     `a new player should be able to buy a few seeds: $${s.money} vs $${cheapest} each`);
 });
 
+// --- the away summary ---------------------------------------------------
+
+test('suspended events are counted instead of dispatched', () => {
+  // Catch-up suspends events so a two-day replay doesn't fire thousands of
+  // toasts. The tally is how the summary gets built without the simulation
+  // knowing anyone is listening.
+  let heard = 0;
+  const off = on('task:done', () => { heard++; });
+
+  suspend();
+  startTally();
+  emitUnlessSuspended('task:done', { task: { type: 'harvest' }, gained: { corn: 3 } });
+  emitUnlessSuspended('task:done', { task: { type: 'harvest' }, gained: { corn: 2 } });
+  emitUnlessSuspended('crop:died', { type: 'carrot' });
+  const tally = stopTally();
+  resume();
+  off();
+
+  assertEqual(heard, 0, 'nothing should have been dispatched while suspended');
+  assertEqual(tally.counts['task:done'], 2, 'both tasks counted');
+  assertEqual(tally.counts['task:harvest'], 2, 'and counted by kind');
+  assertEqual(tally.counts['crop:died'], 1, 'other events counted too');
+  assertEqual(tally.items.corn, 5, 'and the haul is added up');
+});
+
+test('events dispatch normally again once the tally stops', () => {
+  let heard = 0;
+  const off = on('task:done', () => { heard++; });
+  emitUnlessSuspended('task:done', { task: { type: 'chop' } });
+  off();
+  assertEqual(heard, 1, 'live play is unaffected');
+});
+
+test('catch-up returns a tally of what happened while away', async () => {
+  const s = newGame(9001);
+  s.grid.objects.fill(OBJ.NONE);
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y;
+  s.grid.setObject(x, y, OBJ.ROCK);
+  addTask(s, taskForTile(s, x, y, 'clear'));
+
+  let done = 0;
+  const off = on('task:done', () => { done++; });
+  const result = await runCatchup(600 * TICK_MS, () => tick(s));
+  off();
+
+  assertEqual(done, 0, 'the replay must stay silent');
+  assert(result.tally !== null, 'but it reports what it saw');
+  assertEqual(result.tally.counts['task:clear'], 1, 'the rock got cleared');
+  assert((result.tally.items.stone || 0) >= 2, 'and the stone was counted');
+});
+
+test('a short absence is not worth a summary', () => {
+  const s = newGame(9002);
+  assertEqual(buildSummary(s, { ticks: 30, tally: null }), null, 'half a minute is not news');
+});
+
+test('the summary reports work, hauls and losses', () => {
+  const s = newGame(9003);
+  const summary = buildSummary(s, {
+    ticks: 7200,
+    tally: {
+      counts: { 'task:done': 5, 'crop:ripe': 4, 'crop:died': 2, 'animal:ready': 1 },
+      items: { corn: 12, egg: 2 },
+    },
+  });
+
+  assert(summary !== null, 'two hours of work deserves a summary');
+  assert(summary.headline.includes('2 hours'), `headline should say how long: ${summary.headline}`);
+  const text = summary.lines.join(' | ');
+  assert(text.includes('5 jobs finished'), `expected the job count: ${text}`);
+  assert(text.includes('12 corn'), `expected the haul: ${text}`);
+  assert(text.includes('spoiled'), `expected the losses: ${text}`);
+});
+
+test('the summary nudges about neglected animals and unwatered seeds', () => {
+  // Animals never die, so this is the only place neglect ever surfaces.
+  const { s, animal } = farmWithAnimal('cow', 9004);
+  animal.food = 0;
+  animal.water = 0;
+  const bed = { x: s.farmer.x + 1, y: s.farmer.y };
+  s.grid.setGround(bed.x, bed.y, GROUND.TILLED);
+  plantCrop(s, bed.x, bed.y, 'carrot');          // planted, never watered
+
+  const summary = buildSummary(s, { ticks: 3600, tally: { counts: {}, items: {} } });
+
+  assert(summary !== null, 'nudges alone are worth showing');
+  const nudges = summary.nudges.join(' | ');
+  assert(/animal is/.test(nudges), `expected the animal nudge: ${nudges}`);
+  assert(/waiting to be watered/.test(nudges), `expected the seed nudge: ${nudges}`);
+});
+
+test('a quiet absence with nothing to report shows nothing', () => {
+  const s = newGame(9005);
+  s.crops = {};
+  s.animals = [];
+  assertEqual(buildSummary(s, { ticks: 3600, tally: { counts: {}, items: {} } }), null,
+    'no work, no losses, nothing needing attention');
+});
+
+// --- offline shell ------------------------------------------------------
+
+test('every module is precached by the service worker', () => {
+  // The shell list in sw.js is hand-written and drifts: a new module that isn't
+  // in it is fetched from the network, and since main.js imports statically, a
+  // cold offline open fails the whole module graph rather than losing one
+  // feature. This caught js/ui/summary.js going missing.
+  const sw = readFileSync('sw.js', 'utf8');
+  const shell = [...sw.matchAll(/'\.\/([^']*)'/g)].map((m) => m[1]).filter(Boolean);
+
+  const modules = [];
+  (function walk(dir) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const p = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) walk(p);
+      else if (p.endsWith('.js')) modules.push(p.replace(/^\.\//, ''));
+    }
+  }('js'));
+
+  const missing = modules.filter((m) => !shell.includes(m));
+  assertEqual(missing, [], 'these modules would 404 when the game is opened offline');
+});
+
+test('the service worker does not precache files that no longer exist', () => {
+  const sw = readFileSync('sw.js', 'utf8');
+  const shell = [...sw.matchAll(/'\.\/([^']*)'/g)].map((m) => m[1]).filter(Boolean);
+  // './' is the navigation entry, not a file on disk.
+  const stale = shell.filter((p) => p !== '' && !existsSync(p));
+  assertEqual(stale, [], 'the install step would fail to cache these');
+});
+
 // --- report -------------------------------------------------------------
+
+await Promise.all(pending);
 
 for (const { name, err } of failures) {
   console.error(`FAIL  ${name}\n      ${err.message.replace(/\n/g, '\n      ')}`);

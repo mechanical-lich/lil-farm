@@ -146,8 +146,10 @@ function drawMark(ctx, px, py, color) {
  * Object layer, drawn top row to bottom row so that sprites taller than one
  * tile are correctly overlapped by whatever stands in front of them.
  */
-export function drawObjects(ctx, sheets, state, view) {
+export function drawObjects(ctx, sheets, state, view, entityRows = null) {
   const grid = state.grid;
+  const drawn = new Set();
+
   for (let y = view.y0; y <= view.y1; y++) {
     for (let x = view.x0; x <= view.x1; x++) {
       const o = grid.getObject(x, y);
@@ -158,7 +160,25 @@ export function drawObjects(ctx, sheets, state, view) {
     // Draw each building as its bottom row comes up, so it sorts against other
     // objects the same way a tall sprite does: things lower on screen overlap it.
     drawBuildingsEndingAt(ctx, sheets, state, y);
+
+    // Then anything standing on this row. Drawing movers here rather than in a
+    // pass of their own is what stops the farmer walking across the barn roof:
+    // on a roof-overhang row he is drawn before the barn and ends up behind it.
+    if (entityRows?.has(y)) {
+      for (const draw of entityRows.get(y)) draw(ctx, sheets);
+      drawn.add(y);
+    }
   }
+
+  // Movers just outside the drawn rows still need painting or they'd blink out
+  // at the screen edge.
+  if (entityRows) {
+    for (const [y, list] of entityRows) {
+      if (drawn.has(y)) continue;
+      for (const draw of list) draw(ctx, sheets);
+    }
+  }
+
   drawTroughs(ctx, sheets, state, view);
 }
 
@@ -297,6 +317,9 @@ function drawObject(ctx, sheets, state, objId, x, y) {
     case OBJ.BARREL:
       blit(ctx, sheets, SPRITES.barrel, px, py);
       break;
+    case OBJ.EGG:
+      blit(ctx, sheets, SPRITES.egg, px, py);
+      break;
     default:
       break;
   }
@@ -306,7 +329,19 @@ function drawObject(ctx, sheets, state, objId, x, y) {
  * Draws one sprite. `sheets` is the {farm, town} pair; the sprite reference
  * carries which of them it lives on.
  */
-export function blit(ctx, sheets, sprite, dx, dy) {
+export function blit(ctx, sheets, sprite, dx, dy, flip = false) {
   const { sx, sy, sw, sh } = srcRect(sprite);
-  ctx.drawImage(sheetFor(sheets, sprite), sx, sy, sw, sh, dx, dy, sw, sh);
+  const img = sheetFor(sheets, sprite);
+
+  if (!flip) {
+    ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+    return;
+  }
+  // Mirrored horizontally. Every character on the sheet is drawn facing right,
+  // so this is how anything walking left is turned round.
+  ctx.save();
+  ctx.translate(dx + sw, dy);
+  ctx.scale(-1, 1);
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  ctx.restore();
 }
