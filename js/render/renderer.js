@@ -1,7 +1,7 @@
 // Canvas setup and the top-level draw call.
 
 import { COLORS } from '../config.js';
-import { drawGround, drawCrops, drawObjects } from './tilerender.js';
+import { drawGround, drawCrops, drawObjects, drawUnowned } from './tilerender.js';
 import {
   entitiesByRow, drawTaskMarkers, drawTillAnchor, drawPlacementGhost,
 } from './entityrender.js';
@@ -54,6 +54,7 @@ export class Renderer {
     // Movers are handed to the object pass so they sort by row alongside
     // scenery rather than always being painted on top of it.
     drawObjects(ctx, this.sheets, state, view, entitiesByRow(state, alpha));
+    drawUnowned(ctx, state, view);
     if (overlay?.tillAnchor) drawTillAnchor(ctx, overlay.tillAnchor, state.tickCount);
     if (overlay?.pending) drawPlacementGhost(ctx, this.sheets, overlay.pending);
 

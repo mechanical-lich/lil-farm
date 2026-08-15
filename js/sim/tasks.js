@@ -173,6 +173,9 @@ export function completeTask(state, id) {
 export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
   const grid = state.grid;
   if (!grid.inBounds(x, y)) return null;
+  // Nothing at all can be queued on land the player hasn't bought. One check
+  // here covers every tool, so no new tool can forget it.
+  if (!grid.isOwned(x, y)) return null;
 
   const obj = grid.getObject(x, y);
   const def = objDef(obj);

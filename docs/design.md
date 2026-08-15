@@ -16,6 +16,17 @@ Two Kenney tilesheets (CC0), both 16x16 tiles and sharing a palette so they mix 
 ## World
 The game is made up of 16x16 tiles.   Tiles can various things from a fence, grass, road, tilled soil, tree, etc.
 
+### Buying land
+The valley is 40x40 tiles, split into **8x8 plots**. You start owning exactly one — the plot the farmhouse stands in — and buy the rest a plot at a time from the shop's Land tab.
+
+- Land you don't own is **drawn but dimmed**, scenery and all. It reads as somewhere you could go rather than as a wall, and the boundary is obvious without drawing a fence around your farm.
+- Unowned land is completely inert: nothing can be queued on it, nothing built on it, and **neither the farmer nor the animals will walk onto it**. That last part is a quiet bonus — your animals can't wander to the far side of the map.
+- A plot must **border land you already own**, so the farm stays one connected property rather than a scatter of islands.
+- Buying works like buying an animal: the shop steps out of the way, you tap the plot you want, and money changes hands only when you confirm.
+- **Each plot costs more than the last** ($250 x the number you already own), so the first is a couple of good harvests away and owning the whole valley is a long game.
+
+Farms that predate this keep every plot they were using — anything tilled, built, fenced, standing on, or queued. Those plots can end up as islands if the farm was spread out; buying the gaps joins them back up.
+
 ## New Game State
 When you first start the game you are given a plot of land that has to be cleaned up.   There will be rocks, trees, dead trees, and weeds.   You can queue tasks to remove obstacles, pull weeds, and cut trees.   Cleared land goes back to **plain grass** — leaving bare earth behind made a tidied farm look scarred rather than cleared.
 

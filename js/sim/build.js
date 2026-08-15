@@ -84,6 +84,8 @@ export function canPlaceAt(state, kind, x, y) {
 
   for (const t of footprint(kind, x, y)) {
     if (!state.grid.inBounds(t.x, t.y)) return false;
+    // A barn may not straddle the boundary onto land you don't own.
+    if (!state.grid.isOwned(t.x, t.y)) return false;
     if (state.grid.getObject(t.x, t.y) !== OBJ.NONE) return false;
     if (cropAt(state, t.x, t.y)) return false;
     // Beds are hard-won; don't let a stray fence tap pave over one.

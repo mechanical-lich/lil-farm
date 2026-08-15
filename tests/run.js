@@ -10,6 +10,10 @@ import { Grid } from '../js/world/grid.js';
 import { GROUND, OBJ } from '../js/world/tiledefs.js';
 import { generateWorld, startingBarnAnchor } from '../js/world/worldgen.js';
 import { findPath, besideBox, insideBox } from '../js/world/pathfind.js';
+import {
+  PLOT, plotOfTile, plotBounds, plotIndex, startingPlot, landPrice, nextLandPrice,
+  canBuyPlot, buyPlot, buyablePlots, totalPlots, grantLegacyLand,
+} from '../js/world/land.js';
 import { addTask, cancelTask, prioritizeTask, taskForTile, tillRow, queueTillRow } from '../js/sim/tasks.js';
 import {
   CROPS, SOIL_DRY_TICKS, plantCrop, waterTile, harvestCrop,
@@ -29,7 +33,7 @@ import {
   completeBuild, demolish, structureAt, buildingAt, animalCapacity, BARN_CAPACITY,
 } from '../js/sim/build.js';
 import { addItems } from '../js/sim/inventory.js';
-import { newGame, serialize, deserialize } from '../js/state.js';
+import { newGame as newGameRaw, serialize, deserialize } from '../js/state.js';
 import { tick } from '../js/sim/tick.js';
 import { migrate, Autosaver, exportSave, validateSave } from '../js/engine/save.js';
 import { runCatchup } from '../js/engine/loop.js';
@@ -73,6 +77,30 @@ function assert(cond, msg) {
  * comparison fails spuriously. Aligning the clock keeps these tests about what
  * they actually claim to test: that the simulation itself is deterministic.
  */
+/**
+ * Every test below predates land ownership and works wherever on the map it
+ * likes, so `newGame` here hands over the whole valley. The land tests call
+ * `newGameRaw` to get a farm with the single plot a real new game starts with.
+ */
+function newGame(seed) { return ownEverything(newGameRaw(seed)); }
+
+/** A grid that is entirely owned — the pre-ownership Grid, for tests about tiles. */
+function openGrid(w, h) {
+  const g = new Grid(w, h);
+  for (let i = 0; i < Math.ceil(w / PLOT) * Math.ceil(h / PLOT); i++) g.owned.add(i);
+  return g;
+}
+
+/**
+ * Hands a farm the whole map. Land ownership is its own feature with its own
+ * tests; every other test predates it and works wherever it likes, so helpers
+ * that aren't about land opt out of the boundary rather than dodging it.
+ */
+function ownEverything(s) {
+  for (let i = 0; i < totalPlots(s); i++) s.grid.owned.add(i);
+  return s;
+}
+
 function twinGames(seed) {
   const a = newGame(seed);
   const b = newGame(seed);
@@ -116,7 +144,7 @@ test('hash2d is stable and varies across coordinates', () => {
 // --- grid ---------------------------------------------------------------
 
 test('grid walkability distinguishes farmer from animal at gates', () => {
-  const g = new Grid(4, 4);
+  const g = openGrid(4, 4);
   g.setObject(1, 1, OBJ.GATE);
   g.setObject(2, 2, OBJ.FENCE);
 
@@ -127,13 +155,13 @@ test('grid walkability distinguishes farmer from animal at gates', () => {
 });
 
 test('grid treats out-of-bounds as unwalkable', () => {
-  const g = new Grid(4, 4);
+  const g = openGrid(4, 4);
   assert(!g.isWalkable(-1, 0), 'negative x');
   assert(!g.isWalkable(0, 4), 'past height');
 });
 
 test('grid round-trips through JSON', () => {
-  const g = new Grid(6, 5);
+  const g = openGrid(6, 5);
   g.setGround(2, 3, GROUND.TILLED);
   g.setObject(4, 1, OBJ.TREE);
 
@@ -294,14 +322,14 @@ test('migrate refuses junk', () => {
 // --- pathfinding --------------------------------------------------------
 
 test('findPath walks a straight line on open ground', () => {
-  const g = new Grid(10, 10);
+  const g = openGrid(10, 10);
   const path = findPath(g, { x: 0, y: 0 }, { x: 4, y: 0 });
   assertEqual(path.length, 4, 'four steps to move four tiles');
   assertEqual(path[path.length - 1], { x: 4, y: 0 }, 'ends on the goal');
 });
 
 test('findPath routes around a wall', () => {
-  const g = new Grid(7, 7);
+  const g = openGrid(7, 7);
   for (let y = 0; y < 6; y++) g.setObject(3, y, OBJ.FENCE);   // wall with a gap at y=6
 
   const path = findPath(g, { x: 0, y: 0 }, { x: 6, y: 0 });
@@ -313,13 +341,13 @@ test('findPath routes around a wall', () => {
 });
 
 test('findPath returns null when the goal is walled off', () => {
-  const g = new Grid(7, 7);
+  const g = openGrid(7, 7);
   for (let y = 0; y < 7; y++) g.setObject(3, y, OBJ.FENCE);   // full-height wall
   assertEqual(findPath(g, { x: 0, y: 0 }, { x: 6, y: 0 }), null, 'no route should exist');
 });
 
 test('findPath in adjacent mode stops next to a blocking target', () => {
-  const g = new Grid(8, 8);
+  const g = openGrid(8, 8);
   g.setObject(4, 4, OBJ.TREE);   // cannot be stood on
 
   const path = findPath(g, { x: 0, y: 4 }, { x: 4, y: 4 }, { adjacent: true });
@@ -330,7 +358,7 @@ test('findPath in adjacent mode stops next to a blocking target', () => {
 });
 
 test('findPath lets the farmer through a gate but not an animal', () => {
-  const g = new Grid(5, 3);
+  const g = openGrid(5, 3);
   for (let y = 0; y < 3; y++) g.setObject(2, y, OBJ.FENCE);
   g.setObject(2, 1, OBJ.GATE);   // the only way through
 
@@ -341,7 +369,7 @@ test('findPath lets the farmer through a gate but not an animal', () => {
 });
 
 test('findPath is deterministic across runs', () => {
-  const g = new Grid(12, 12);
+  const g = openGrid(12, 12);
   g.setObject(5, 5, OBJ.ROCK);
   const a = findPath(g, { x: 0, y: 0 }, { x: 11, y: 11 });
   const b = findPath(g, { x: 0, y: 0 }, { x: 11, y: 11 });
@@ -1917,6 +1945,154 @@ test('a quiet absence with nothing to report shows nothing', () => {
   s.animals = [];
   assertEqual(buildSummary(s, { ticks: 3600, tally: { counts: {}, items: {} } }), null,
     'no work, no losses, nothing needing attention');
+});
+
+// --- land ---------------------------------------------------------------
+
+test('a new farm owns exactly one plot, and the whole farmstead is inside it', () => {
+  const s = newGameRaw(6100);
+  assertEqual(s.grid.owned.size, 1, 'one plot to start');
+
+  const { px, py } = plotOfTile(s.farmer.x, s.farmer.y);
+  const b = plotBounds(px, py);
+  assert(s.grid.owned.has(plotIndex(px, py, s.grid.w)), 'the plot you stand in');
+
+  // The barn is five rows tall as drawn: three of overhanging roof above two of
+  // body. All of it has to sit inside owned land or the roof renders dimmed.
+  const barn = s.buildings[0];
+  assert(barn, 'a new farm has its barn');
+  assert(barn.y - 3 >= b.y0, `barn roof starts at ${barn.y - 3}, plot at ${b.y0}`);
+  assert(barn.y + 1 < b.y1, 'barn body ends inside the plot');
+  assert(barn.x >= b.x0 && barn.x + 2 < b.x1, 'barn fits across the plot');
+});
+
+test('nothing can be queued on land you do not own', () => {
+  const s = newGameRaw(6101);
+  const { px, py } = plotOfTile(s.farmer.x, s.farmer.y);
+  const outside = { x: plotBounds(px, py).x0 - 1, y: s.farmer.y };
+  assert(!s.grid.isOwned(outside.x, outside.y), 'the test tile is off the farm');
+
+  // A tree just over the line is still a tree; it just isn't the player's.
+  s.grid.setObject(outside.x, outside.y, OBJ.TREE);
+  assertEqual(taskForTile(s, outside.x, outside.y, 'chop'), null, 'no chopping it');
+  assertEqual(taskForTile(s, outside.x, outside.y, 'auto'), null, 'nor by the auto tool');
+  assert(!canPlaceAt(s, 'fence', outside.x, outside.y), 'nothing built on it either');
+});
+
+test('the farmer and the animals both stop at the boundary', () => {
+  const s = newGameRaw(6102);
+  const { px, py } = plotOfTile(s.farmer.x, s.farmer.y);
+  const b = plotBounds(px, py);
+  s.grid.objects.fill(OBJ.NONE);
+
+  assert(s.grid.isWalkable(b.x0, s.farmer.y, 'farmer'), 'inside is walkable');
+  assert(!s.grid.isWalkable(b.x0 - 1, s.farmer.y, 'farmer'), 'the farmer stays in');
+  assert(!s.grid.isWalkable(b.x0 - 1, s.farmer.y, 'animal'), 'and so do the animals');
+
+  // Pathfinding must not route through unowned land to save a step.
+  const path = findPath(s.grid, { x: b.x0, y: b.y0 }, { x: b.x1 - 1, y: b.y1 - 1 });
+  assert(path, 'a path across your own land exists');
+  assert(path.every((t) => s.grid.isOwned(t.x, t.y)), 'and never leaves it');
+});
+
+test('land is bought a plot at a time, and only next to what you own', () => {
+  const s = newGameRaw(6103);
+  const { px, py } = plotOfTile(s.farmer.x, s.farmer.y);
+  s.money = 100000;
+
+  assert(!canBuyPlot(s, px, py).ok, 'not the plot you already own');
+  assert(!canBuyPlot(s, px + 2, py).ok, 'not a plot two away, with a gap');
+  assert(!canBuyPlot(s, px + 1, py + 1).ok, 'not diagonally — corners do not touch');
+  assert(canBuyPlot(s, px + 1, py).ok, 'the plot next door, yes');
+
+  const price = nextLandPrice(s);
+  const res = buyPlot(s, px + 1, py);
+  assert(res.ok, 'the purchase goes through');
+  assertEqual(s.money, 100000 - price, 'and costs what it said it would');
+  assertEqual(s.grid.owned.size, 2, 'two plots now');
+
+  // Owning it changes what is reachable next: the far side is now adjacent.
+  assert(canBuyPlot(s, px + 2, py).ok, 'the next one along opens up');
+});
+
+test('land you cannot afford is refused without charging you', () => {
+  const s = newGameRaw(6104);
+  const { px, py } = plotOfTile(s.farmer.x, s.farmer.y);
+  s.money = 10;
+
+  const res = buyPlot(s, px + 1, py);
+  assert(!res.ok, 'refused');
+  assertEqual(s.money, 10, 'and nothing taken');
+  assertEqual(s.grid.owned.size, 1, 'and no land granted');
+});
+
+test('each plot costs more than the last', () => {
+  assertEqual(landPrice(1) < landPrice(2), true, 'the second is dearer than the first');
+  assertEqual(landPrice(5) < landPrice(6), true, 'and it keeps climbing');
+
+  // The whole valley should be a long game, not an afternoon's harvest.
+  const s = newGameRaw(6105);
+  let total = 0;
+  for (let n = 1; n < totalPlots(s); n++) total += landPrice(n);
+  assert(total > 20000, `buying the map should be a real goal, not $${total}`);
+});
+
+test('buying land where you own everything offers nothing', () => {
+  const s = ownEverything(newGameRaw(6106));
+  assertEqual(buyablePlots(s).length, 0, 'nothing left to buy');
+});
+
+test('ownership survives a save round trip', () => {
+  const s = newGameRaw(6107);
+  const { px, py } = plotOfTile(s.farmer.x, s.farmer.y);
+  s.money = 100000;
+  buyPlot(s, px + 1, py);
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual(Array.from(back.grid.owned).sort(), Array.from(s.grid.owned).sort(),
+    'the deeds are part of the save');
+});
+
+test('an old save keeps every plot it was using', () => {
+  // Before this feature the whole map was the player's. The migration must not
+  // fence anyone out of land they had already built on.
+  const s = ownEverything(newGameRaw(6108));
+  s.grid.objects.fill(OBJ.NONE);
+  s.grid.ground.fill(GROUND.GRASS);
+  s.buildings = [];
+
+  // A farm spread over three far-apart corners of the map.
+  s.grid.setGround(2, 2, GROUND.TILLED);              // a bed in the north-west
+  s.grid.setObject(37, 4, OBJ.FENCE);                 // a fence in the north-east
+  s.animals = [{ id: 1, type: 'chicken', x: 3, y: 36 }];  // a chicken in the south-west
+
+  const v1 = JSON.parse(JSON.stringify(serialize(s)));
+  v1.version = 1;
+  delete v1.map.owned;
+
+  const granted = new Set(grantLegacyLand(v1));
+  const w = s.grid.w;
+  for (const [x, y, what] of [[2, 2, 'the bed'], [37, 4, 'the fence'],
+    [3, 36, 'the chicken'], [s.farmer.x, s.farmer.y, 'the farmer']]) {
+    const p = plotOfTile(x, y);
+    assert(granted.has(plotIndex(p.px, p.py, w)), `${what} keeps its land`);
+  }
+});
+
+test('migrating an old save grants the land, once', () => {
+  const s = newGameRaw(6109);
+  const v1 = JSON.parse(JSON.stringify(serialize(s)));
+  v1.version = 1;
+  delete v1.map.owned;
+
+  const migrated = migrate(v1);
+  assertEqual(migrated.version, SAVE_VERSION, 'brought up to date');
+  assert(Array.isArray(migrated.map.owned) && migrated.map.owned.length > 0,
+    'and comes back with land');
+
+  const live = deserialize(migrated);
+  assert(live.grid.isOwned(live.farmer.x, live.farmer.y),
+    'the farmer is standing on land he owns');
 });
 
 // --- save export / import -----------------------------------------------

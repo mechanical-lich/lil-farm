@@ -39,7 +39,9 @@ for development.
   watching.
 - **Settings panel — complete.** Backup, restore, and the debug switches that
   used to live only on `window.lilfarm`, now reachable from a phone. See below.
-- **Next: M6 remainder** — land expansion.
+- **Land expansion — complete.** The map is divided into 8x8 plots, bought one
+  at a time from the shop. See below.
+- **`TESTING` is off.** New farms get $50 and ten seeds, as intended.
 
 **The settings panel and the save.** The farm lives in localStorage, which the
 browser is entitled to clear, so exporting a copy is the only real protection
@@ -59,7 +61,26 @@ Both destructive buttons use a two-tap confirm (`confirmable()`) rather than
 `confirm()`: it stays in the game's own styling and can't be dismissed by a
 stray swipe. Taps re-arm for 4s and reset when the panel closes.
 
-140 headless tests pass via `npm test`.
+**Land ownership lives on the Grid, not beside it.** `grid.owned` is a Set of
+plot indices, and `isWalkable()` consults it. That one placement is why the
+farmer, the animals and the pathfinder can't disagree about where the farm ends
+— they all already funnel through that method. `taskForTile` and `canPlaceAt`
+check `isOwned` explicitly, which covers every tool at once rather than per tool.
+
+The v1 -> v2 migration (`grantLegacyLand` in `world/land.js`) grants any plot
+showing a sign of use: the farmer, buildings, animals, troughs, crops, queued
+tasks, and any tile that isn't plain grass. Before this feature a farm owned the
+whole map, so anything not granted is something taken away from a player who had
+it — hence the deliberate generosity. Granted plots can be non-contiguous, which
+is fine; the adjacency rule only governs new purchases.
+
+**Development is served by `tools/devserver.mjs`, not `python -m http.server`.**
+The only meaningful difference is `Cache-Control: no-store`. Python sends no
+cache headers, which lets the browser heuristically cache ES modules, and a
+half-stale module graph produces baffling errors about exports that plainly
+exist. This cost hours more than once. Don't switch back.
+
+150 headless tests pass via `npm test`.
 
 Tilling is a two-point row gesture and beds are drawn with the capsule art — see
 section 8. Adjacent rows stay visually separate rather than merging into a grid.
@@ -80,7 +101,9 @@ movement.
 device: the horizontally scrolling rows couldn't be the target of a drag, so they
 never scrolled on iPhone; and a tap landing in the 6px gap between two buttons
 fell through to the canvas and did farm work. The rows also declare
-`touch-action: pan-x` so a horizontal drag is unambiguously a scroll.
+`touch-action: pan-x` so a horizontal drag is unambiguously a scroll. Confirmed
+fixed on a real iPhone — this is not something a desktop browser can tell you,
+so any future change to `#ui` pointer handling needs re-checking on the phone.
 
 Panels (`shop` / `tasks` / `bag`) coordinate through `panel:open`, `panel:close` and
 `panel:dismiss` events rather than holding references to each other. Opening one
@@ -92,7 +115,7 @@ a stray tap on the visible strip queue work the player never intended.
 Farmer travel speed is `FARMER_SPEED` in `config.js` (tiles walked per tick,
 currently 3). Work durations are separate and unaffected by it.
 
-Run it with `python3 -m http.server 8145` and open `/index.html`. `window.lilfarm`
+Run it with `node tools/devserver.mjs 8146` and open `/index.html`. `window.lilfarm`
 exposes `state`, `camera`, `save()`, `wipe()`, and `give()` for poking at a live farm.
 
 > ⚠ **`TESTING` in `config.js` is currently `true`**, which starts a new farm with
@@ -168,7 +191,7 @@ at all while the farmer is on it, which reads as swung open.
 ## 0. Ground rules
 
 - **No third-party libraries.** No npm dependencies, no bundler. Plain ES modules
-  (`<script type="module">`) served as static files. `python3 -m http.server` (or any
+  (`<script type="module">`) served as static files. `node tools/devserver.mjs` (or any
   static server) is the dev workflow.
 - **Many small files.** One module per concern (see file layout below). No file should
   grow past ~300 lines without a good reason.

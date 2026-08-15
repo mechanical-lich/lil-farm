@@ -4,6 +4,7 @@
 // one: a schema change must never destroy an existing save.
 
 import { SAVE_KEY, SAVE_VERSION, AUTOSAVE_MIN_MS, AUTOSAVE_MAX_MS } from '../config.js';
+import { grantLegacyLand } from '../world/land.js';
 
 /**
  * Migrations from version N to N+1, applied in order. Add an entry whenever the
@@ -11,7 +12,14 @@ import { SAVE_KEY, SAVE_VERSION, AUTOSAVE_MIN_MS, AUTOSAVE_MAX_MS } from '../con
  * @type {Record<number, (data: any) => any>}
  */
 const migrations = {
-  // 1: (data) => { data.newField = default; data.version = 2; return data; },
+  // Land ownership. Before this, every tile of the map was the player's; now it
+  // is bought a plot at a time. Existing farms keep everything they were using.
+  1: (data) => {
+    data.map = data.map || {};
+    data.map.owned = grantLegacyLand(data);
+    data.version = 2;
+    return data;
+  },
 };
 
 export function loadSave() {

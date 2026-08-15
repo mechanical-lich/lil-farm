@@ -1,4 +1,4 @@
-// The shop panel: two tabs, buy and sell.
+// The shop panel: buy, animals, land and sell.
 //
 // Quantity buttons are deliberately coarse (1 / 5 / all) rather than a stepper —
 // on a phone, tapping "+" nine times to buy ten seeds is miserable.
@@ -9,9 +9,10 @@ import {
   animalList, canBuyAnimal,
 } from '../sim/shop.js';
 import { animalCapacity } from '../sim/build.js';
+import { PLOT, nextLandPrice, ownedCount, totalPlots, buyablePlots } from '../world/land.js';
 import { countItem } from '../sim/inventory.js';
 
-export function initShopPanel(state, { onMessage, onPlaceAnimal } = {}) {
+export function initShopPanel(state, { onMessage, onPlaceAnimal, onPickLand } = {}) {
   const panel = document.getElementById('shop-panel');
   const list = document.getElementById('shop-list');
   const tabs = document.getElementById('shop-tabs');
@@ -57,6 +58,18 @@ export function initShopPanel(state, { onMessage, onPlaceAnimal } = {}) {
     // Livestock doesn't complete here: the shop closes and hands off to the
     // placement flow so the player chooses where the animal lives. Nothing is
     // charged until they confirm a spot.
+    // Land works the same way as livestock, and for the same reason: the
+    // player has to say *which* plot, so the shop steps out of the way.
+    if (act === 'land') {
+      if (buyablePlots(state).length === 0) {
+        onMessage?.('There is no more land to buy', 'warn');
+        return;
+      }
+      setOpen(false);
+      onPickLand?.();
+      return;
+    }
+
     if (act === 'animal') {
       const allowed = canBuyAnimal(state, id);
       if (!allowed.ok) { onMessage?.(allowed.reason, 'warn'); return; }
@@ -88,7 +101,8 @@ export function initShopPanel(state, { onMessage, onPlaceAnimal } = {}) {
 
     list.innerHTML = tab === 'buy' ? renderBuy()
       : tab === 'animals' ? renderAnimals()
-        : renderSell();
+        : tab === 'land' ? renderLand()
+          : renderSell();
 
     if (tab === 'buy') {
       note.textContent = `New seeds in ${formatDuration(ticksUntilRotation(state))} · $${state.money}`;
@@ -97,9 +111,28 @@ export function initShopPanel(state, { onMessage, onPlaceAnimal } = {}) {
       note.textContent = cap === 0
         ? 'Build a barn to keep animals · $' + state.money
         : `Space for ${state.animals.length}/${cap} animals · $${state.money}`;
+    } else if (tab === 'land') {
+      note.textContent = `You own ${ownedCount(state)} of ${totalPlots(state)} plots · $${state.money}`;
     } else {
       note.textContent = `$${state.money}`;
     }
+  }
+
+  function renderLand() {
+    const price = nextLandPrice(state);
+    const available = buyablePlots(state).length;
+    if (available === 0) {
+      return '<li class="empty">You own the whole valley. Nothing left to buy!</li>';
+    }
+    return `
+      <li>
+        <span class="shop-name">A plot of land
+          <em>${PLOT}x${PLOT} tiles, next to your farm</em>
+        </span>
+        <span class="shop-price">$${price}</span>
+        <button data-act="land" ${state.money >= price ? '' : 'disabled'}>Choose</button>
+      </li>
+      <li class="empty">Each plot costs more than the last.</li>`;
   }
 
   function renderAnimals() {

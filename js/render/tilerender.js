@@ -187,6 +187,34 @@ export function drawObjects(ctx, sheets, state, view, entityRows = null) {
  * two body rows. Only the body sits on the ground, so the roof can hang over
  * tiles the farmer walks through.
  */
+/**
+ * Washes over land the player hasn't bought.
+ *
+ * Drawn last, over the scenery rather than under it, so the trees out there
+ * dim too — the boundary has to read as "not yours yet" at a glance, and
+ * dimming only the grass under a bright tree doesn't say that. The wash is
+ * deliberately gentle: it's an invitation, not a wall.
+ */
+export function drawUnowned(ctx, state, view) {
+  const { grid } = state;
+  ctx.save();
+  ctx.fillStyle = 'rgba(24, 38, 20, 0.42)';
+  for (let y = view.y0; y <= view.y1; y++) {
+    // Runs of unowned tiles are filled in one rect per row, which at 40 tiles
+    // wide is a handful of fills instead of hundreds.
+    let runStart = -1;
+    for (let x = view.x0; x <= view.x1 + 1; x++) {
+      const unowned = x <= view.x1 && !grid.isOwned(x, y);
+      if (unowned && runStart < 0) runStart = x;
+      if (!unowned && runStart >= 0) {
+        ctx.fillRect(runStart * TILE, y * TILE, (x - runStart) * TILE, TILE);
+        runStart = -1;
+      }
+    }
+  }
+  ctx.restore();
+}
+
 export function drawBuilding(ctx, sheets, building) {
   const px = building.x * TILE;
   const roofRows = SPRITES.barnRoofRows;

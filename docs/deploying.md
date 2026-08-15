@@ -61,14 +61,14 @@ works with no connection.
 
 ## Local development
 
-`python3 -m http.server 8145`, then open `http://localhost:8145/`.
+`node tools/devserver.mjs 8146`, then open `http://localhost:8146/`.
 
 The service worker **deliberately does not register on localhost**, because
 serving assets cache-first means an edited file keeps showing its old version
 until the cache is cleared. Any worker left over from a previous test is
 unregistered automatically on a plain local load.
 
-To exercise the installable build locally, load `http://localhost:8145/?sw=1`.
+To exercise the installable build locally, load `http://localhost:8146/?sw=1`.
 
 ## Regenerating the icons
 

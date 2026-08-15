@@ -10,7 +10,7 @@ export const CATCHUP_CHUNK = 20000;     // ticks per chunk before yielding to th
 
 // --- Persistence --------------------------------------------------------
 export const SAVE_KEY = 'lilfarm.save.v1';
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 export const AUTOSAVE_MIN_MS = 1000;    // never write more often than this
 export const AUTOSAVE_MAX_MS = 10000;   // always write at least this often when dirty
 
@@ -23,9 +23,11 @@ export const FARMER_SPEED = 3;
 // --- Starting resources -------------------------------------------------
 //
 // TESTING hands a new farm enough of everything to reach any part of the game
-// immediately. Set it to false before anyone actually plays: the real starting
-// kit is deliberately meagre, and skipping that is skipping the early game.
-export const TESTING = true;
+// immediately. It is off for anyone actually playing: the real starting kit is
+// deliberately meagre, and skipping that is skipping the early game. Flip it on
+// to test something deep in the game without farming your way there first —
+// the settings panel says loudly when it's on.
+export const TESTING = false;
 
 const REAL_START = {
   money: 50,
@@ -47,6 +49,13 @@ export const START_INVENTORY = TESTING ? TESTING_START.inventory : REAL_START.in
 // --- World --------------------------------------------------------------
 export const MAP_W = 40;
 export const MAP_H = 40;
+
+// What each new plot of land costs: this many dollars times the number of
+// plots already owned, so the second plot is one step and the last is
+// twenty-four. Guesswork until the economy has been played properly — a good
+// eggplant field clears a few hundred an hour, so the first plot should be a
+// couple of decent harvests away and the far corners of the map a long game.
+export const LAND_PRICE_STEP = 250;
 
 // Density of starting obstacles, as a fraction of map tiles.
 export const GEN = {

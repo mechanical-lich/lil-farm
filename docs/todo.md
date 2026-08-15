@@ -1,5 +1,6 @@
-- Tilled soil should tile based on their neighbors.   We have horizontal and veritcle directions.  Keep it in lanes though, no middle tiles.
 - Weeds randomly grow on grass tiles and need pulled
 - Fun animations.  Farmer bounces as he walks, trees wiggle as they are chopped, etc.
-- Flip sprite left/right based on direction
-- Mushroom Journal.   Create a tile sheet of different mushrooms.  Spawn the mushrooms on grass tiles at random.   Mushrooms have various rarities and can be sold at different prices.   A journal records what mushrooms you've found and how many of each.   
+- Mushroom Journal.   I have created a mushrooms tilesheet with 4 mushroom types and 4 varations.  Spawn the mushrooms on grass tiles at random.   Mushrooms have various rarities and can be sold at different prices.   A journal records what mushrooms you've found and how many of each.    
+- Animal affection system.  Player can select a petting action.  When they click on animals it pets them makes a heart animation and raises that animals affection.    The higher the affection the the less resources the animal requires to produce it's product.   Higher affection also reduces the amount of time it takes to create product.   IE an high affection chicken needs less food and water and lays eggs more frequently.   Every so often based on their affection level, an animal shows an emote.   
+- Organize sell menu by item type. Group crops, products, seeds, etc together.  
+- Get rid of the "Tasks" button and make it so that the bar at the top that tells you what the far is currently doing is the button that opens the tasks model.   Put the current number of tasks in this bar too.  

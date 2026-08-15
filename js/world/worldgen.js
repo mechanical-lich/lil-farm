@@ -3,6 +3,7 @@
 import { Grid } from './grid.js';
 import { GROUND, OBJ } from './tiledefs.js';
 import { MAP_W, MAP_H, GEN } from '../config.js';
+import { startingPlot } from './land.js';
 
 /**
  * Where the farm's starting barn stands, relative to the farmer's spawn: three
@@ -22,7 +23,17 @@ export function generateWorld(rng) {
   const grid = new Grid(MAP_W, MAP_H);
   grid.ground.fill(GROUND.GRASS);
 
-  const spawn = { x: Math.floor(MAP_W / 2), y: Math.floor(MAP_H / 2) };
+  // Nudged below the map's centre so the whole farmstead fits inside the single
+  // plot a new farm owns: three overhanging roof rows, two barn body rows, and
+  // the two yard rows the farmer stands in come to seven of the plot's eight.
+  // A roof poking into land you haven't bought would be drawn dimmed and read
+  // as derelict.
+  const spawn = { x: Math.floor(MAP_W / 2), y: Math.floor(MAP_H / 2) + 1 };
+
+  // You start owning exactly the plot you're standing in; the rest of the
+  // valley is bought a plot at a time. See land.js.
+  const start = startingPlot(spawn);
+  grid.own(start.px, start.py);
 
   // Scatter obstacles. Order matters: later types only land on empty tiles, so
   // trees (placed first) get priority over weeds.

@@ -8,7 +8,7 @@
 // ⚠ Bump CACHE_VERSION on every deploy. Assets are served cache-first, so
 // without a bump a returning player keeps the old build indefinitely.
 
-const CACHE_VERSION = 'lil-farm-v2';
+const CACHE_VERSION = 'lil-farm-v3';
 
 const SHELL = [
   './',
@@ -33,6 +33,7 @@ const SHELL = [
   './js/render/tilerender.js',
   './js/render/entityrender.js',
   './js/world/grid.js',
+  './js/world/land.js',
   './js/world/tiledefs.js',
   './js/world/worldgen.js',
   './js/world/pathfind.js',
