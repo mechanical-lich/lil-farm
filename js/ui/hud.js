@@ -6,7 +6,9 @@ import { taskLabel } from '../sim/tasks.js';
 
 export function initHud(state) {
   const money = document.getElementById('hud-money');
-  const status = document.getElementById('hud-status');
+  // The status chip is also the task-queue button (see taskpanel.js); the HUD
+  // only owns the text inside it, never the element's own classes or state.
+  const status = document.getElementById('hud-status-text');
   const invBtn = document.getElementById('inv-toggle');
   const invPanel = document.getElementById('inv-panel');
   const invList = document.getElementById('inv-list');

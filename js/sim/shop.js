@@ -20,9 +20,25 @@ export const ROTATION_TICKS = 6 * 60 * 60;
 /** Always available, so a player can never be stranded with nothing to plant. */
 export const STAPLE_SEEDS = ['carrot', 'wheat'];
 
-/** Two of these are offered at a time. */
-export const ROTATING_SEEDS = ['corn', 'tomato', 'cabbage', 'eggplant'];
-export const ROTATING_COUNT = 2;
+/**
+ * The non-staple crops, split by how long they take. One is drawn from each
+ * tier, so the shop always offers something slow.
+ *
+ * Drawing two from a single pool let a rotation take out cabbage *and*
+ * eggplant together, which is the one outcome the balance can't afford: the
+ * slow crops are the whole point of an overnight field, and a player who
+ * checks in at bedtime and finds only 4- and 5-minute crops has nothing worth
+ * planting. Tiering costs nothing — the list is still four seeds long and
+ * still rotates — and it makes that case impossible rather than unlikely.
+ */
+export const ROTATING_TIERS = [
+  ['corn', 'tomato'],        // mid: something to plant while you're watching
+  ['cabbage', 'eggplant'],   // slow: something to leave running overnight
+];
+
+/** Flat view of the same pool, for anything that just wants the names. */
+export const ROTATING_SEEDS = ROTATING_TIERS.flat();
+export const ROTATING_COUNT = ROTATING_TIERS.length;
 
 /** Everything sold by the sack rather than the seed packet. */
 export const MATERIALS = {
@@ -67,11 +83,7 @@ export function ticksUntilRotation(state) {
 export function stockedSeedCrops(state) {
   const rng = makeRng(((state.seed >>> 0) ^ (rotationIndex(state) * 0x9e3779b1)) >>> 0);
 
-  const pool = [...ROTATING_SEEDS];
-  const picked = [];
-  for (let i = 0; i < ROTATING_COUNT && pool.length > 0; i++) {
-    picked.push(pool.splice(rng.int(pool.length), 1)[0]);
-  }
+  const picked = ROTATING_TIERS.map((tier) => tier[rng.int(tier.length)]);
 
   // Sorted by grow time so the list reads short-to-long, which is also
   // cheap-to-expensive; the shop shouldn't reshuffle its own rows visually.

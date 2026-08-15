@@ -4,7 +4,7 @@
 // one: a schema change must never destroy an existing save.
 
 import { SAVE_KEY, SAVE_VERSION, AUTOSAVE_MIN_MS, AUTOSAVE_MAX_MS } from '../config.js';
-import { grantLegacyLand } from '../world/land.js';
+import { expandSaveToCells } from '../world/expand.js';
 
 /**
  * Migrations from version N to N+1, applied in order. Add an entry whenever the
@@ -12,12 +12,16 @@ import { grantLegacyLand } from '../world/land.js';
  * @type {Record<number, (data: any) => any>}
  */
 const migrations = {
-  // Land ownership. Before this, every tile of the map was the player's; now it
-  // is bought a plot at a time. Existing farms keep everything they were using.
-  1: (data) => {
-    data.map = data.map || {};
-    data.map.owned = grantLegacyLand(data);
-    data.version = 2;
+  // Land ownership arrived here, but the geometry changed again in 3 and the
+  // grant is done there, over the whole of the player's old map. Nothing to do
+  // but move the version along.
+  1: (data) => { data.version = 2; return data; },
+
+  // The 3x3 world. The old 40x40 map becomes the middle cell and the player
+  // keeps all of it; eight new cells are generated around it. See world/expand.js.
+  2: (data) => {
+    expandSaveToCells(data);
+    data.version = 3;
     return data;
   },
 };

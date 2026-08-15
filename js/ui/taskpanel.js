@@ -10,7 +10,11 @@ export function initTaskPanel(state) {
   const root = document.getElementById('task-panel');
   const list = document.getElementById('task-list');
   const count = document.getElementById('task-count');
-  const toggle = document.getElementById('task-toggle');
+  // The queue opens from the status bar rather than its own button: the bar is
+  // already what you look at to see what the farmer is doing, so it's where you
+  // reach when you want to know what's next. It also gives the bottom row of
+  // buttons back a slot's worth of width.
+  const toggle = document.getElementById('hud-status');
 
   let open = false;
   const setOpen = (v) => {

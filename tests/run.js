@@ -7,20 +7,24 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { makeRng, hash2d } from '../js/engine/rng.js';
 import { Grid } from '../js/world/grid.js';
-import { GROUND, OBJ } from '../js/world/tiledefs.js';
+import { GROUND, OBJ, isTilled } from '../js/world/tiledefs.js';
 import { generateWorld, startingBarnAnchor } from '../js/world/worldgen.js';
 import { findPath, besideBox, insideBox } from '../js/world/pathfind.js';
 import {
   PLOT, plotOfTile, plotBounds, plotIndex, startingPlot, landPrice, nextLandPrice,
-  canBuyPlot, buyPlot, buyablePlots, totalPlots, grantLegacyLand,
+  canBuyPlot, buyPlot, buyablePlots, totalPlots,
 } from '../js/world/land.js';
+import { expandSaveToCells, centreCellIndex } from '../js/world/expand.js';
+import {
+  updateWeeds, canSprout, countWeeds, WEED_INTERVAL, WEED_MAX_FRACTION,
+} from '../js/sim/weeds.js';
 import { addTask, cancelTask, prioritizeTask, taskForTile, tillRow, queueTillRow } from '../js/sim/tasks.js';
 import {
   CROPS, SOIL_DRY_TICKS, plantCrop, waterTile, harvestCrop,
   cropAt, isRipe, isStalled, spoilRemaining, SPOIL_TICKS, updateCrops,
 } from '../js/sim/crops.js';
 import {
-  ROTATION_TICKS, STAPLE_SEEDS, ROTATING_COUNT, stockedSeedCrops, buyList,
+  ROTATION_TICKS, STAPLE_SEEDS, ROTATING_COUNT, ROTATING_TIERS, stockedSeedCrops, buyList,
   buy, sell, sellAll, buyAnimal, canBuyAnimal, canPlaceAnimal, MATERIALS,
 } from '../js/sim/shop.js';
 import { ITEMS } from '../js/sim/inventory.js';
@@ -31,6 +35,7 @@ import {
 import {
   BUILDABLES, canPlaceAt, canAfford, footprint, troughAnchorAt,
   completeBuild, demolish, structureAt, buildingAt, animalCapacity, BARN_CAPACITY,
+  placeStructure,
 } from '../js/sim/build.js';
 import { addItems } from '../js/sim/inventory.js';
 import { newGame as newGameRaw, serialize, deserialize } from '../js/state.js';
@@ -41,7 +46,9 @@ import {
   on, suspend, resume, startTally, stopTally, emitUnlessSuspended,
 } from '../js/engine/events.js';
 import { buildSummary } from '../js/ui/summary.js';
-import { TICK_MS, SAVE_VERSION, FARMER_SPEED } from '../js/config.js';
+import {
+  TICK_MS, SAVE_VERSION, FARMER_SPEED, MAP_W, MAP_H, CELL_W, CELL_H,
+} from '../js/config.js';
 
 let passed = 0;
 const failures = [];
@@ -96,6 +103,48 @@ function openGrid(w, h) {
  * tests; every other test predates it and works wherever it likes, so helpers
  * that aren't about land opt out of the boundary rather than dodging it.
  */
+/**
+ * A farm as it would have been saved before the 3x3 world: one 40x40 map with
+ * no ownership recorded, coordinates running 0..39.
+ *
+ * Built by taking the middle cell of a current farm and shifting everything
+ * back by one cell — the exact inverse of the migration, which is what makes it
+ * a fair test of it rather than a fabricated shape the game never wrote.
+ */
+function oldWorldSave(state) {
+  const data = JSON.parse(JSON.stringify(serialize(state)));
+  data.version = 1;
+
+  data.map = { w: CELL_W, h: CELL_H, ground: [], objects: [] };
+  for (let y = 0; y < CELL_H; y++) {
+    for (let x = 0; x < CELL_W; x++) {
+      data.map.ground.push(state.grid.getGround(x + CELL_W, y + CELL_H));
+      data.map.objects.push(state.grid.getObject(x + CELL_W, y + CELL_H));
+    }
+  }
+
+  const back = (p) => { p.x -= CELL_W; p.y -= CELL_H; };
+  back(data.farmer);
+  (data.farmer.path || []).forEach(back);
+  (data.farmer.trail || []).forEach(back);
+  for (const a of data.animals || []) {
+    back(a);
+    if (typeof a.px === 'number') { a.px -= CELL_W; a.py -= CELL_H; }
+    (a.path || []).forEach(back);
+  }
+  for (const b of data.buildings || []) back(b);
+  for (const t of data.tasks || []) back(t);
+  for (const key of ['crops', 'wetUntil', 'tillDir', 'troughs']) {
+    const out = {};
+    for (const [k, v] of Object.entries(data[key] || {})) {
+      const comma = k.indexOf(',');
+      out[`${+k.slice(0, comma) - CELL_W},${+k.slice(comma + 1) - CELL_H}`] = v;
+    }
+    data[key] = out;
+  }
+  return data;
+}
+
 function ownEverything(s) {
   for (let i = 0; i < totalPlots(s); i++) s.grid.owned.add(i);
   return s;
@@ -1721,6 +1770,34 @@ test('the rotating selection offers exactly two extra crops', () => {
   }
 });
 
+test('every rotation stocks something slow enough to leave overnight', () => {
+  // The rotation once drew both slow crops out at the same time, which left a
+  // player checking in at bedtime with nothing but 4- and 5-minute crops to
+  // plant. One seed comes from each tier now, so that cannot happen.
+  const slow = ROTATING_TIERS[ROTATING_TIERS.length - 1];
+  for (const seed of [11, 12, 13]) {
+    const s = newGame(seed);
+    for (let r = 0; r < 40; r++) {
+      s.tickCount = r * ROTATION_TICKS;
+      const stock = stockedSeedCrops(s);
+      assert(stock.some((c) => slow.includes(c)),
+        `seed ${seed} rotation ${r} offered nothing slow: ${stock.join(', ')}`);
+    }
+  }
+});
+
+test('the rotation still moves — no tier is stuck on one crop', () => {
+  const s = newGame(14);
+  const seen = new Set();
+  for (let r = 0; r < 40; r++) {
+    s.tickCount = r * ROTATION_TICKS;
+    for (const c of stockedSeedCrops(s)) seen.add(c);
+  }
+  for (const crop of ROTATING_TIERS.flat()) {
+    assert(seen.has(crop), `${crop} never came up across 40 rotations`);
+  }
+});
+
 test('stock is stable within a rotation and changes across rotations', () => {
   const s = newGame(77);
 
@@ -1947,6 +2024,130 @@ test('a quiet absence with nothing to report shows nothing', () => {
     'no work, no losses, nothing needing attention');
 });
 
+// --- weeds regrowing ----------------------------------------------------
+
+/** A farm with one plot, cleared of everything, so weeds are the only variable. */
+function weedableFarm(seed = 7000) {
+  const s = newGameRaw(seed);
+  s.grid.objects.fill(OBJ.NONE);
+  s.buildings = [];
+  return s;
+}
+
+test('weeds come back on cleared land', () => {
+  const s = weedableFarm(7001);
+  assertEqual(countWeeds(s), 0, 'starts clear');
+
+  for (let i = 0; i < WEED_INTERVAL * 3 + 1; i++) tick(s);
+  assert(countWeeds(s) > 0, 'a tidied farm does not stay tidy forever');
+});
+
+test('weeds stop at a fraction of the land, however long you are away', () => {
+  // The property that makes this safe to leave running: a week away must not
+  // bury the farm. Whatever the elapsed time, the worst case is the same.
+  const s = weedableFarm(7002);
+  const cap = Math.floor(s.grid.owned.size * PLOT * PLOT * WEED_MAX_FRACTION);
+
+  for (let i = 0; i < 7 * 24 * 60 * 60; i++) tick(s);
+
+  const weeds = countWeeds(s);
+  assert(weeds <= cap, `a week away left ${weeds} weeds, cap is ${cap}`);
+  assert(weeds >= cap - 1, `and it should reach the cap, not stall at ${weeds}`);
+});
+
+test('owning more land means more weeds to keep down', () => {
+  const small = weedableFarm(7003);
+  const big = weedableFarm(7003);
+  const { px, py } = plotOfTile(big.farmer.x, big.farmer.y);
+  big.money = 100000;
+  buyPlot(big, px + 1, py);
+  buyPlot(big, px - 1, py);
+  for (let i = big.grid.w * 0; i < 1; i++) big.grid.objects.fill(OBJ.NONE);
+
+  for (let i = 0; i < 24 * 60 * 60; i++) { tick(small); tick(big); }
+
+  assert(countWeeds(big) > countWeeds(small),
+    'upkeep should scale with the farm, not stay fixed');
+});
+
+test('weeds never sprout on beds, crops, roads or anything already there', () => {
+  const s = weedableFarm(7004);
+  const { x, y } = { x: s.farmer.x + 2, y: s.farmer.y - 4 };
+
+  s.grid.setGround(x, y, GROUND.TILLED);
+  assert(!canSprout(s, x, y), 'not on a bed');
+
+  s.grid.setGround(x, y, GROUND.GRASS);
+  plantCrop(s, x, y, 'carrot');
+  assert(!canSprout(s, x, y), 'not on a crop');
+  delete s.crops[`${x},${y}`];
+
+  s.grid.setGround(x, y, GROUND.ROAD);
+  assert(!canSprout(s, x, y), 'not on a road');
+
+  s.grid.setGround(x, y, GROUND.GRASS);
+  s.grid.setObject(x, y, OBJ.ROCK);
+  assert(!canSprout(s, x, y), 'not on top of a rock');
+
+  s.grid.setObject(x, y, OBJ.NONE);
+  assert(canSprout(s, x, y), 'but plain grass, yes');
+
+  assert(!canSprout(s, s.farmer.x, s.farmer.y), 'and never underfoot');
+});
+
+test('weeds never sprout on land you do not own', () => {
+  const s = weedableFarm(7005);
+  const { px, py } = plotOfTile(s.farmer.x, s.farmer.y);
+  const outside = plotBounds(px, py).x0 - 1;
+  assert(!canSprout(s, outside, s.farmer.y), 'the neighbour keeps his own weeds');
+
+  // A long run must not touch it either.
+  for (let i = 0; i < 24 * 60 * 60; i++) tick(s);
+  assertEqual(s.grid.getObject(outside, s.farmer.y), OBJ.NONE, 'still clear over there');
+});
+
+test('weed regrowth is deterministic, so catching up twice agrees', () => {
+  // The whole offline design rests on this: replaying the same elapsed time
+  // must produce the same farm, weeds included.
+  const a = weedableFarm(7006);
+  const b = weedableFarm(7006);
+  for (let i = 0; i < WEED_INTERVAL * 40; i++) { tick(a); tick(b); }
+  assertEqual(serialize(b), serialize(a), 'two identical farms must stay identical');
+});
+
+test('a weed that grows while you are away is counted for the summary', () => {
+  const s = weedableFarm(7007);
+  suspend();
+  startTally();
+  for (let i = 0; i < WEED_INTERVAL * 3 + 1; i++) tick(s);
+  const tally = stopTally();
+  resume();
+
+  assert((tally.counts['weed:grown'] || 0) > 0, 'the summary can say weeds sprang up');
+});
+
+test('clearing a weed makes room for another', () => {
+  // Regrowth replaces what you clear rather than piling on top of it, which is
+  // what keeps the chore constant instead of compounding.
+  const s = weedableFarm(7008);
+  for (let i = 0; i < 24 * 60 * 60; i++) tick(s);
+  const atCap = countWeeds(s);
+
+  // Pull one by hand, as the farmer would.
+  outer: for (let y = 0; y < s.grid.h; y++) {
+    for (let x = 0; x < s.grid.w; x++) {
+      if (s.grid.getObject(x, y) === OBJ.WEED && s.grid.isOwned(x, y)) {
+        s.grid.setObject(x, y, OBJ.NONE);
+        break outer;
+      }
+    }
+  }
+  assertEqual(countWeeds(s), atCap - 1, 'one fewer for now');
+
+  for (let i = 0; i < WEED_INTERVAL * 8; i++) tick(s);
+  assertEqual(countWeeds(s), atCap, 'and it grows back');
+});
+
 // --- land ---------------------------------------------------------------
 
 test('a new farm owns exactly one plot, and the whole farmstead is inside it', () => {
@@ -2001,7 +2202,7 @@ test('land is bought a plot at a time, and only next to what you own', () => {
   s.money = 100000;
 
   assert(!canBuyPlot(s, px, py).ok, 'not the plot you already own');
-  assert(!canBuyPlot(s, px + 2, py).ok, 'not a plot two away, with a gap');
+  assert(!canBuyPlot(s, px + 1, py - 1).ok, 'not a corner, which only touches diagonally');
   assert(!canBuyPlot(s, px + 1, py + 1).ok, 'not diagonally — corners do not touch');
   assert(canBuyPlot(s, px + 1, py).ok, 'the plot next door, yes');
 
@@ -2011,8 +2212,9 @@ test('land is bought a plot at a time, and only next to what you own', () => {
   assertEqual(s.money, 100000 - price, 'and costs what it said it would');
   assertEqual(s.grid.owned.size, 2, 'two plots now');
 
-  // Owning it changes what is reachable next: the far side is now adjacent.
-  assert(canBuyPlot(s, px + 2, py).ok, 'the next one along opens up');
+  // Owning it changes what is reachable next: the corner beyond it now has an
+  // orthogonal neighbour, so it comes up for sale.
+  assert(canBuyPlot(s, px + 1, py - 1).ok, 'the corner opens up once its neighbour is yours');
 });
 
 test('land you cannot afford is refused without charging you', () => {
@@ -2053,46 +2255,116 @@ test('ownership survives a save round trip', () => {
     'the deeds are part of the save');
 });
 
-test('an old save keeps every plot it was using', () => {
-  // Before this feature the whole map was the player's. The migration must not
-  // fence anyone out of land they had already built on.
-  const s = ownEverything(newGameRaw(6108));
-  s.grid.objects.fill(OBJ.NONE);
-  s.grid.ground.fill(GROUND.GRASS);
-  s.buildings = [];
-
-  // A farm spread over three far-apart corners of the map.
-  s.grid.setGround(2, 2, GROUND.TILLED);              // a bed in the north-west
-  s.grid.setObject(37, 4, OBJ.FENCE);                 // a fence in the north-east
-  s.animals = [{ id: 1, type: 'chicken', x: 3, y: 36 }];  // a chicken in the south-west
-
-  const v1 = JSON.parse(JSON.stringify(serialize(s)));
-  v1.version = 1;
-  delete v1.map.owned;
-
-  const granted = new Set(grantLegacyLand(v1));
-  const w = s.grid.w;
-  for (const [x, y, what] of [[2, 2, 'the bed'], [37, 4, 'the fence'],
-    [3, 36, 'the chicken'], [s.farmer.x, s.farmer.y, 'the farmer']]) {
-    const p = plotOfTile(x, y);
-    assert(granted.has(plotIndex(p.px, p.py, w)), `${what} keeps its land`);
-  }
-});
-
-test('migrating an old save grants the land, once', () => {
-  const s = newGameRaw(6109);
-  const v1 = JSON.parse(JSON.stringify(serialize(s)));
-  v1.version = 1;
-  delete v1.map.owned;
+test('an old save keeps the whole of its map, not just the parts it used', () => {
+  // Before this, a farm was a single 40x40 map and every tile of it was the
+  // player's. That map becomes the middle cell and they keep all of it — the
+  // land they gain the option to buy is new country beyond it.
+  const s = newGameRaw(6108);
+  const v1 = oldWorldSave(s);
 
   const migrated = migrate(v1);
-  assertEqual(migrated.version, SAVE_VERSION, 'brought up to date');
-  assert(Array.isArray(migrated.map.owned) && migrated.map.owned.length > 0,
-    'and comes back with land');
-
   const live = deserialize(migrated);
-  assert(live.grid.isOwned(live.farmer.x, live.farmer.y),
-    'the farmer is standing on land he owns');
+
+  assertEqual(live.grid.owned.size, 1, 'exactly the cell they had');
+  assertEqual(Array.from(live.grid.owned), [centreCellIndex()], 'the middle one');
+
+  // Every tile of the old map, corners included, is theirs — not just the
+  // parts they happened to have built on.
+  for (const [x, y] of [[0, 0], [CELL_W - 1, 0], [0, CELL_H - 1], [CELL_W - 1, CELL_H - 1]]) {
+    assert(live.grid.isOwned(x + CELL_W, y + CELL_H), `old tile ${x},${y} is still theirs`);
+  }
+  assert(!live.grid.isOwned(0, 0), 'and the new country around it is not');
+});
+
+test('migrating moves the whole farm into the middle cell together', () => {
+  // A farm with one of everything that carries a coordinate, all of it inside
+  // the cell that becomes the middle one.
+  const s = newGameRaw(6109);
+  const bed = { x: s.farmer.x + 3, y: s.farmer.y + 3 };
+  s.grid.setObject(bed.x, bed.y, OBJ.NONE);
+  s.grid.setGround(bed.x, bed.y, GROUND.TILLED);
+  plantCrop(s, bed.x, bed.y, 'carrot');
+  waterTile(s, bed.x, bed.y);
+
+  const chicken = makeAnimal(s, 'chicken', s.farmer.x + 5, s.farmer.y + 5);
+  s.tasks = [{ id: 1, type: 'clear', x: s.farmer.x + 7, y: s.farmer.y, work: 5, progress: 0 }];
+  const trough = { x: s.farmer.x - 6, y: s.farmer.y + 6 };
+  placeStructure(s, 'waterTrough', trough.x, trough.y);
+
+  const was = {
+    farmer: { ...s.farmer }, barn: { ...s.buildings[0] },
+    chicken: { x: chicken.x, y: chicken.y },
+  };
+  const live = deserialize(migrate(oldWorldSave(s)));
+
+  // Everything lands back where it started: shifted out by a cell to build the
+  // old save, shifted back in by the migration. Anything the migration forgets
+  // to move would arrive a cell away from the rest of the farm.
+  assertEqual(live.farmer.x, was.farmer.x, 'the farmer moved with his farm');
+  assertEqual(live.farmer.y, was.farmer.y, 'on both axes');
+  assertEqual(live.buildings[0].x, was.barn.x, 'and so did the barn');
+  assertEqual(live.buildings[0].y, was.barn.y, 'both ways');
+  assertEqual(live.animals[0].x, was.chicken.x, 'and the chicken');
+  assertEqual(live.animals[0].px, was.chicken.x, 'including where it is drawn');
+  assertEqual(live.tasks[0].x, s.farmer.x + 7, 'and the queued work');
+  assert(live.crops[`${bed.x},${bed.y}`], 'and the planted carrot');
+  assert(live.wetUntil[`${bed.x},${bed.y}`], 'and the fact that it was watered');
+  assert(live.troughs[`${trough.x},${trough.y}`], 'and the trough');
+
+  // The farm has to still work afterwards, not just look right.
+  assert(live.grid.isOwned(live.farmer.x, live.farmer.y), 'the farmer stands on his own land');
+  assert(isTilled(live.grid.getGround(bed.x, bed.y)), 'the bed came too, still watered');
+});
+
+test('migrating generates new land around the old farm', () => {
+  const s = newGameRaw(6110);
+  const live = deserialize(migrate(oldWorldSave(s)));
+
+  assertEqual(live.grid.w, MAP_W, 'the world is nine cells wide now');
+  assertEqual(live.grid.h, MAP_H, 'and nine tall');
+
+  // The new cells must look lived-in, not like blank lawn.
+  let obstacles = 0;
+  for (let y = 0; y < CELL_H; y++) {
+    for (let x = 0; x < CELL_W; x++) if (live.grid.getObject(x, y) !== OBJ.NONE) obstacles++;
+  }
+  assert(obstacles > 100, `the new corner cell should be overgrown, found ${obstacles}`);
+});
+
+test('migrating an old save is deterministic', () => {
+  // Two players on the same save must get the same new land, and reloading
+  // must not reshuffle it.
+  const s = newGameRaw(6111);
+  const a = deserialize(migrate(oldWorldSave(s)));
+  const b = deserialize(migrate(oldWorldSave(s)));
+  assertEqual(serialize(b), serialize(a), 'the new country is generated from the seed');
+});
+
+test('a save from the short-lived 8x8-plot version migrates too', () => {
+  // Land ownership shipped once with a different geometry, so saves in the
+  // wild can be v1 or v2. Both have a 40x40 map; v2 also has plot indices that
+  // mean nothing now. Either way the player ends up owning their whole map.
+  const s = newGameRaw(6113);
+  const v2 = oldWorldSave(s);
+  v2.version = 2;
+  v2.map.owned = [0, 1, 5];            // meaningless under the new geometry
+
+  const live = deserialize(migrate(v2));
+  assertEqual(Array.from(live.grid.owned), [centreCellIndex()], 'one cell, the middle one');
+  assert(live.grid.isOwned(live.farmer.x, live.farmer.y), 'with the farmer on it');
+  assertEqual(live.grid.w, MAP_W, 'in the expanded world');
+});
+
+test('a migrated farm can buy the land next door', () => {
+  const s = newGameRaw(6112);
+  const live = deserialize(migrate(oldWorldSave(s)));
+  live.money = 100000;
+
+  const { px, py } = plotOfTile(live.farmer.x, live.farmer.y);
+  assertEqual(`${px},${py}`, '1,1', 'a migrated farm sits in the middle of the nine');
+  assert(canBuyPlot(live, px, py + 1).ok, 'the cell to the south is for sale');
+  assert(!canBuyPlot(live, px + 1, py + 1).ok, 'the corner still needs a neighbour first');
+  assert(buyPlot(live, px, py + 1).ok, 'and the purchase goes through');
 });
 
 // --- save export / import -----------------------------------------------

@@ -10,7 +10,7 @@ export const CATCHUP_CHUNK = 20000;     // ticks per chunk before yielding to th
 
 // --- Persistence --------------------------------------------------------
 export const SAVE_KEY = 'lilfarm.save.v1';
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 export const AUTOSAVE_MIN_MS = 1000;    // never write more often than this
 export const AUTOSAVE_MAX_MS = 10000;   // always write at least this often when dirty
 
@@ -47,15 +47,25 @@ export const START_MONEY = TESTING ? TESTING_START.money : REAL_START.money;
 export const START_INVENTORY = TESTING ? TESTING_START.inventory : REAL_START.inventory;
 
 // --- World --------------------------------------------------------------
-export const MAP_W = 40;
-export const MAP_H = 40;
+//
+// The world is a 3x3 grid of cells, each one a full 40x40 farm. You start
+// owning the middle cell and buy the eight around it, so the map the player
+// sees at the start is the whole map they used to get — expansion adds new
+// country rather than subdividing what was already there.
+export const CELL_W = 40;
+export const CELL_H = 40;
+export const CELLS_X = 3;
+export const CELLS_Y = 3;
 
-// What each new plot of land costs: this many dollars times the number of
-// plots already owned, so the second plot is one step and the last is
-// twenty-four. Guesswork until the economy has been played properly — a good
-// eggplant field clears a few hundred an hour, so the first plot should be a
-// couple of decent harvests away and the far corners of the map a long game.
-export const LAND_PRICE_STEP = 250;
+export const MAP_W = CELL_W * CELLS_X;
+export const MAP_H = CELL_H * CELLS_Y;
+
+// What each new cell of land costs: this many dollars times the number of cells
+// already owned, so the second is one step and the ninth is eight. A cell is a
+// whole 40x40 farm, so these are large numbers on purpose — $72,000 for the
+// full valley. Guesswork until the economy has been played properly; a good
+// eggplant field clears a few thousand an hour once it's running.
+export const LAND_PRICE_STEP = 2000;
 
 // Density of starting obstacles, as a fraction of map tiles.
 export const GEN = {
@@ -68,7 +78,9 @@ export const GEN = {
 };
 
 // --- Camera -------------------------------------------------------------
-export const ZOOM_MIN = 2;
+// Lowered when the world became nine cells: at 2 you can see about a tenth of
+// one cell, which makes crossing the valley a lot of dragging.
+export const ZOOM_MIN = 1;
 export const ZOOM_MAX = 6;
 export const ZOOM_DEFAULT = 3;
 

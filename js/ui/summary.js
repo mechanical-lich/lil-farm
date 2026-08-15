@@ -48,6 +48,9 @@ export function buildSummary(state, catchup) {
     lines.push(`${milkable} ${milkable === 1 ? 'animal is' : 'animals are'} ready to milk`);
   }
 
+  const weeds = counts['weed:grown'] || 0;
+  if (weeds > 0) lines.push(`${weeds} ${weeds === 1 ? 'weed' : 'weeds'} sprang up`);
+
   // Things that are true *now* rather than events — the reason a farm can look
   // idle. Animals never die, so this is the only way neglect ever shows up.
   const nudges = [];

@@ -10,6 +10,7 @@ import { TICK_MS } from '../config.js';
 import { updateFarmer } from './farmer.js';
 import { updateCrops } from './crops.js';
 import { updateAnimals } from './animals.js';
+import { updateWeeds } from './weeds.js';
 
 /** @param {object} state */
 export function tick(state) {
@@ -19,4 +20,5 @@ export function tick(state) {
   updateFarmer(state);
   updateCrops(state);
   updateAnimals(state);
+  updateWeeds(state);
 }

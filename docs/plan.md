@@ -39,9 +39,11 @@ for development.
   watching.
 - **Settings panel — complete.** Backup, restore, and the debug switches that
   used to live only on `window.lilfarm`, now reachable from a phone. See below.
-- **Land expansion — complete.** The map is divided into 8x8 plots, bought one
-  at a time from the shop. See below.
+- **Land expansion — complete.** The world is a 3x3 grid of cells, each a full
+  40x40 farm; you start in the middle and buy outward. See below.
 - **`TESTING` is off.** New farms get $50 and ten seeds, as intended.
+- **Weeds regrow — complete.** Capped, seeded, replayable; see `sim/weeds.js`.
+- **The status bar is the task button.** One fewer button in the bottom row.
 
 **The settings panel and the save.** The farm lives in localStorage, which the
 browser is entitled to clear, so exporting a copy is the only real protection
@@ -67,12 +69,29 @@ farmer, the animals and the pathfinder can't disagree about where the farm ends
 — they all already funnel through that method. `taskForTile` and `canPlaceAt`
 check `isOwned` explicitly, which covers every tool at once rather than per tool.
 
-The v1 -> v2 migration (`grantLegacyLand` in `world/land.js`) grants any plot
-showing a sign of use: the farmer, buildings, animals, troughs, crops, queued
-tasks, and any tile that isn't plain grass. Before this feature a farm owned the
-whole map, so anything not granted is something taken away from a player who had
-it — hence the deliberate generosity. Granted plots can be non-contiguous, which
-is fine; the adjacency rule only governs new purchases.
+**The world grew rather than being subdivided.** A cell is 40x40 — the entire
+map as it was — and the world is 3x3 of them, so a new farm has exactly as much
+land as it always did and expansion is new country. This was a correction: the
+first attempt cut the existing 40x40 map into 8x8 plots, which took land away
+from players instead of offering them more.
+
+`world/expand.js` is the v2 -> v3 migration: the old map goes into the centre
+cell, eight cells are generated around it from a generator seeded off the save's
+own seed (so it's deterministic and can't disturb `state.rng` mid-stream), and
+**every coordinate in the save shifts by one cell**. That last part is the risky
+half — farmer, path, trail, animals and their pixel positions, buildings, tasks,
+and the `"x,y"`-keyed crops/wetUntil/tillDir/troughs. Anything new that carries
+a tile coordinate has to be added to `shiftCoordinates` or it will point at the
+wrong tile forever. The test builds its "old save" by running that shift in
+reverse on a real farm, so a forgotten field shows up as a farm scattered a cell
+apart rather than as a passing assertion.
+
+Saves in the wild can be v1 or v2 (ownership shipped once with the 8x8 geometry);
+both are 40x40 maps and both converge on the same expansion, which discards the
+old plot indices and grants the whole cell.
+
+A save is ~57KB now — nine times the tiles. Well inside localStorage's ~5MB and
+still fine to paste into the settings panel's backup box.
 
 **Development is served by `tools/devserver.mjs`, not `python -m http.server`.**
 The only meaningful difference is `Cache-Control: no-store`. Python sends no
@@ -80,7 +99,20 @@ cache headers, which lets the browser heuristically cache ES modules, and a
 half-stale module graph produces baffling errors about exports that plainly
 exist. This cost hours more than once. Don't switch back.
 
-150 headless tests pass via `npm test`.
+**Weeds are the template for anything that spawns over time** (mushrooms next).
+Three properties, all tested: capped as a fraction of owned land so a week away
+can't bury the farm; only real work on one tick in `WEED_INTERVAL`, because
+catch-up runs it 604,800 times in a row; and `state.rng` only, so replaying the
+same elapsed time twice gives the same farm. `countWeeds` counts *owned* tiles
+only — counting the whole map would put a new farm hundreds over its cap and
+nothing would ever grow back.
+
+**The seed rotation draws one crop per tier, not two from one pool.** The old
+version could take cabbage and eggplant out together, leaving a player checking
+in at bedtime with nothing but 4- and 5-minute crops — the slow crops are the
+entire point of an overnight field. Reported from real play.
+
+164 headless tests pass via `npm test`.
 
 Tilling is a two-point row gesture and beds are drawn with the capsule art — see
 section 8. Adjacent rows stay visually separate rather than merging into a grid.

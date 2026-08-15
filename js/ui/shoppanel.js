@@ -9,10 +9,13 @@ import {
   animalList, canBuyAnimal,
 } from '../sim/shop.js';
 import { animalCapacity } from '../sim/build.js';
-import { PLOT, nextLandPrice, ownedCount, totalPlots, buyablePlots } from '../world/land.js';
+import {
+  PLOT, nextLandPrice, ownedCount, totalPlots, buyablePlots, buyPlot, canBuyPlot,
+  plotsAcross, plotsDown, plotIndex,
+} from '../world/land.js';
 import { countItem } from '../sim/inventory.js';
 
-export function initShopPanel(state, { onMessage, onPlaceAnimal, onPickLand } = {}) {
+export function initShopPanel(state, { onMessage, onPlaceAnimal, onLandBought } = {}) {
   const panel = document.getElementById('shop-panel');
   const list = document.getElementById('shop-list');
   const tabs = document.getElementById('shop-tabs');
@@ -21,6 +24,9 @@ export function initShopPanel(state, { onMessage, onPlaceAnimal, onPickLand } = 
 
   let tab = 'buy';
   let open = false;
+  // Which land cell is armed for a second tap. A cell costs thousands, so it
+  // doesn't go through on a stray thumb.
+  let armedCell = null;
 
   const setOpen = (v) => {
     if (open === v) return;
@@ -33,6 +39,7 @@ export function initShopPanel(state, { onMessage, onPlaceAnimal, onPickLand } = 
       render();
     } else {
       emit('panel:close', 'shop');
+      armedCell = null;
     }
   };
   on('panel:open', (who) => { if (who !== 'shop') setOpen(false); });
@@ -58,15 +65,27 @@ export function initShopPanel(state, { onMessage, onPlaceAnimal, onPickLand } = 
     // Livestock doesn't complete here: the shop closes and hands off to the
     // placement flow so the player chooses where the animal lives. Nothing is
     // charged until they confirm a spot.
-    // Land works the same way as livestock, and for the same reason: the
-    // player has to say *which* plot, so the shop steps out of the way.
+    // Land is picked from the little map below rather than by tapping the
+    // world: a cell is a whole 40x40 farm, five screens wide, so a ghost laid
+    // over the map would just wash the whole view green with no way to tell
+    // which cell you had. Nine buttons say it in one glance.
     if (act === 'land') {
-      if (buyablePlots(state).length === 0) {
-        onMessage?.('There is no more land to buy', 'warn');
+      const px = Number(btn.dataset.px);
+      const py = Number(btn.dataset.py);
+      const key = `${px},${py}`;
+
+      if (armedCell !== key) {
+        armedCell = key;
+        render();
         return;
       }
-      setOpen(false);
-      onPickLand?.();
+      armedCell = null;
+
+      const res = buyPlot(state, px, py);
+      if (!res.ok) { onMessage?.(res.reason, 'warn'); render(); return; }
+      onMessage?.(`Land bought for $${res.price}`);
+      onLandBought?.(px, py);
+      render();
       return;
     }
 
@@ -118,21 +137,41 @@ export function initShopPanel(state, { onMessage, onPlaceAnimal, onPickLand } = 
     }
   }
 
+  /**
+   * The valley as a little map: your land in the middle, the cells you can buy
+   * around it. Tap one to arm it, tap again to buy.
+   */
   function renderLand() {
     const price = nextLandPrice(state);
-    const available = buyablePlots(state).length;
-    if (available === 0) {
+    const buyable = new Set(buyablePlots(state).map((p) => `${p.px},${p.py}`));
+    if (buyable.size === 0) {
       return '<li class="empty">You own the whole valley. Nothing left to buy!</li>';
     }
+
+    const cells = [];
+    for (let py = 0; py < plotsDown(state.grid.h); py++) {
+      for (let px = 0; px < plotsAcross(state.grid.w); px++) {
+        const key = `${px},${py}`;
+        if (state.grid.owned.has(plotIndex(px, py, state.grid.w))) {
+          cells.push('<span class="land-cell yours">Yours</span>');
+        } else if (!buyable.has(key)) {
+          cells.push('<span class="land-cell locked"></span>');
+        } else {
+          const armed = armedCell === key;
+          const afford = canBuyPlot(state, px, py).ok;
+          cells.push(`<button class="land-cell${armed ? ' armed' : ''}"
+            data-act="land" data-px="${px}" data-py="${py}"
+            ${afford ? '' : 'disabled'}>${armed ? 'Buy?' : `$${price}`}</button>`);
+        }
+      }
+    }
+
     return `
-      <li>
-        <span class="shop-name">A plot of land
-          <em>${PLOT}x${PLOT} tiles, next to your farm</em>
-        </span>
-        <span class="shop-price">$${price}</span>
-        <button data-act="land" ${state.money >= price ? '' : 'disabled'}>Choose</button>
-      </li>
-      <li class="empty">Each plot costs more than the last.</li>`;
+      <li class="land-map"><div class="land-grid"
+        style="grid-template-columns: repeat(${plotsAcross(state.grid.w)}, 1fr)">
+        ${cells.join('')}
+      </div></li>
+      <li class="empty">Each cell is a whole ${PLOT}x${PLOT} farm, and costs more than the last.</li>`;
   }
 
   function renderAnimals() {

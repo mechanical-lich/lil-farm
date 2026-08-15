@@ -15,9 +15,7 @@ import { drawBuilding } from './render/tilerender.js';
 import { drawAnimalSprite } from './render/entityrender.js';
 import { animalDef } from './sim/animals.js';
 import { buyAnimal, canPlaceAnimal } from './sim/shop.js';
-import {
-  PLOT, plotOfTile, plotBounds, canBuyPlot, buyPlot, nextLandPrice, buyablePlots,
-} from './world/land.js';
+import { PLOT, plotBounds } from './world/land.js';
 import { attachInput } from './ui/input.js';
 import { initToolbar, TOOLS } from './ui/toolbar.js';
 import { initTaskPanel } from './ui/taskpanel.js';
@@ -71,14 +69,11 @@ async function boot() {
   initTaskPanel(state);
   initShopPanel(state, {
     onMessage: (msg, kind) => toast(msg, kind),
-    onPickLand: () => {
-      // Start the ghost on a plot the player can actually afford and reach,
-      // rather than on the farmhouse plot they already own.
-      const first = buyablePlots(state)[0];
-      const b = plotBounds(first.px, first.py);
-      beginPlacement(landPlacement(state), b.x0, b.y0);
+    // Land is bought from the little map in the shop, so nothing to site here —
+    // just take the player out to look at what they just bought.
+    onLandBought: (px, py) => {
+      const b = plotBounds(px, py);
       camera.centerOnTile(b.x0 + PLOT / 2, b.y0 + PLOT / 2);
-      toast('Tap the plot you want, then confirm');
     },
     onPlaceAnimal: (type) => {
       // Start the ghost on the farmer, so something is visible immediately and
@@ -270,8 +265,7 @@ function wirePanelTracking() {
  * queued build task) and a livestock purchase (an immediate transaction).
  */
 function beginPlacement(spec, x, y) {
-  // A spec may snap the tap to its own grid — land is bought by the plot, so
-  // tapping anywhere in one selects the whole thing rather than a corner.
+  // A spec may snap the tap to its own grid.
   const at = spec.snap ? spec.snap(x, y) : { x, y };
   placement.pending = { ...spec, ...at, valid: spec.validate(at.x, at.y) };
   renderConfirmBar();
@@ -337,34 +331,6 @@ function animalPlacement(state, type) {
       return res.ok
         ? { ok: true, message: `${def.name} bought for $${res.spent}` }
         : { ok: false, reason: res.reason };
-    },
-  };
-}
-
-/**
- * Buying land. The plot is the unit, so the tap snaps to the plot grid and the
- * ghost covers all 64 tiles — there is no such thing as buying a corner. Money
- * moves on confirm, like livestock, so looking around costs nothing.
- */
-function landPlacement(state) {
-  return {
-    w: PLOT, h: PLOT,
-    snap: (x, y) => {
-      const { px, py } = plotOfTile(x, y);
-      const b = plotBounds(px, py);
-      return { x: b.x0, y: b.y0 };
-    },
-    confirmLabel: `✓ Buy this land ($${nextLandPrice(state)})`,
-    validate: (x, y) => {
-      const { px, py } = plotOfTile(x, y);
-      return canBuyPlot(state, px, py).ok;
-    },
-    confirm: (x, y) => {
-      const { px, py } = plotOfTile(x, y);
-      const res = buyPlot(state, px, py);
-      if (!res.ok) return { ok: false, reason: res.reason };
-      events.emit('money:changed', { delta: -res.price });
-      return { ok: true, message: `Land bought for $${res.price}` };
     },
   };
 }

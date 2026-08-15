@@ -121,10 +121,39 @@ body {
   flex: 1;
   min-width: 0;
   font-weight: 600;
+}
+
+/* The status chip doubles as the task-queue button, so it has to shed the
+   default button chrome. The text ellipsizes; the count never gets pushed off. */
+#hud-status {
+  gap: 6px;
+  justify-content: space-between;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+#hud-status.has-work { border-color: var(--accent); }
+
+#hud-status-text {
   overflow: hidden;
   text-overflow: ellipsis;
-  display: block;
-  line-height: 1.7;
+  white-space: nowrap;
+}
+
+#task-count {
+  display: inline-block;
+  flex: 0 0 auto;
+  min-width: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--panel-edge);
+  color: #fff;
+  text-align: center;
 }
 
 /* --- bottom controls --------------------------------------------------- */
@@ -236,16 +265,63 @@ body {
   color: #10240c;
 }
 
-#task-toggle.has-work { border-color: var(--accent); }
+/* --- the land map ------------------------------------------------------ */
 
-#task-count {
-  display: inline-block;
-  min-width: 22px;
-  padding: 0 6px;
-  margin-left: 4px;
-  border-radius: 999px;
-  background: var(--panel-edge);
-  color: #fff;
+.panel li.land-map {
+  display: block;
+  border-bottom: none;
+  padding: 8px 0 4px;
+}
+
+/* Square cells, so the little map reads as the valley's actual shape. */
+.land-grid {
+  display: grid;
+  gap: 6px;
+  max-width: 300px;
+  margin: 0 auto;
+}
+
+.land-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  border: 2px solid var(--panel-edge);
+  background: #e7d3ae;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* Overrides #ui button, which sets a min-height that would stretch the grid. */
+.panel button.land-cell {
+  min-height: 0;
+  padding: 4px;
+}
+
+.land-cell.yours {
+  background: var(--accent);
+  border-color: #3f8a34;
+  color: #10240c;
+}
+
+/* Not adjacent to anything you own: shown, so the shape of the valley is
+   legible, but plainly not on offer. */
+.land-cell.locked {
+  background: rgba(185, 138, 84, 0.18);
+  border-style: dashed;
+  opacity: 0.5;
+}
+
+.panel button.land-cell.armed {
+  background: #f0d9c9;
+  border-color: #b9714f;
+}
+
+.panel button.land-cell:disabled {
+  opacity: 0.45;
+  box-shadow: none;
 }
 
 /* --- sliding panels ---------------------------------------------------- */

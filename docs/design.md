@@ -17,20 +17,30 @@ Two Kenney tilesheets (CC0), both 16x16 tiles and sharing a palette so they mix 
 The game is made up of 16x16 tiles.   Tiles can various things from a fence, grass, road, tilled soil, tree, etc.
 
 ### Buying land
-The valley is 40x40 tiles, split into **8x8 plots**. You start owning exactly one — the plot the farmhouse stands in — and buy the rest a plot at a time from the shop's Land tab.
+The valley is a **3x3 grid of cells, each one a full 40x40 farm**. You start owning the middle cell and buy the eight around it. A starting farm is therefore exactly as big as the whole map used to be — buying land adds new country rather than handing back pieces of what you already had.
 
-- Land you don't own is **drawn but dimmed**, scenery and all. It reads as somewhere you could go rather than as a wall, and the boundary is obvious without drawing a fence around your farm.
-- Unowned land is completely inert: nothing can be queued on it, nothing built on it, and **neither the farmer nor the animals will walk onto it**. That last part is a quiet bonus — your animals can't wander to the far side of the map.
-- A plot must **border land you already own**, so the farm stays one connected property rather than a scatter of islands.
-- Buying works like buying an animal: the shop steps out of the way, you tap the plot you want, and money changes hands only when you confirm.
-- **Each plot costs more than the last** ($250 x the number you already own), so the first is a couple of good harvests away and owning the whole valley is a long game.
+- Land you don't own is **drawn but dimmed**, scenery and all. It reads as somewhere you could go rather than as a wall.
+- Unowned land is completely inert: nothing can be queued on it, nothing built on it, and **neither the farmer nor the animals will walk onto it**. That last part is a quiet bonus — your animals can't wander off to the far side of the valley.
+- A cell must **border land you already own**, so the farm stays one connected property. The four corners of the valley only open up once you own one of their neighbours.
+- Land is bought from a **little 3x3 map in the shop's Land tab**, not by tapping the world. A cell is five screens wide, so a highlight laid over the map would just wash the whole view green with no way to tell which cell you had. Nine buttons say it in one glance. Tap a cell to arm it, tap again to buy — these cost thousands.
+- **Each cell costs more than the last** ($2,000 x the number you already own), so the whole valley is $72,000 and a long game.
 
-Farms that predate this keep every plot they were using — anything tilled, built, fenced, standing on, or queued. Those plots can end up as islands if the farm was spread out; buying the gaps joins them back up.
+Farms that predate this keep **the whole of their old map**. It was entirely theirs and it stays entirely theirs, dropped into the middle cell with eight new cells generated around it.
 
 ## New Game State
 When you first start the game you are given a plot of land that has to be cleaned up.   There will be rocks, trees, dead trees, and weeds.   You can queue tasks to remove obstacles, pull weeds, and cut trees.   Cleared land goes back to **plain grass** — leaving bare earth behind made a tidied farm look scarred rather than cleared.
 
 A new farm starts with **one barn** already standing, on the two rows directly above the farmer, with his dirt yard in front of it.  It gives the opening view something to sit around instead of an empty field, and it means keeping animals is something to work toward from day one rather than only after saving 50 wood and 20 stone.  It can be demolished like any other barn if you'd rather put it somewhere else.
+
+### Weeds come back
+Cleared land doesn't stay clear. Weeds sprout again on open grass you own, slowly and forever, so a farm is something you keep rather than something you finish.
+
+- Only on **plain grass you own** — never on a bed, a crop, a road, a built tile, or under someone's feet. A weed appearing in a planted row would read as a bug.
+- **Capped at 12% of the land you own.** Coming back after a week must never mean a farm buried in weeds; this is a game built to be left alone, so the worst case is always the same modest tidy-up. Worldgen's weeds count toward the cap, which means weeds return to *replace* what you clear rather than piling up on top of it.
+- Owning more land means more weeds to keep down, so expanding costs a little upkeep as well as money.
+- Pull them with the clear tool, same as always; each one is a fiber.
+
+The same shape — slow, capped, seeded scatter over open grass — is what the mushrooms will want later.
 
 ## Inventory
 Some tasks suchs as harvesting a crop, cutting a tree, milking a cow, collecting eggs, etc will add items to your inventory. 
@@ -136,6 +146,8 @@ The whole premise is that the farm runs with the tab closed, so returning shows 
 - Nothing to say means no card.  An absence under a minute isn't news either.
 
 ## Panels and modes
+The status bar at the top is also the task-queue button: it already tells you what the farmer is doing, so it's where you reach when you want to know what's next, and it carries the queue count. This keeps the bottom row down to three buttons on a phone-width screen.
+
 The sliding panels (Shop, Tasks, Bag) only cover part of the screen, so the map stays visible above them.  That made it easy to be "still in Build mode" while shopping and quietly put down a fence with a stray tap.
 
 - Opening any panel **drops the tool back to plain Tap** and closes the tool's sub-picker, so nothing destructive stays armed behind it.
