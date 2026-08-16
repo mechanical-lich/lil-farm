@@ -216,6 +216,19 @@ failing; and `forage()` banks the mushroom itself, so `clearBuildSite` records
 it for the report but must not bank it again. The first version double-counted
 and a test caught it.
 
+**The duck is what the `'swimmer'` seam was for.** `SWIMMERS` is now derived
+from the `swims` flag on the animal table rather than hand-listed, so adding
+another swimmer is a data change. Nothing else moved: gates still stop it,
+because the gate check keys off "not the farmer" rather than off the actor
+name.
+
+Two behaviours came with it. A swimmer that is off the water and has nothing
+else to do paths back onto it — plain wandering drifts inland a little further
+after every trip ashore, which reads as the opposite of preferring water. And
+`canLayAt` gates egg-laying on owned, dry, empty ground, which is both what
+sends a duck ashore and the fix for eggs being laid on land the player doesn't
+own (they could never be picked up).
+
 **Water is the only blocking *ground*.** The check sits in `Grid.isWalkable`
 beside the ownership one, for the same reason: the farmer, the animals and the
 pathfinder all funnel through that method, so they can't disagree about where
@@ -436,7 +449,7 @@ at all while the farmer is on it, which reads as swung open.
   with a grass wedge in one corner (TL, TR, BR, BL in that order). Confirmed by sampling
   the PNG's pixels, not by eye. They complete the nine-slice at `(0,1)`–`(2,3)`.
 
-253 headless tests pass via `npm test`.
+259 headless tests pass via `npm test`.
 
 ## 0. Ground rules
 

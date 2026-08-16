@@ -173,7 +173,7 @@ There are tasks to fill food and water troughs.  Water is infinite, but food mus
 Animals can not open gates.
 
 ### How animals work
-- Three animals, in order of patience: a **chicken** ($120) drops an **egg** every 20 minutes, a **cow** ($500) is ready to **milk** after 30 minutes, and a **sheep** ($800) grows a **fleece** over 75 minutes.  All of them need food and water to make progress; the clock only runs while they have both.
+- Four animals, in order of patience: a **chicken** ($120) drops an **egg** every 20 minutes, a **duck** ($200) drops one every 17, a **cow** ($500) is ready to **milk** after 30 minutes, and a **sheep** ($800) grows a **fleece** over 75 minutes.  All of them need food and water to make progress; the clock only runs while they have both.
 - **Wool is the slow, valuable one.**  A fleece sells for $100 against milk's $60, so a sheep is the animal for someone who looks in twice a day and the wrong one for someone watching the farm — the same shape as the slow crops being the seed you plant before bed.
 - **Milked and sheared animals bank up to 4 units** and then wait.  Without that a cow produced one thing and stood idle however long you were away, which made the animals you pay the most for far worse than chickens overnight.  A full cow fills in 2 hours and a sheep in 5, so the cow is the animal to own if you're watching and the sheep if you're not:
 
@@ -187,6 +187,17 @@ Animals can not open gates.
 - **Collecting takes the whole bank in one tap.**  One tap per churn would recreate exactly the fiddliness that picking eggs up off the ground already has.
 - **Chickens are not collected from.**  A hen with enough food, water and time **drops an egg on the ground** where it stands, and the egg is picked up with the clear task like anything else lying in the grass.  Eggs don't block movement, and a hen with nowhere to put one simply waits rather than losing it.
 - **Cows and sheep are collected from directly** — you tap the animal.  That difference is deliberate: you pick an egg up off the ground, you milk a cow and you shear a sheep.
+### Ducks
+The duck is the better layer — sooner than a hen, for more money up front — and the only animal that can **cross water**.
+
+- A duck spends its day **on the pond** if there is one. Left to plain wandering it drifts inland after every trip ashore, so it actively heads back to the water whenever it has nothing else to do.
+- **It comes ashore to lay.** An egg can't sit on open water, so a duck that's ready to lay walks to dry land first and the egg waits until it gets there.
+- It can be bought straight onto the water; nothing else can.
+- A duck is still livestock: a **gate holds it in** exactly like a hen, and it never dies.
+- Ducks don't *need* water — one on a farm with no pond behaves like a hen that lays a bit faster. The pond is a preference, not a requirement.
+
+**An egg is never laid where it could never be collected** — not on water, and not on land you don't own. Both would strand it for good, since no task at all can be queued on unowned land.
+
 - **Every animal comes in a colour.**  `assets/animals.png` has a row per animal and a column per variation, and a newly bought animal picks a column at random — so you might get a white cow or a brown one.  It keeps that colour for life.  Adding a column to the image is the whole job: the game counts the columns when the sheet loads, so new colours need no code.
 - Because the colour is rolled when the sale goes through, the placement ghost can't know it.  Rather than show one colour and hand over another, **the ghost cycles through them** — which says "you'll get one of these" without promising which.
 - **Animals are free-range.**  Nothing forces you to fence them.  Fences and gates are how you *choose* to keep them near their troughs, since a gate stops an animal but not the farmer.

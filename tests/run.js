@@ -40,7 +40,7 @@ import {
   ANIMALS, TROUGH_CAPACITY, FEED_COST, FOOD_DURATION, WATER_DURATION, SEEK_THRESHOLD,
   makeAnimal, collectFrom, isNeglected, fillWaterTrough, fillFeedTrough, pickFeed, animalDef,
   petAnimal, pickEmote, currentEmote, animalAt, isReady, PRODUCE_CAP,
-  setAnimalVariants, animalVariantCount, variantOf, isThirsty,
+  setAnimalVariants, animalVariantCount, variantOf, isThirsty, SWIMMERS, canLayAt,
   AFFECTION_MAX, PET_GAIN, PET_COOLDOWN, EMOTE_TICKS,
 } from '../js/sim/animals.js';
 import {
@@ -2137,6 +2137,112 @@ test('wool takes longer than milk and is worth more when it comes', () => {
 
   assert(isReady(cow.animal), 'the cow is ready first');
   assert(!isReady(sheep.animal), 'the sheep is still growing its fleece');
+});
+
+// --- ducks --------------------------------------------------------------
+
+test('a duck swims and everything else does not', () => {
+  assert(SWIMMERS.has('duck'), 'the duck is the swimmer');
+  for (const type of ['chicken', 'cow', 'sheep']) {
+    assert(!SWIMMERS.has(type), `a ${type} cannot swim`);
+  }
+
+  const s = farmWithMaterials(9800);
+  const x = s.farmer.x + 4;
+  const y = s.farmer.y;
+  s.grid.setGround(x, y, GROUND.WATER);
+  assert(canPlaceAnimal(s, x, y, 'duck'), 'a duck can be put straight on the pond');
+  assert(!canPlaceAnimal(s, x, y, 'chicken'), 'a hen cannot');
+});
+
+test('a duck heads for the water when it has nothing else to do', () => {
+  const s = farmWithMaterials(9801);
+  completeBuild(s, { buildKind: 'barn', x: s.farmer.x - 1, y: s.farmer.y - 4 });
+  // A pond a few tiles away, and a duck on dry land beside it.
+  const px = s.farmer.x + 4;
+  for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) {
+    s.grid.setGround(px + dx, s.farmer.y + dy, GROUND.WATER);
+  }
+  const duck = makeAnimal(s, 'duck', px - 1, s.farmer.y);
+  duck.food = 1e9;
+  duck.water = 1e9;
+
+  let onWater = false;
+  for (let i = 0; i < 2000 && !onWater; i++) {
+    tick(s);
+    onWater = isWater(s.grid.getGround(duck.x, duck.y));
+  }
+  assert(onWater, 'it should have taken to the water');
+});
+
+test('a duck returns to the water after coming ashore to lay', () => {
+  // Wandering alone isn't enough: it drifts further inland after every trip,
+  // which is the opposite of preferring the water.
+  const s = farmWithMaterials(9804);
+  completeBuild(s, { buildKind: 'barn', x: s.farmer.x - 1, y: s.farmer.y - 4 });
+  const px = s.farmer.x + 4;
+  for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) {
+    s.grid.setGround(px + dx, s.farmer.y + dy, GROUND.WATER);
+  }
+  const duck = makeAnimal(s, 'duck', px + 1, s.farmer.y + 1);
+  duck.food = 1e9;
+  duck.water = 1e9;
+
+  // Long enough to lay several times over, so any inland drift compounds.
+  for (let i = 0; i < ANIMALS.duck.produceTicks * 4; i++) tick(s);
+
+  const home = Math.max(Math.abs(duck.x - (px + 1)), Math.abs(duck.y - (s.farmer.y + 1)));
+  assert(home <= 3, `it wandered ${home} tiles from its pond`);
+});
+
+test('a duck comes ashore to lay, and never lays on the pond', () => {
+  const s = farmWithMaterials(9802);
+  completeBuild(s, { buildKind: 'barn', x: s.farmer.x - 1, y: s.farmer.y - 4 });
+  const px = s.farmer.x + 4;
+  for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) {
+    s.grid.setGround(px + dx, s.farmer.y + dy, GROUND.WATER);
+  }
+  const duck = makeAnimal(s, 'duck', px + 1, s.farmer.y + 1);   // mid-pond
+  duck.food = 1e9;
+  duck.water = 1e9;
+
+  for (let i = 0; i < ANIMALS.duck.produceTicks * 3; i++) tick(s);
+
+  const eggs = [];
+  s.grid.objects.forEach((o, i) => {
+    if (o === OBJ.EGG) eggs.push({ x: i % s.grid.w, y: Math.floor(i / s.grid.w) });
+  });
+  assert(eggs.length > 0, 'it laid at least one egg');
+  for (const e of eggs) {
+    assert(!isWater(s.grid.getGround(e.x, e.y)), `an egg is floating at ${e.x},${e.y}`);
+    assert(s.grid.isOwned(e.x, e.y), 'and it is somewhere it can be picked up');
+  }
+});
+
+test('an egg is never laid where it could never be collected', () => {
+  // Both cases are permanent losses: nothing can be picked up off water, and
+  // no task at all can be queued on land the player does not own.
+  const s = farmWithMaterials(9803);
+  const x = s.farmer.x + 3;
+  const y = s.farmer.y;
+
+  assert(canLayAt(s, x, y), 'open owned grass is fine');
+
+  s.grid.setGround(x, y, GROUND.WATER);
+  assert(!canLayAt(s, x, y), 'not on water');
+
+  s.grid.setGround(x, y, GROUND.GRASS);
+  const outside = { x: 5, y: 5 };                 // far outside the starting cell
+  s.grid.owned.delete(plotIndex(0, 0, s.grid.w));
+  assert(!s.grid.isOwned(outside.x, outside.y), 'the test tile is off the farm');
+  assert(!canLayAt(s, outside.x, outside.y), 'nor on land you do not own');
+});
+
+test('a duck lays faster than a hen, for a higher price', () => {
+  assert(ANIMALS.duck.produceTicks < ANIMALS.chicken.produceTicks, 'ducks lay sooner');
+  assert(ANIMALS.duck.price > ANIMALS.chicken.price, 'and cost more up front');
+  assertEqual(ANIMALS.duck.produces, 'egg', 'both give eggs');
+  assert(ANIMALS.duck.laysOnGround, 'and a duck drops them like a hen does');
 });
 
 // --- affection ----------------------------------------------------------

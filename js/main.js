@@ -333,7 +333,7 @@ function animalPlacement(state, type) {
   return {
     w: 1, h: 1,
     confirmLabel: `✓ Put ${def.name.toLowerCase()} here`,
-    validate: (x, y) => canPlaceAnimal(state, x, y),
+    validate: (x, y) => canPlaceAnimal(state, x, y, type),
     // The colour is rolled when the sale goes through, so the ghost can't know
     // it. Rather than show one and hand over another, it cycles through the
     // colours — which says "you'll get one of these" without promising which.

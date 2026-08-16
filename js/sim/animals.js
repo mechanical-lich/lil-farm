@@ -20,6 +20,10 @@ import { CROPS } from './crops.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 
 /**
+ * `swims` is what lets an animal onto water, via SWIMMERS below. A duck spends
+ * its time on the pond and has to come ashore to lay, since an egg can't sit on
+ * open water.
+ *
  * `row` is the animal's row on assets/animals.png; the columns of that row are
  * its colour variations. Each animal picks one when it's bought and keeps it,
  * so a farm ends up with a white cow and a brown one rather than a herd of
@@ -46,6 +50,14 @@ export const ANIMALS = {
   sheep: {
     name: 'Sheep', price: 800, row: 0,
     produces: 'wool', produceTicks: 4500,         // 75 min
+  },
+  // A better layer than a hen, and the only animal that can cross water. It
+  // spends its day on the pond if there is one, and comes ashore to lay.
+  duck: {
+    name: 'Duck', price: 200, row: 3,
+    produces: 'egg', produceTicks: 1000,          // ~17 min
+    laysOnGround: true,
+    swims: true,
   },
 };
 
@@ -77,11 +89,10 @@ export const FEED_COST = 3;           // crops consumed to fill a feed trough
 /** Per-tick chance an idle, contented animal ambles a tile. */
 const WANDER_CHANCE = 0.06;
 
-/**
- * Animals that can cross water. Empty for now — ducks are planned, and this is
- * the one place that will need to know about them.
- */
-export const SWIMMERS = new Set();
+/** Animals that can cross water. Read off the table above. */
+export const SWIMMERS = new Set(
+  Object.entries(ANIMALS).filter(([, def]) => def.swims).map(([type]) => type),
+);
 
 /** How the grid should treat this animal when asked what it can walk on. */
 export function actorFor(animal) {
@@ -404,6 +415,20 @@ export function updateAnimals(state) {
  *
  * @returns {boolean} whether an egg was actually laid.
  */
+/**
+ * Can an egg sit on this tile?
+ *
+ * Not on water, which is what sends a duck ashore — and not on land the player
+ * doesn't own, where nothing can be picked up. An egg laid on either would be
+ * stranded there for good.
+ */
+export function canLayAt(state, x, y) {
+  if (!state.grid.isOwned(x, y)) return false;
+  if (isWater(state.grid.getGround(x, y))) return false;
+  if (state.grid.getObject(x, y) !== OBJ.NONE) return false;
+  return !state.crops[`${x},${y}`];
+}
+
 function layEgg(state, a) {
   const spots = [
     { x: a.x, y: a.y },
@@ -412,9 +437,7 @@ function layEgg(state, a) {
   ];
 
   for (const s of spots) {
-    if (!state.grid.inBounds(s.x, s.y)) continue;
-    if (state.grid.getObject(s.x, s.y) !== OBJ.NONE) continue;
-    if (state.crops[`${s.x},${s.y}`]) continue;      // not on top of a crop
+    if (!canLayAt(state, s.x, s.y)) continue;
 
     state.grid.setObject(s.x, s.y, OBJ.EGG);
     emitUnlessSuspended('animal:laid', { id: a.id, type: a.type, x: s.x, y: s.y });
@@ -444,6 +467,10 @@ function moveAnimal(state, a) {
     : a.food <= SEEK_THRESHOLD ? 'food'
       : null;
 
+  // Ready to lay but standing somewhere an egg can't go — on the pond, for a
+  // duck. Head for dry land; the egg waits until it gets there.
+  if (wantsToLay(state, a) && !layableNearby(state, a) && seekDryLand(state, a)) return;
+
   if (wants) {
     const trough = troughBeside(state, a, wants);
     if (trough) { drinkOrEat(state, a, trough, wants); return; }
@@ -455,6 +482,14 @@ function moveAnimal(state, a) {
 
     if (wants === 'water' && seekWater(state, a)) return;
     if (seekTrough(state, a, wants)) return;
+  }
+
+  // Nothing needed, nothing to put down: a duck goes back to the water. Left
+  // to plain wandering it drifts inland after every trip ashore to lay, which
+  // is the opposite of what a duck does.
+  if (actor === 'swimmer' && !isWater(state.grid.getGround(a.x, a.y))
+      && seekWater(state, a, true)) {
+    return;
   }
 
   wander(state, a);
@@ -489,8 +524,13 @@ function beingTended(state, a) {
 
 const ORTHO = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 
-/** Standing next to open water? Animals drink from the bank, not from in it. */
+/**
+ * Within reach of a drink? Animals drink from the bank — and a duck sitting on
+ * the pond is obviously in reach of it, which the bank-only test would miss on
+ * a pond one tile across.
+ */
 function waterBeside(state, a) {
+  if (isWater(state.grid.getGround(a.x, a.y))) return true;
   return ORTHO.some(([dx, dy]) => isWater(state.grid.getGround(a.x + dx, a.y + dy)));
 }
 
@@ -519,8 +559,12 @@ function nearestWater(state, a) {
   return null;
 }
 
-/** Routes to the bank of the nearest water it can reach. */
-function seekWater(state, a) {
+/**
+ * Routes to the nearest water it can reach.
+ *
+ * @param {boolean} onto true to swim out into it, false to stop at the bank.
+ */
+function seekWater(state, a, onto = false) {
   // Nothing found last time? Don't scan again every tick; the map rarely
   // changes and the animal will still be thirsty in five minutes.
   if (a.waterSearchAt != null && state.tickCount - a.waterSearchAt < WATER_SCAN_COOLDOWN) {
@@ -531,7 +575,7 @@ function seekWater(state, a) {
   if (!found) { a.waterSearchAt = state.tickCount; return false; }
 
   const path = findPath(state.grid, { x: a.x, y: a.y }, found,
-    { actor: actorFor(a), adjacent: true });
+    { actor: actorFor(a), adjacent: !onto });
   if (path && path.length > 0) { a.path = path; a.waterSearchAt = null; return true; }
   if (path && path.length === 0) return false;      // already on the bank
 
@@ -557,14 +601,56 @@ function seekTrough(state, a, kind) {
   return false;
 }
 
+/** Is this animal sitting on a finished product it can't put down here? */
+function wantsToLay(state, a) {
+  const def = animalDef(a.type);
+  return !!def?.laysOnGround && !isNeglected(a) && a.progress >= def.produceTicks;
+}
+
+function layableNearby(state, a) {
+  return canLayAt(state, a.x, a.y)
+    || ORTHO.some(([dx, dy]) => canLayAt(state, a.x + dx, a.y + dy));
+}
+
+/** Routes to the nearest tile an egg could actually be left on. */
+function seekDryLand(state, a) {
+  for (let r = 1; r <= WATER_SCAN_RADIUS; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const x = a.x + dx;
+        const y = a.y + dy;
+        if (!canLayAt(state, x, y)) continue;
+        if (!state.grid.isWalkable(x, y, actorFor(a))) continue;
+
+        const path = findPath(state.grid, { x: a.x, y: a.y }, { x, y }, { actor: actorFor(a) });
+        if (path && path.length > 0) { a.path = path; return true; }
+        if (path) return false;                    // already ashore
+      }
+    }
+  }
+  return false;
+}
+
 function wander(state, a) {
   if (!state.rng.chance(WANDER_CHANCE)) return;
-  const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
-  const [dx, dy] = dirs[state.rng.int(4)];
-  const nx = a.x + dx;
-  const ny = a.y + dy;
-  if (!state.grid.isWalkable(nx, ny, actorFor(a))) return;
-  if (dx !== 0) a.facing = dx > 0 ? 'right' : 'left';
-  a.x = nx;
-  a.y = ny;
+
+  const actor = actorFor(a);
+  const open = ORTHO
+    .map(([dx, dy]) => ({ dx, dy, x: a.x + dx, y: a.y + dy }))
+    .filter((d) => state.grid.isWalkable(d.x, d.y, actor));
+  if (open.length === 0) return;
+
+  // A duck heads for the water when it has nothing better to do — but not when
+  // it's carrying an egg it needs dry land to put down.
+  let choices = open;
+  if (actor === 'swimmer' && !wantsToLay(state, a)) {
+    const wet = open.filter((d) => isWater(state.grid.getGround(d.x, d.y)));
+    if (wet.length) choices = wet;
+  }
+
+  const move = choices[state.rng.int(choices.length)];
+  if (move.dx !== 0) a.facing = move.dx > 0 ? 'right' : 'left';
+  a.x = move.x;
+  a.y = move.y;
 }

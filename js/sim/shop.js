@@ -10,7 +10,7 @@ import { makeRng } from '../engine/rng.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 import { CROPS, seedIdFor, isSeedId, cropFromSeedId } from './crops.js';
 import { ITEMS, addItem, removeItem, countItem, itemName } from './inventory.js';
-import { ANIMALS, animalDef, makeAnimal } from './animals.js';
+import { ANIMALS, animalDef, makeAnimal, SWIMMERS } from './animals.js';
 import { animalCapacity } from './build.js';
 
 /** How long one shop rotation lasts. Six hours: slower than a play session, so
@@ -144,8 +144,13 @@ export function canBuyAnimal(state, type) {
 }
 
 /** Somewhere an animal could actually stand. */
-export function canPlaceAnimal(state, x, y) {
-  return state.grid.inBounds(x, y) && state.grid.isWalkable(x, y, 'animal');
+/**
+ * @param {string} [type] which animal — a duck may be put straight on the pond,
+ *   everything else needs dry land.
+ */
+export function canPlaceAnimal(state, x, y, type) {
+  const actor = type && SWIMMERS.has(type) ? 'swimmer' : 'animal';
+  return state.grid.inBounds(x, y) && state.grid.isWalkable(x, y, actor);
 }
 
 /**
@@ -156,7 +161,7 @@ export function canPlaceAnimal(state, x, y) {
 export function buyAnimal(state, type, x, y) {
   const allowed = canBuyAnimal(state, type);
   if (!allowed.ok) return allowed;
-  if (!canPlaceAnimal(state, x, y)) return { ok: false, reason: "it can't stand there" };
+  if (!canPlaceAnimal(state, x, y, type)) return { ok: false, reason: "it can't stand there" };
 
   const def = animalDef(type);
   state.money -= def.price;
