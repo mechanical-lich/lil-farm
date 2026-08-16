@@ -5,7 +5,7 @@
 // later, so one unreachable rock never deadlocks the whole farm.
 
 import { emitUnlessSuspended } from '../engine/events.js';
-import { OBJ, GROUND, objDef, isTilled } from '../world/tiledefs.js';
+import { OBJ, GROUND, objDef, isTilled, isWater } from '../world/tiledefs.js';
 import { cropAt, isRipe, isStalled, cropDef } from './crops.js';
 import { buildDef, canPlaceAt, structureAt, demolishWork, troughAnchorAt } from './build.js';
 import { animalDef, TROUGH_CAPACITY, isReady } from './animals.js';
@@ -217,7 +217,9 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
       work: demolishWork(found.kind),
       detail: def.name.toLowerCase(),
       w: def.size[0], h: def.size[1],
-      adjacent: def.obj != null,   // solid structures are worked on from beside
+      // Solid structures are worked on from beside — and so is water, which
+      // the farmer plainly cannot stand in to fill back in.
+      adjacent: def.obj != null || isWater(def.ground),
     };
   };
 

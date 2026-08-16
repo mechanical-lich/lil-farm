@@ -5,7 +5,7 @@
 // the farmer actually finishes the job. That way cancelling a build never costs
 // the player anything, which matches how planting handles seeds.
 
-import { OBJ, GROUND, isTilled } from '../world/tiledefs.js';
+import { OBJ, GROUND, isTilled, isWater } from '../world/tiledefs.js';
 import { countItem, removeItem, itemName } from './inventory.js';
 import { cropAt } from './crops.js';
 import { emitUnlessSuspended } from '../engine/events.js';
@@ -34,6 +34,17 @@ export const BUILDABLES = {
   dirtRoad: {
     name: 'Dirt road', ground: GROUND.DIRT, cost: {}, work: 4, size: [1, 1],
     hint: 'Worn earth, free to lay',
+  },
+  // Water is dug, not bought, so both cost only the farmer's time — but a good
+  // deal more of it than a path. Both block movement, so they double as
+  // scenery you can shape a farm around.
+  pond: {
+    name: 'Pond', ground: GROUND.WATER, cost: {}, work: 20, size: [1, 1],
+    hint: 'Still water — dig any shape',
+  },
+  river: {
+    name: 'River', ground: GROUND.RIVER, cost: {}, work: 14, size: [1, 1],
+    hint: 'Flowing water — one tile wide, bends as you lay it',
   },
   waterTrough: {
     name: 'Water trough', obj: OBJ.TROUGH_WATER, cost: { wood: 8 }, work: 14,
@@ -94,6 +105,12 @@ export function canPlaceAt(state, kind, x, y) {
     if (!state.grid.inBounds(t.x, t.y)) return false;
     // A barn may not straddle the boundary onto land you don't own.
     if (!state.grid.isOwned(t.x, t.y)) return false;
+    // Nothing goes on water — there are no bridges, and a fence in a pond
+    // would be nonsense. Take the water up first.
+    if (isWater(state.grid.getGround(t.x, t.y))) return false;
+    // Water must not be dug out from under anyone: it blocks, so the farmer or
+    // an animal standing there would be stranded on an island of one tile.
+    if (isWater(def.ground) && occupied(state, t.x, t.y)) return false;
     if (state.grid.getObject(t.x, t.y) !== OBJ.NONE) return false;
     if (cropAt(state, t.x, t.y)) return false;
     // Beds are hard-won; don't let a stray fence tap pave over one.
@@ -101,6 +118,12 @@ export function canPlaceAt(state, kind, x, y) {
     if (def.ground && state.grid.getGround(t.x, t.y) === def.ground) return false;
   }
   return true;
+}
+
+/** Is anyone standing here? */
+function occupied(state, x, y) {
+  if (state.farmer.x === x && state.farmer.y === y) return true;
+  return (state.animals || []).some((a) => a.x === x && a.y === y);
 }
 
 /** Total materials already promised to queued build tasks. */

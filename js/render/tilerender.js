@@ -2,8 +2,8 @@
 // the caller has already applied the camera transform.
 
 import { TILE } from '../config.js';
-import { GROUND, OBJ, isTilled } from '../world/tiledefs.js';
-import { SPRITES, TOWN, CAPSULES, srcRect, sheetFor } from './sprites.js';
+import { GROUND, OBJ, isTilled, isWater } from '../world/tiledefs.js';
+import { SPRITES, TOWN, WATER, RIVER, CAPSULES, srcRect, sheetFor } from './sprites.js';
 import { mushroomAt } from '../sim/mushrooms.js';
 import { hash2d } from '../engine/rng.js';
 import { cropStage, isStalled, spoilRemaining, SPOIL_TICKS } from '../sim/crops.js';
@@ -53,6 +53,17 @@ export function dirtPieceAt(state, x, y) {
 
 const isDirtAt = (state) => (nx, ny) => state.grid.getGround(nx, ny) === GROUND.DIRT;
 
+/** Water of either kind counts as water, so a river joins a pond seamlessly. */
+const isWaterAt = (state) => (nx, ny) => isWater(state.grid.getGround(nx, ny));
+
+export function waterPieceAt(state, x, y) {
+  return ninePiece(isWaterAt(state), x, y, WATER);
+}
+
+export function waterCornersAt(state, x, y) {
+  return concaveCorners(isWaterAt(state), x, y);
+}
+
 /** Quadrant of a tile each concave corner occupies, in pixels. */
 const QUADRANT = {
   innerTL: [0, 0], innerTR: [TILE / 2, 0],
@@ -75,7 +86,10 @@ const QUADRANT = {
  * would leave three corners wrong.
  */
 export function dirtCornersAt(state, x, y) {
-  const same = isDirtAt(state);
+  return concaveCorners(isDirtAt(state), x, y);
+}
+
+function concaveCorners(same, x, y) {
   const n = same(x, y - 1);
   const s = same(x, y + 1);
   const w = same(x - 1, y);
@@ -90,14 +104,48 @@ export function dirtCornersAt(state, x, y) {
 }
 
 /** Draws one inner corner, clipped to its own quarter of the tile. */
-function blitCorner(ctx, sheets, corner, px, py) {
+function blitCorner(ctx, sheets, set, corner, px, py) {
   const [qx, qy] = QUADRANT[corner];
   ctx.save();
   ctx.beginPath();
   ctx.rect(px + qx, py + qy, TILE / 2, TILE / 2);
   ctx.clip();
-  blit(ctx, sheets, DIRT_SET[corner], px, py);
+  blit(ctx, sheets, set[corner], px, py);
   ctx.restore();
+}
+
+/**
+ * Which river piece belongs here, from the water it touches.
+ *
+ * A river is a one-tile-wide path, so it's the *connections* that decide the
+ * tile, not an area fill: two opposite neighbours make a straight, two
+ * adjacent ones a bend. Three or more is a confluence the sheet has no tile
+ * for, and neither has a lone tile with none — both become open water, which
+ * reads as a pool where the channels meet.
+ *
+ * @returns {{sprite: number[], turns: number}} turns are quarter turns clockwise
+ */
+export function riverPieceAt(state, x, y) {
+  const same = isWaterAt(state);
+  const n = same(x, y - 1);
+  const s = same(x, y + 1);
+  const w = same(x - 1, y);
+  const e = same(x + 1, y);
+  const count = n + s + w + e;
+
+  if (count >= 3 || count === 0) return { sprite: RIVER.pool, turns: 0 };
+
+  if (n && s) return { sprite: RIVER.straight, turns: 0 };
+  if (w && e) return { sprite: RIVER.straight, turns: 1 };
+
+  if (n && e) return { sprite: RIVER.NE, turns: 0 };
+  if (n && w) return { sprite: RIVER.NW, turns: 0 };
+  if (s && e) return { sprite: RIVER.SE, turns: 0 };
+  if (s && w) return { sprite: RIVER.SW, turns: 0 };
+
+  // A dead end: draw it as a straight running the way it points, so the
+  // channel looks like it carries on rather than stopping in mid-air.
+  return { sprite: RIVER.straight, turns: (w || e) ? 1 : 0 };
 }
 
 /**
@@ -155,13 +203,24 @@ export function drawGround(ctx, sheets, state, view) {
         if (piece) ctx.drawImage(piece, x * TILE, y * TILE);
       } else if (g === GROUND.ROAD) {
         blit(ctx, sheets, TOWN.paved, x * TILE, y * TILE);
+      } else if (g === GROUND.WATER) {
+        // Grass underneath: the pond's edge tiles are part water, part bank.
+        blit(ctx, sheets, TOWN.grass, x * TILE, y * TILE);
+        blit(ctx, sheets, waterPieceAt(state, x, y), x * TILE, y * TILE);
+        for (const corner of waterCornersAt(state, x, y)) {
+          blitCorner(ctx, sheets, WATER, corner, x * TILE, y * TILE);
+        }
+      } else if (g === GROUND.RIVER) {
+        blit(ctx, sheets, TOWN.grass, x * TILE, y * TILE);
+        const { sprite, turns } = riverPieceAt(state, x, y);
+        blitTurned(ctx, sheets, sprite, x * TILE, y * TILE, turns);
       } else {
         // Bare earth: the barn yard, and any dirt road the player has laid.
         // Autotiled so a run of it gets a proper grassy boundary — edges,
         // corners and the insides of bends — instead of hard square edges.
         blit(ctx, sheets, dirtPieceAt(state, x, y), x * TILE, y * TILE);
         for (const corner of dirtCornersAt(state, x, y)) {
-          blitCorner(ctx, sheets, corner, x * TILE, y * TILE);
+          blitCorner(ctx, sheets, DIRT_SET, corner, x * TILE, y * TILE);
         }
       }
     }
@@ -433,6 +492,21 @@ function drawObject(ctx, sheets, state, objId, x, y) {
  * Draws one sprite. `sheets` is the {farm, town} pair; the sprite reference
  * carries which of them it lives on.
  */
+/**
+ * Like blit, but turned a quarter turn at a time about the tile's centre. The
+ * sheet has a north-south river channel and no east-west one, and a quarter
+ * turn is a better answer than asking for more art.
+ */
+export function blitTurned(ctx, sheets, sprite, dx, dy, turns = 0) {
+  if (!turns) { blit(ctx, sheets, sprite, dx, dy); return; }
+  const { sx, sy, sw, sh } = srcRect(sprite);
+  ctx.save();
+  ctx.translate(dx + sw / 2, dy + sh / 2);
+  ctx.rotate((Math.PI / 2) * turns);
+  ctx.drawImage(sheetFor(sheets, sprite), sx, sy, sw, sh, -sw / 2, -sh / 2, sw, sh);
+  ctx.restore();
+}
+
 export function blit(ctx, sheets, sprite, dx, dy, flip = false) {
   const { sx, sy, sw, sh } = srcRect(sprite);
   const img = sheetFor(sheets, sprite);

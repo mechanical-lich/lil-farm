@@ -8,7 +8,17 @@ export const GROUND = {
   TILLED: 2,        // ploughed and dry
   ROAD: 3,
   TILLED_WET: 4,    // ploughed and watered; dries back to TILLED over time
+  WATER: 5,         // standing water — a pond, dug out in whatever shape
+  RIVER: 6,         // flowing water — a one-tile channel that bends
 };
+
+/**
+ * Water of either kind. Both block movement and both autotile against each
+ * other, so a river running into a pond joins up instead of butting against it.
+ */
+export function isWater(groundId) {
+  return groundId === GROUND.WATER || groundId === GROUND.RIVER;
+}
 
 export function isTilled(groundId) {
   return groundId === GROUND.TILLED || groundId === GROUND.TILLED_WET;

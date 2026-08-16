@@ -5,6 +5,7 @@
 //   'emotes' — assets/emotes.png               speech bubbles over the animals
 //   'shrooms' — assets/mushrooms.png           one row of 16 foraged mushrooms
 //   'animals' — assets/animals.png              a row per animal, a column per colour
+//   'battle'  — assets/battle_tilemap_packed.png  water: ponds and rivers
 //
 // Both share the same palette (#84c669 grass, #eaa56c dirt), so tiles from the
 // two sheets sit next to each other seamlessly.
@@ -61,6 +62,36 @@ export const SOIL = {
  * FENCE: a full set — a nine-slice for enclosures, plus standalone horizontal
  * and vertical runs with proper end posts.
  */
+/**
+ * Water, from the battle sheet. Catalogued by sampling the PNG rather than by
+ * eye — for each tile, which of its four edges are blue and which are green.
+ *
+ * WATER is a full autotile set for a pond: the 3x3 nine-slice at (0,1)-(2,3),
+ * whose north shore is sand and south shore grass, plus four concave corners
+ * at (0,5)-(3,5) for the insides of bends. Same shape as the dirt set, so it
+ * goes through the same drawing code.
+ *
+ * RIVER is a one-tile-wide channel: a straight run and the four bends. The
+ * sheet has no east-west straight, so the north-south one is turned a quarter
+ * turn — the water texture has no grain, so it reads the same either way.
+ * Junctions and lone tiles fall back to open water, which looks like a pool
+ * where the channels meet.
+ */
+export const WATER = {
+  TL: [0, 1, 'battle'], T: [1, 1, 'battle'], TR: [2, 1, 'battle'],
+  L: [0, 2, 'battle'], C: [1, 2, 'battle'], R: [2, 2, 'battle'],
+  BL: [0, 3, 'battle'], B: [1, 3, 'battle'], BR: [2, 3, 'battle'],
+  innerTL: [0, 5, 'battle'], innerTR: [1, 5, 'battle'],
+  innerBR: [2, 5, 'battle'], innerBL: [3, 5, 'battle'],
+};
+
+export const RIVER = {
+  straight: [3, 3, 'battle'],      // runs north-south; turned for east-west
+  NE: [3, 1, 'battle'], NW: [4, 1, 'battle'],
+  SE: [3, 0, 'battle'], SW: [4, 0, 'battle'],
+  pool: [1, 2, 'battle'],          // junctions, and a river of one tile
+};
+
 export const TOWN = {
   grass: [0, 0, 'town'],
   grassClump: [1, 0, 'town'],
@@ -269,15 +300,16 @@ function loadImage(src) {
  * Loads both tilesheets and prepares derived tiles.
  * @returns {Promise<{farm: HTMLImageElement, town: HTMLImageElement,
  *   emotes: HTMLImageElement, shrooms: HTMLImageElement,
- *   animals: HTMLImageElement}>}
+ *   animals: HTMLImageElement, battle: HTMLImageElement}>}
  */
 export async function loadSheets() {
-  const [farm, town, emotes, shrooms, animals] = await Promise.all([
+  const [farm, town, emotes, shrooms, animals, battle] = await Promise.all([
     loadImage('assets/tilemap_packed.png'),
     loadImage('assets/town_tilemap_packed.png'),
     loadImage('assets/emotes.png'),
     loadImage('assets/mushrooms.png'),
     loadImage('assets/animals.png'),
+    loadImage('assets/battle_tilemap_packed.png'),
   ]);
   buildCapsules(farm);
 
@@ -286,7 +318,7 @@ export async function loadSheets() {
   // whole job — there's no constant to remember to bump.
   setAnimalVariants(Math.round(animals.width / TILE));
 
-  return { farm, town, emotes, shrooms, animals };
+  return { farm, town, emotes, shrooms, animals, battle };
 }
 
 /** Resolves which sheet image a sprite reference belongs to. */

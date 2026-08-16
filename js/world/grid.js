@@ -1,7 +1,7 @@
 // The tile grid: two parallel layers (ground + objects) stored as flat typed
 // arrays. Serializes to plain number arrays for JSON.
 
-import { GROUND, OBJ, objDef } from './tiledefs.js';
+import { GROUND, OBJ, objDef, isWater } from './tiledefs.js';
 import { plotIndexFor, plotIndex } from './land.js';
 
 export class Grid {
@@ -42,8 +42,11 @@ export class Grid {
   }
 
   /**
-   * @param {'farmer'|'animal'} actor Gates are passable for the farmer (who can
-   *   open them) but not for animals, so walkability depends on who is asking.
+   * @param {'farmer'|'animal'|'swimmer'} actor Walkability depends on who is
+   *   asking. Gates open for the farmer but not for livestock; water stops
+   *   everyone except a swimmer. Nothing is a swimmer yet — the value exists so
+   *   that ducks, when they arrive, are a one-line change here rather than a
+   *   rewrite of how walkability is asked.
    */
   isWalkable(x, y, actor = 'farmer') {
     if (!this.inBounds(x, y)) return false;
@@ -51,9 +54,13 @@ export class Grid {
     // concerned. Doing this here rather than at each call site is what keeps
     // the farmer and the animals from ever disagreeing about the boundary.
     if (!this.owned.has(plotIndexFor(this.w, x, y))) return false;
+    // Nobody swims. Water is the one piece of *ground* that stops you, which
+    // is why the check lives here rather than in the object layer.
+    if (actor !== 'swimmer' && isWater(this.ground[this.idx(x, y)])) return false;
     const def = objDef(this.objects[this.idx(x, y)]);
     if (def.blocks) return false;
-    if (actor === 'animal' && def.blocksAnimals) return false;
+    // A swimmer is still livestock: gates hold it in just the same.
+    if (actor !== 'farmer' && def.blocksAnimals) return false;
     return true;
   }
 

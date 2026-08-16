@@ -8,7 +8,7 @@
 // ⚠ Bump CACHE_VERSION on every deploy. Assets are served cache-first, so
 // without a bump a returning player keeps the old build indefinitely.
 
-const CACHE_VERSION = 'lil-farm-v12';
+const CACHE_VERSION = 'lil-farm-v13';
 
 const SHELL = [
   './',
@@ -20,6 +20,7 @@ const SHELL = [
   './assets/emotes.png',
   './assets/mushrooms.png',
   './assets/animals.png',
+  './assets/battle_tilemap_packed.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',

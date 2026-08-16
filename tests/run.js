@@ -7,7 +7,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { makeRng, hash2d } from '../js/engine/rng.js';
 import { Grid } from '../js/world/grid.js';
-import { GROUND, OBJ, isTilled } from '../js/world/tiledefs.js';
+import { GROUND, OBJ, isTilled, isWater } from '../js/world/tiledefs.js';
 import { generateWorld, startingBarnAnchor } from '../js/world/worldgen.js';
 import { findPath, besideBox, insideBox } from '../js/world/pathfind.js';
 import {
@@ -37,7 +37,7 @@ import {
   ANIMALS, TROUGH_CAPACITY, FEED_COST, FOOD_DURATION, WATER_DURATION, SEEK_THRESHOLD,
   makeAnimal, collectFrom, isNeglected, fillWaterTrough, fillFeedTrough, pickFeed, animalDef,
   petAnimal, pickEmote, currentEmote, animalAt, isReady, PRODUCE_CAP,
-  setAnimalVariants, animalVariantCount, variantOf,
+  setAnimalVariants, animalVariantCount, variantOf, isThirsty,
   AFFECTION_MAX, PET_GAIN, PET_COOLDOWN, EMOTE_TICKS,
 } from '../js/sim/animals.js';
 import {
@@ -45,8 +45,10 @@ import {
   completeBuild, demolish, structureAt, buildingAt, animalCapacity, BARN_CAPACITY,
   placeStructure, buildDef, kindForGround,
 } from '../js/sim/build.js';
-import { TOWN } from '../js/render/sprites.js';
-import { dirtPieceAt, dirtCornersAt } from '../js/render/tilerender.js';
+import { TOWN, WATER, RIVER } from '../js/render/sprites.js';
+import {
+  dirtPieceAt, dirtCornersAt, waterPieceAt, waterCornersAt, riverPieceAt,
+} from '../js/render/tilerender.js';
 import { addItems } from '../js/sim/inventory.js';
 import { newGame as newGameRaw, serialize, deserialize } from '../js/state.js';
 import { tick } from '../js/sim/tick.js';
@@ -2329,6 +2331,180 @@ test('animals from before colours are spread across them, not all identical', ()
   }
   assert(new Set(back.animals.map((a) => a.variant)).size > 1,
     'an established farm should not turn into a herd of clones');
+});
+
+// --- water --------------------------------------------------------------
+
+test('water is dug for free and can be filled back in', () => {
+  const s = farmWithMaterials(9500);
+  s.inventory = {};
+  const x = s.farmer.x + 6;
+  const y = s.farmer.y + 6;
+
+  for (const kind of ['pond', 'river']) {
+    assert(canAfford(s, kind).ok, `${kind} costs only the digging`);
+    assert(canPlaceAt(s, kind, x, y), `${kind} goes on open grass`);
+    completeBuild(s, { buildKind: kind, x, y });
+    assert(isWater(s.grid.getGround(x, y)), `${kind} leaves water behind`);
+    assertEqual(structureAt(s, x, y).kind, kind, 'the clear tool can find it');
+    assert(demolish(s, x, y).ok, 'and fill it back in');
+    assertEqual(s.grid.getGround(x, y), GROUND.GRASS, 'leaving grass');
+  }
+});
+
+test('nobody walks on water', () => {
+  const s = farmWithMaterials(9501);
+  const x = s.farmer.x + 4;
+  const y = s.farmer.y;
+  s.grid.setGround(x, y, GROUND.WATER);
+
+  assert(!s.grid.isWalkable(x, y, 'farmer'), 'the farmer stays out');
+  assert(!s.grid.isWalkable(x, y, 'animal'), 'and so does the livestock');
+  assert(s.grid.isWalkable(x, y, 'swimmer'), 'but a swimmer could cross it');
+
+  s.grid.setGround(x, y, GROUND.RIVER);
+  assert(!s.grid.isWalkable(x, y, 'farmer'), 'a river stops him too');
+});
+
+test('a swimmer is still livestock: a gate holds it in', () => {
+  // The seam for ducks must not accidentally let them through fences.
+  const s = farmWithMaterials(9502);
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y;
+  s.grid.setObject(x, y, OBJ.GATE);
+
+  assert(s.grid.isWalkable(x, y, 'farmer'), 'the farmer opens gates');
+  assert(!s.grid.isWalkable(x, y, 'swimmer'), 'a swimmer does not');
+});
+
+test('water is never dug out from under anyone', () => {
+  // It blocks, so an animal standing there would be marooned on its own tile.
+  const s = farmWithMaterials(9503);
+  completeBuild(s, { buildKind: 'barn', x: s.farmer.x - 1, y: s.farmer.y - 4 });
+  const animal = makeAnimal(s, 'cow', s.farmer.x + 3, s.farmer.y);
+
+  assert(!canPlaceAt(s, 'pond', animal.x, animal.y), 'not under the cow');
+  assert(!canPlaceAt(s, 'pond', s.farmer.x, s.farmer.y), 'nor under the farmer');
+  assert(canPlaceAt(s, 'pond', s.farmer.x + 5, s.farmer.y), 'but open ground is fine');
+
+  // A road may still be laid underfoot — it doesn't block, so nobody is stuck.
+  assert(canPlaceAt(s, 'dirtRoad', s.farmer.x, s.farmer.y), 'a path underfoot is harmless');
+});
+
+test('nothing can be built on water', () => {
+  const s = farmWithMaterials(9504);
+  const x = s.farmer.x + 4;
+  const y = s.farmer.y + 4;
+  s.grid.setGround(x, y, GROUND.WATER);
+
+  assert(!canPlaceAt(s, 'fence', x, y), 'no fence in a pond');
+  assert(!canPlaceAt(s, 'dirtRoad', x, y), 'and no path across it — take it up first');
+  assertEqual(taskForTile(s, x, y, 'till'), null, 'nor can it be ploughed');
+});
+
+test('an animal drinks from a pond it can reach', () => {
+  const { s, animal } = farmWithAnimal('cow', 9505);
+  s.troughs = {};                                   // no trough anywhere
+  s.grid.setGround(animal.x + 2, animal.y, GROUND.WATER);
+  animal.water = 1;
+
+  for (let i = 0; i < 200; i++) tick(s);
+
+  assert(animal.water > SEEK_THRESHOLD, `it should have found the pond (water ${animal.water})`);
+  assert(!isThirsty(animal), 'and stopped being thirsty');
+});
+
+test('a pond never runs dry, unlike a trough', () => {
+  // The reward for digging one: an animal that can reach water stops needing
+  // you to carry any.
+  const { s, animal } = farmWithAnimal('sheep', 9506);
+  s.troughs = {};
+  s.grid.setGround(animal.x + 2, animal.y, GROUND.WATER);
+
+  for (let i = 0; i < 6 * 60 * 60; i++) tick(s);
+  assert(!isThirsty(animal), 'six hours later it is still watered');
+});
+
+test('an animal fenced away from water still goes thirsty', () => {
+  const { s, animal } = farmWithAnimal('cow', 9507);
+  s.troughs = {};
+  // Penned in on all four sides — a line of fence isn't enough, it would just
+  // walk round the end.
+  for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+    s.grid.setObject(animal.x + dx, animal.y + dy, OBJ.FENCE);
+  }
+  s.grid.setGround(animal.x + 2, animal.y, GROUND.WATER);
+  animal.water = 1;
+
+  for (let i = 0; i < 600; i++) tick(s);
+  assert(isThirsty(animal), 'it cannot drink what it cannot get to');
+  assert(s.animals.includes(animal), 'and it is still alive, as ever');
+});
+
+test('a river picks its piece from what it connects to', () => {
+  const s = farmWithMaterials(9508);
+  const ox = 20;
+  const oy = 20;
+  const lay = (dx, dy) => s.grid.setGround(ox + dx, oy + dy, GROUND.RIVER);
+  const at = (dx, dy) => riverPieceAt(s, ox + dx, oy + dy);
+
+  // A vertical run, then a bend east along the bottom.
+  for (let i = 0; i < 4; i++) lay(0, i);
+  for (let i = 1; i < 4; i++) lay(i, 3);
+
+  assertEqual(at(0, 1).sprite, RIVER.straight, 'the run is a straight');
+  assertEqual(at(0, 1).turns, 0, 'unturned, because it runs north-south');
+  assertEqual(at(0, 3).sprite, RIVER.NE, 'the bend comes from the north, leaves east');
+  assertEqual(at(2, 3).sprite, RIVER.straight, 'the arm is a straight');
+  assertEqual(at(2, 3).turns, 1, 'turned a quarter, because it runs east-west');
+});
+
+test('a river junction and a lone tile both fall back to open water', () => {
+  // Neither has a tile on the sheet, and a pool is a fair reading of both.
+  const s = farmWithMaterials(9509);
+  const ox = 20;
+  const oy = 20;
+
+  assertEqual(riverPieceAt(s, ox, oy).sprite, RIVER.pool, 'nothing connected yet');
+
+  for (const [dx, dy] of [[0, 0], [0, -1], [0, 1], [-1, 0], [1, 0]]) {
+    s.grid.setGround(ox + dx, oy + dy, GROUND.RIVER);
+  }
+  assertEqual(riverPieceAt(s, ox, oy).sprite, RIVER.pool, 'a crossroads is a pool');
+});
+
+test('a river runs into a pond without a seam', () => {
+  // The two grounds autotile against each other, or the join would show as a
+  // hard edge between them.
+  const s = farmWithMaterials(9510);
+  const ox = 20;
+  const oy = 20;
+  s.grid.setGround(ox, oy - 1, GROUND.RIVER);
+  s.grid.setGround(ox, oy, GROUND.RIVER);
+  s.grid.setGround(ox, oy + 1, GROUND.WATER);
+
+  assertEqual(riverPieceAt(s, ox, oy).sprite, RIVER.straight, 'the river reads as continuing');
+  // And the pond counts the river as water on its northern edge.
+  assert(!waterCornersAt(s, ox, oy + 1).includes('innerTL'), 'no notch where they meet');
+});
+
+test('a pond autotiles like the dirt road, corners and all', () => {
+  const s = farmWithMaterials(9511);
+  const ox = 20;
+  const oy = 20;
+  for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) {
+    s.grid.setGround(ox + dx, oy + dy, GROUND.WATER);
+  }
+  assertEqual(waterPieceAt(s, ox, oy), WATER.TL, 'top-left bank');
+  assertEqual(waterPieceAt(s, ox + 1, oy + 1), WATER.C, 'open water in the middle');
+  assertEqual(waterPieceAt(s, ox + 2, oy + 2), WATER.BR, 'bottom-right bank');
+
+  // Dig an L and the inside of the bend gets a wedge, as the dirt road does.
+  const l = farmWithMaterials(9512);
+  for (const [dx, dy] of [[1, 0], [2, 0], [0, 1], [1, 1], [2, 1], [0, 2], [1, 2], [2, 2]]) {
+    l.grid.setGround(ox + dx, oy + dy, GROUND.WATER);
+  }
+  assertEqual(waterCornersAt(l, ox + 1, oy + 1), ['innerTL'], 'grass tucked into the bend');
 });
 
 // --- the dirt road ------------------------------------------------------

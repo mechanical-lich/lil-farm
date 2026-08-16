@@ -113,6 +113,23 @@ Barns are the answer to "what are the farm tiles for" — they're what lets you 
 - Fences drawn next to each other join into a continuous run automatically.
 
 ### Taking things down
+### Water
+Two buildables, both dug rather than bought — they cost only the farmer's time, though a good deal more of it than a path.
+
+- **Pond** — standing water, dug in whatever shape you like. Autotiles as an area: a sandy north shore, grassy banks, and proper concave corners on the inside of a bend, the same machinery the dirt road uses.
+- **River** — flowing water, **one tile wide**, which picks its piece from what it connects to: a straight run, or one of four bends. The sheet has no east-west straight, so the north-south one is turned a quarter turn. A junction of three or more, and a lone tile with none, both fall back to open water, which reads as a pool where the channels meet.
+
+The two count as the same thing for autotiling, so **a river runs into a pond without a seam**.
+
+**Nothing walks on water.** It's the one piece of *ground* that blocks — everything else that stops you is an object. That makes it scenery you can shape a farm around, and it means:
+
+- Water is **never dug out from under anyone**. An animal standing there would be marooned on a one-tile island, so the tile has to be empty of the farmer and livestock first. (A path may still be laid underfoot; it doesn't block, so nobody gets stuck.)
+- Nothing can be built on water and it can't be ploughed. Fill it in first.
+- The farmer digs and fills it **from the bank**, since he plainly can't stand in it.
+- Ducks are planned and will be able to swim. The grid already understands a third kind of traveller for that; nothing is one yet.
+
+**Animals drink from water they can reach**, exactly as they drink from a trough — but a pond never needs refilling. An animal with a pond in reach never troubles you for a trough again, which is most of the point of digging one. One that's fenced away from it still goes thirsty, and still never dies.
+
 ### Roads
 Two of them, and they read very differently:
 

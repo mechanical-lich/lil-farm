@@ -145,6 +145,31 @@ their eggs go on the ground, so there's nothing to bank.
 The v3 -> v4 migration converts `ready` to `stock`, because a cow standing there
 ready had earned its milk and shouldn't quietly lose it on an update.
 
+**Water is the only blocking *ground*.** The check sits in `Grid.isWalkable`
+beside the ownership one, for the same reason: the farmer, the animals and the
+pathfinder all funnel through that method, so they can't disagree about where
+the water's edge is. `isWalkable` now takes a third actor, `'swimmer'`, which
+water lets through and gates still stop — nothing is one yet, but ducks are
+planned and this is the seam. `SWIMMERS` in `sim/animals.js` is the only place
+that will need to know about them.
+
+Two consequences that needed handling explicitly: build and demolish tasks for
+water are `adjacent`, since the farmer can't stand in it to dig or fill it; and
+`canPlaceAt` refuses water on a tile with anyone on it, or the animal standing
+there would be marooned on a one-tile island.
+
+**Animals drink from open water** the same way they drink from a trough, and a
+pond never empties. `nearestWater` searches ring by ring out to a fixed radius
+and an animal that finds nothing waits `WATER_SCAN_COOLDOWN` before looking
+again — catch-up replays that loop hundreds of thousands of times, and an
+unbounded scan of a 14,400-tile map would make a week away crawl.
+
+The pond reuses the dirt road's autotiler unchanged (`ninePiece` plus
+quadrant-composited concave corners), which is what that generalisation was
+for. The river is different in kind — a one-tile path, so it picks its tile from
+its *connections* rather than from an area fill — and `blitTurned` supplies the
+east-west straight the sheet doesn't have.
+
 **Animal colours are counted off the sheet, not hardcoded.** `loadSheets` reads
 `assets/animals.png`'s width and calls `setAnimalVariants(width / TILE)`, so
 adding a column to the image puts a new colour in the game with no code change —
@@ -317,11 +342,16 @@ at all while the farmer is on it, which reads as swung open.
   tool-shaped at small sizes.
 - `DERIVED.dirt` still exists in `sprites.js` but is now unused by the ground layer; the
   town sheet's real dirt replaced it.
+- Battle sheet water, all confirmed by sampling pixels: pond nine-slice at
+  `(0,1)`–`(2,3)` (sand along the north shore, grass along the south), concave
+  corners at `(0,5)` TL, `(1,5)` TR, `(2,5)` BR, `(3,5)` BL. River straight
+  (north-south only) at `(3,3)`; bends at `(3,1)` NE, `(4,1)` NW, `(3,0)` SE,
+  `(4,0)` SW. There is **no east-west straight** — it's the vertical one turned.
 - Town sheet `(3,3)`–`(6,3)` are the dirt set's **concave corners** — flat on every edge
   with a grass wedge in one corner (TL, TR, BR, BL in that order). Confirmed by sampling
   the PNG's pixels, not by eye. They complete the nine-slice at `(0,1)`–`(2,3)`.
 
-207 headless tests pass via `npm test`.
+219 headless tests pass via `npm test`.
 
 ## 0. Ground rules
 

@@ -13,6 +13,7 @@
 
 import { ANIMAL_VARIANTS } from '../config.js';
 import { findPath, besideBox } from '../world/pathfind.js';
+import { isWater } from '../world/tiledefs.js';
 import { OBJ } from '../world/tiledefs.js';
 import { addItem, countItem, removeItem, ITEMS } from './inventory.js';
 import { CROPS } from './crops.js';
@@ -75,6 +76,21 @@ export const FEED_COST = 3;           // crops consumed to fill a feed trough
 
 /** Per-tick chance an idle, contented animal ambles a tile. */
 const WANDER_CHANCE = 0.06;
+
+/**
+ * Animals that can cross water. Empty for now — ducks are planned, and this is
+ * the one place that will need to know about them.
+ */
+export const SWIMMERS = new Set();
+
+/** How the grid should treat this animal when asked what it can walk on. */
+export function actorFor(animal) {
+  return SWIMMERS.has(animal.type) ? 'swimmer' : 'animal';
+}
+
+/** How far an animal will look for a drink, and how long before it looks again. */
+const WATER_SCAN_RADIUS = 10;
+const WATER_SCAN_COOLDOWN = 300;
 
 // --- Affection ----------------------------------------------------------
 //
@@ -402,10 +418,12 @@ function layEgg(state, a) {
 }
 
 function moveAnimal(state, a) {
+  const actor = actorFor(a);
+
   // Already walking somewhere: keep going.
   if (a.path && a.path.length > 0) {
     const next = a.path.shift();
-    if (state.grid.isWalkable(next.x, next.y, 'animal')) {
+    if (state.grid.isWalkable(next.x, next.y, actor)) {
       if (next.x !== a.x) a.facing = next.x > a.x ? 'right' : 'left';
       a.x = next.x;
       a.y = next.y;
@@ -422,6 +440,13 @@ function moveAnimal(state, a) {
   if (wants) {
     const trough = troughBeside(state, a, wants);
     if (trough) { drinkOrEat(state, a, trough, wants); return; }
+
+    // A pond or a river is a drink like any other, and a better one: it never
+    // needs refilling. An animal that can reach water never troubles you for
+    // a trough again, which is most of the point of digging one.
+    if (wants === 'water' && waterBeside(state, a)) { drinkFromWild(state, a); return; }
+
+    if (wants === 'water' && seekWater(state, a)) return;
     if (seekTrough(state, a, wants)) return;
   }
 
@@ -448,6 +473,58 @@ function drinkOrEat(state, a, trough, kind) {
   emitUnlessSuspended('world:changed', { x: trough.x, y: trough.y });
 }
 
+const ORTHO = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+
+/** Standing next to open water? Animals drink from the bank, not from in it. */
+function waterBeside(state, a) {
+  return ORTHO.some(([dx, dy]) => isWater(state.grid.getGround(a.x + dx, a.y + dy)));
+}
+
+function drinkFromWild(state, a) {
+  a.water = WATER_DURATION;
+  a.waterSearchAt = null;
+}
+
+/**
+ * Nearest water within sight, searched ring by ring so the first hit is the
+ * closest. Bounded hard: catch-up replays this loop hundreds of thousands of
+ * times, and an unbounded scan of a 14,400-tile map would make coming back
+ * from a week away crawl.
+ */
+function nearestWater(state, a) {
+  for (let r = 1; r <= WATER_SCAN_RADIUS; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;   // ring edge
+        const x = a.x + dx;
+        const y = a.y + dy;
+        if (isWater(state.grid.getGround(x, y))) return { x, y };
+      }
+    }
+  }
+  return null;
+}
+
+/** Routes to the bank of the nearest water it can reach. */
+function seekWater(state, a) {
+  // Nothing found last time? Don't scan again every tick; the map rarely
+  // changes and the animal will still be thirsty in five minutes.
+  if (a.waterSearchAt != null && state.tickCount - a.waterSearchAt < WATER_SCAN_COOLDOWN) {
+    return false;
+  }
+
+  const found = nearestWater(state, a);
+  if (!found) { a.waterSearchAt = state.tickCount; return false; }
+
+  const path = findPath(state.grid, { x: a.x, y: a.y }, found,
+    { actor: actorFor(a), adjacent: true });
+  if (path && path.length > 0) { a.path = path; a.waterSearchAt = null; return true; }
+  if (path && path.length === 0) return false;      // already on the bank
+
+  a.waterSearchAt = state.tickCount;                // there but unreachable
+  return false;
+}
+
 /** Routes toward the nearest stocked trough it can actually reach. */
 function seekTrough(state, a, kind) {
   const candidates = troughList(state)
@@ -459,7 +536,7 @@ function seekTrough(state, a, kind) {
   // farm every tick, and it will try again next tick anyway.
   for (const t of candidates.slice(0, 3)) {
     const path = findPath(state.grid, { x: a.x, y: a.y }, { x: t.x, y: t.y },
-      { actor: 'animal', adjacent: true, w: 2, h: 1 });
+      { actor: actorFor(a), adjacent: true, w: 2, h: 1 });
     if (path && path.length > 0) { a.path = path; return true; }
     if (path && path.length === 0) return false;   // already there
   }
@@ -472,7 +549,7 @@ function wander(state, a) {
   const [dx, dy] = dirs[state.rng.int(4)];
   const nx = a.x + dx;
   const ny = a.y + dy;
-  if (!state.grid.isWalkable(nx, ny, 'animal')) return;
+  if (!state.grid.isWalkable(nx, ny, actorFor(a))) return;
   if (dx !== 0) a.facing = dx > 0 ? 'right' : 'left';
   a.x = nx;
   a.y = ny;
