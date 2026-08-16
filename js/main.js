@@ -13,7 +13,9 @@ import { itemName, addItem } from './sim/inventory.js';
 import { canAfford, buildDef, canPlaceAt } from './sim/build.js';
 import { drawBuilding } from './render/tilerender.js';
 import { drawAnimalSprite } from './render/entityrender.js';
-import { animalDef, animalAt, petAnimal, isReady } from './sim/animals.js';
+import {
+  animalDef, animalAt, petAnimal, isReady, animalVariantCount,
+} from './sim/animals.js';
 import { buyAnimal, canPlaceAnimal } from './sim/shop.js';
 import { PLOT, plotBounds } from './world/land.js';
 import { attachInput } from './ui/input.js';
@@ -325,7 +327,11 @@ function animalPlacement(state, type) {
     w: 1, h: 1,
     confirmLabel: `✓ Put ${def.name.toLowerCase()} here`,
     validate: (x, y) => canPlaceAnimal(state, x, y),
-    draw: (ctx, sheets, at) => drawAnimalSprite(ctx, sheets, type, at),
+    // The colour is rolled when the sale goes through, so the ghost can't know
+    // it. Rather than show one and hand over another, it cycles through the
+    // colours — which says "you'll get one of these" without promising which.
+    draw: (ctx, sheets, at) => drawAnimalSprite(ctx, sheets, type, at,
+      Math.floor(state.tickCount / 2) % animalVariantCount()),
     confirm: (x, y) => {
       const res = buyAnimal(state, type, x, y);
       return res.ok

@@ -11,6 +11,7 @@
 // *choose* to keep them near their troughs, since a gate blocks an animal but
 // not the farmer.
 
+import { ANIMAL_VARIANTS } from '../config.js';
 import { findPath, besideBox } from '../world/pathfind.js';
 import { OBJ } from '../world/tiledefs.js';
 import { addItem, countItem, removeItem, ITEMS } from './inventory.js';
@@ -18,6 +19,11 @@ import { CROPS } from './crops.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 
 /**
+ * `row` is the animal's row on assets/animals.png; the columns of that row are
+ * its colour variations. Each animal picks one when it's bought and keeps it,
+ * so a farm ends up with a white cow and a brown one rather than a herd of
+ * clones.
+ *
  * `laysOnGround` is what sets the chicken apart: a hen with food, water and
  * time drops an egg where it stands, to be picked up like anything else lying
  * in the grass. Cows and sheep are milked and sheared directly, which is what
@@ -25,19 +31,19 @@ import { emitUnlessSuspended } from '../engine/events.js';
  */
 export const ANIMALS = {
   chicken: {
-    name: 'Chicken', price: 120, sprite: 'chicken',
+    name: 'Chicken', price: 120, row: 2,
     produces: 'egg', produceTicks: 1200,          // 20 min
     laysOnGround: true,
   },
   cow: {
-    name: 'Cow', price: 500, sprite: 'cow',
+    name: 'Cow', price: 500, row: 1,
     produces: 'milk', produceTicks: 1800,         // 30 min
   },
   // The overnight animal. Wool is slower than milk and worth more, which makes
   // a sheep the better buy for someone who checks in twice a day and the worse
   // one for someone watching — the same shape as the slow crops.
   sheep: {
-    name: 'Sheep', price: 800, sprite: 'sheep',
+    name: 'Sheep', price: 800, row: 0,
     produces: 'wool', produceTicks: 4500,         // 75 min
   },
 };
@@ -188,14 +194,41 @@ function updateEmote(state, a) {
 
 export function animalDef(type) { return ANIMALS[type]; }
 
+/**
+ * How many colours each animal comes in.
+ *
+ * Set from the width of assets/animals.png when it loads, so adding a column
+ * to the image is the whole job — no constant to remember to bump. Falls back
+ * to the config value headlessly, where there's no image to measure.
+ */
+let variantCount = ANIMAL_VARIANTS;
+
+export function setAnimalVariants(n) {
+  if (Number.isFinite(n) && n >= 1) variantCount = Math.floor(n);
+}
+
+export function animalVariantCount() { return variantCount; }
+
+/** The colour a newly bought animal turns out to be. */
+export function rollVariant(state) { return state.rng.int(variantCount); }
+
+/**
+ * Clamped for drawing: a save made when the sheet had more columns than it has
+ * now would otherwise index off the end of it and draw nothing.
+ */
+export function variantOf(animal) {
+  return Math.min(animal.variant || 0, variantCount - 1);
+}
+
 export function animalAt(state, x, y) {
   return (state.animals || []).find((a) => a.x === x && a.y === y) || null;
 }
 
-export function makeAnimal(state, type, x, y) {
+export function makeAnimal(state, type, x, y, variant = rollVariant(state)) {
   const animal = {
     id: state.nextAnimalId++,
     type,
+    variant,
     x, y, px: x, py: y,
     affection: 0,
     // null rather than -Infinity: JSON turns Infinity into null anyway, so the

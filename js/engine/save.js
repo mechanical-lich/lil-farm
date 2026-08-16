@@ -3,7 +3,9 @@
 // This game's whole premise is a long-lived farm, so migrations exist from day
 // one: a schema change must never destroy an existing save.
 
-import { SAVE_KEY, SAVE_VERSION, AUTOSAVE_MIN_MS, AUTOSAVE_MAX_MS } from '../config.js';
+import {
+  SAVE_KEY, SAVE_VERSION, AUTOSAVE_MIN_MS, AUTOSAVE_MAX_MS, ANIMAL_VARIANTS,
+} from '../config.js';
 import { expandSaveToCells } from '../world/expand.js';
 
 /**
@@ -33,6 +35,17 @@ const migrations = {
       delete a.ready;
     }
     data.version = 4;
+    return data;
+  },
+
+  // Animals come in colours now. Existing ones are spread across the columns
+  // by id rather than all defaulting to the first, so an established farm gets
+  // the variety a new one would instead of a herd of identical white cows.
+  4: (data) => {
+    for (const a of data.animals || []) {
+      if (a.variant == null) a.variant = a.id % ANIMAL_VARIANTS;
+    }
+    data.version = 5;
     return data;
   },
 };

@@ -24,8 +24,16 @@ export const BUILDABLES = {
     hint: 'The farmer walks through; animals cannot',
   },
   road: {
-    name: 'Road', ground: GROUND.ROAD, cost: { stone: 1 }, work: 5, size: [1, 1],
+    name: 'Stone road', ground: GROUND.ROAD, cost: { stone: 1 }, work: 5, size: [1, 1],
     hint: 'Tidy paths across the farm',
+  },
+  // Trodden earth rather than a built surface, so it costs nothing but the
+  // walking — the price is the farmer's time. It autotiles with proper grass
+  // edges, inside corners and all, which is what makes a run of it read as a
+  // path rather than a row of brown squares.
+  dirtRoad: {
+    name: 'Dirt road', ground: GROUND.DIRT, cost: {}, work: 4, size: [1, 1],
+    hint: 'Worn earth, free to lay',
   },
   waterTrough: {
     name: 'Water trough', obj: OBJ.TROUGH_WATER, cost: { wood: 8 }, work: 14,

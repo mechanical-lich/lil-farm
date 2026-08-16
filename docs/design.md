@@ -98,7 +98,7 @@ Tilled land has a dry and a wet version in the tilesheet, and each crop has a ye
 ## Construction
 You can build things like farms, fences, barrels, water/feed troughs, and roads.  
 
-- The build tool offers fence, gate, road, water trough and feed trough, each showing its material cost.  Materials come from chopping trees and clearing rocks, or from the shop.
+- The build tool offers fence, gate, two kinds of road, water trough and feed trough, each showing its material cost.  Materials come from chopping trees and clearing rocks, or from the shop.
 - **Materials are reserved when work is queued and spent when it's finished.**  You can't queue more building than you have materials for, but cancelling a build costs nothing.
 - Fences block everyone.  Gates block animals but the farmer opens them, so a pen needs exactly one gate to be usable and secure.
 - Troughs are **two tiles wide** and need two clear tiles side by side.
@@ -113,6 +113,16 @@ Barns are the answer to "what are the farm tiles for" — they're what lets you 
 - Fences drawn next to each other join into a continuous run automatically.
 
 ### Taking things down
+### Roads
+Two of them, and they read very differently:
+
+- **Stone road** — the cobbles from the town sheet, 1 stone a tile. A tidy, built surface. The tile has its own grass border baked in, so a run of it needs no edge work.
+- **Dirt road** — worn earth. It **costs nothing**: you're not laying a surface, you're wearing a path, and the price is the farmer's time. It shares its ground with the barn's yard, so a path can run straight into the yard and read as one piece of ground.
+
+The dirt road **autotiles properly**: the town sheet has a full 3x3 nine-slice for the straight edges and convex corners, *and* four concave corners for the insides of bends. Without those last four a path turning a corner draws as solid earth with a square notch of grass sitting in the turn.
+
+The four wedges are **composited a quarter-tile at a time** rather than picked as a single tile. Each concave tile on the sheet is solid earth with one grass wedge, so drawing two would have the second paint over the first. Clipping each to its own quadrant lets all four appear at once — which is what a crossroads needs, where every diagonal is grass and choosing one tile would leave three corners wrong.
+
 **Anything you build can be removed again, and gives back half its materials** (rounded down, so a 1-stone road refunds nothing).
 
 - Use the clear task, the same one that chops trees and undoes beds.
@@ -145,6 +155,8 @@ Animals can not open gates.
 - **Collecting takes the whole bank in one tap.**  One tap per churn would recreate exactly the fiddliness that picking eggs up off the ground already has.
 - **Chickens are not collected from.**  A hen with enough food, water and time **drops an egg on the ground** where it stands, and the egg is picked up with the clear task like anything else lying in the grass.  Eggs don't block movement, and a hen with nowhere to put one simply waits rather than losing it.
 - **Cows and sheep are collected from directly** — you tap the animal.  That difference is deliberate: you pick an egg up off the ground, you milk a cow and you shear a sheep.
+- **Every animal comes in a colour.**  `assets/animals.png` has a row per animal and a column per variation, and a newly bought animal picks a column at random — so you might get a white cow or a brown one.  It keeps that colour for life.  Adding a column to the image is the whole job: the game counts the columns when the sheet loads, so new colours need no code.
+- Because the colour is rolled when the sale goes through, the placement ghost can't know it.  Rather than show one colour and hand over another, **the ghost cycles through them** — which says "you'll get one of these" without promising which.
 - **Animals are free-range.**  Nothing forces you to fence them.  Fences and gates are how you *choose* to keep them near their troughs, since a gate stops an animal but not the farmer.
 - You need a **barn before you can buy an animal**, and each barn holds 4.
 - **You choose where a new animal goes.**  Pressing Buy closes the shop and hands you a ghost of the animal; tap to move it, then confirm.  Nothing is charged until you confirm a spot, so backing out is free — the same rule building follows.

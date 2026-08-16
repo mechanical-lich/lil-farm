@@ -37,13 +37,16 @@ import {
   ANIMALS, TROUGH_CAPACITY, FEED_COST, FOOD_DURATION, WATER_DURATION, SEEK_THRESHOLD,
   makeAnimal, collectFrom, isNeglected, fillWaterTrough, fillFeedTrough, pickFeed, animalDef,
   petAnimal, pickEmote, currentEmote, animalAt, isReady, PRODUCE_CAP,
+  setAnimalVariants, animalVariantCount, variantOf,
   AFFECTION_MAX, PET_GAIN, PET_COOLDOWN, EMOTE_TICKS,
 } from '../js/sim/animals.js';
 import {
   BUILDABLES, canPlaceAt, canAfford, footprint, troughAnchorAt,
   completeBuild, demolish, structureAt, buildingAt, animalCapacity, BARN_CAPACITY,
-  placeStructure,
+  placeStructure, buildDef, kindForGround,
 } from '../js/sim/build.js';
+import { TOWN } from '../js/render/sprites.js';
+import { dirtPieceAt, dirtCornersAt } from '../js/render/tilerender.js';
 import { addItems } from '../js/sim/inventory.js';
 import { newGame as newGameRaw, serialize, deserialize } from '../js/state.js';
 import { tick } from '../js/sim/tick.js';
@@ -57,6 +60,7 @@ import {
 import { buildSummary } from '../js/ui/summary.js';
 import {
   TICK_MS, SAVE_VERSION, FARMER_SPEED, MAP_W, MAP_H, CELL_W, CELL_H, SAVE_KEY,
+  TILE, ANIMAL_VARIANTS,
 } from '../js/config.js';
 
 let passed = 0;
@@ -1580,9 +1584,11 @@ test('a save from before banking keeps the milk it was owed', () => {
   for (let i = 0; i < ANIMALS.cow.produceTicks + 5; i++) tick(s);
   assertEqual(animal.stock, 1, 'a cow ready to milk');
 
-  // How that farm was written before animals could bank.
+  // How that farm was written before animals could bank. Pinned to 3 rather
+  // than SAVE_VERSION - 1: the point is *that* schema, and the relative form
+  // quietly stopped meaning it the moment a version was added after it.
   const old = JSON.parse(JSON.stringify(serialize(s)));
-  old.version = SAVE_VERSION - 1;
+  old.version = 3;
   for (const a of old.animals) { a.ready = a.stock > 0; delete a.stock; }
 
   const back = deserialize(migrate(old));
@@ -2232,6 +2238,196 @@ test('emotes are part of the sim, so they replay identically', () => {
   const b = farmWithAnimal('cow', 8108);
   for (let i = 0; i < 2000; i++) { tick(a.s); tick(b.s); }
   assertEqual(serialize(b.s), serialize(a.s), 'two identical farms must stay identical');
+});
+
+// --- animal colours -----------------------------------------------------
+
+/** Width and height of a PNG, straight out of its IHDR chunk. */
+function pngSize(path) {
+  const buf = readFileSync(path);
+  return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+}
+
+test('the animal sheet and the animal definitions agree', () => {
+  // The sheet is art the game indexes into by row and column. If a row is
+  // added to ANIMALS without a row on the sheet, that animal draws nothing —
+  // and nothing else would catch it, since the renderer has no canvas here.
+  const { w, h } = pngSize('assets/animals.png');
+  const cols = w / TILE;
+  const rows = h / TILE;
+  assertEqual(w % TILE, 0, 'the sheet is a whole number of tiles wide');
+  assertEqual(h % TILE, 0, 'and tall');
+
+  for (const [type, def] of Object.entries(ANIMALS)) {
+    assert(Number.isInteger(def.row), `${type} needs a row on the sheet`);
+    assert(def.row < rows, `${type} wants row ${def.row}, the sheet has ${rows}`);
+  }
+  assertEqual(new Set(Object.values(ANIMALS).map((d) => d.row)).size,
+    Object.keys(ANIMALS).length, 'every animal has its own row');
+
+  // Whatever the sheet's width, that's how many colours the game offers.
+  setAnimalVariants(cols);
+  assertEqual(animalVariantCount(), cols, 'the count comes off the sheet');
+  setAnimalVariants(ANIMAL_VARIANTS);
+});
+
+test('a bought animal gets a colour, and not always the same one', () => {
+  const s = farmWithMaterials(9400);
+  completeBuild(s, { buildKind: 'barn', x: s.farmer.x - 1, y: s.farmer.y - 4 });
+  s.money = 100000;
+
+  const seen = new Set();
+  for (let i = 0; i < 24; i++) {
+    const animal = makeAnimal(s, 'cow', s.farmer.x + 1, s.farmer.y);
+    assert(Number.isInteger(animal.variant), 'every animal is born some colour');
+    assert(animal.variant >= 0 && animal.variant < animalVariantCount(),
+      `variant ${animal.variant} is off the sheet`);
+    seen.add(animal.variant);
+  }
+  assert(seen.size > 1, 'two dozen cows should not all be the same colour');
+});
+
+test('an animal keeps its colour for life, and through a save', () => {
+  const { s, animal } = farmWithAnimal('sheep', 9401);
+  const born = animal.variant;
+
+  for (let i = 0; i < 60 * 60; i++) tick(s);
+  assertEqual(animal.variant, born, 'an hour of wandering does not change it');
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual(back.animals[0].variant, born, 'nor does putting the farm away');
+});
+
+test('buying is deterministic, so catching up agrees on the colours', () => {
+  const a = farmWithAnimal('cow', 9402);
+  const b = farmWithAnimal('cow', 9402);
+  assertEqual(b.animal.variant, a.animal.variant, 'same seed, same colour');
+});
+
+test('an animal from a sheet with more colours than we have now still draws', () => {
+  // Variants are stored on the animal. If the sheet ever loses a column, the
+  // stored index would point off the end of it and the animal would vanish.
+  const { animal } = farmWithAnimal('cow', 9403);
+  animal.variant = 99;
+  assertEqual(variantOf(animal), animalVariantCount() - 1, 'clamped to a real column');
+});
+
+test('animals from before colours are spread across them, not all identical', () => {
+  const s = farmWithMaterials(9404);
+  completeBuild(s, { buildKind: 'barn', x: s.farmer.x - 1, y: s.farmer.y - 4 });
+  for (let i = 0; i < 4; i++) makeAnimal(s, 'chicken', s.farmer.x + 1, s.farmer.y);
+
+  // How that farm was written before animals had a colour.
+  const old = JSON.parse(JSON.stringify(serialize(s)));
+  old.version = 4;
+  for (const a of old.animals) delete a.variant;
+
+  const back = deserialize(migrate(old));
+  for (const a of back.animals) {
+    assert(Number.isInteger(a.variant), 'every old animal is given a colour');
+    assert(a.variant >= 0 && a.variant < ANIMAL_VARIANTS, 'a real one');
+  }
+  assert(new Set(back.animals.map((a) => a.variant)).size > 1,
+    'an established farm should not turn into a herd of clones');
+});
+
+// --- the dirt road ------------------------------------------------------
+
+test('a dirt road costs nothing but the walking, and reverts to grass', () => {
+  const s = farmWithMaterials(9300);
+  s.inventory = {};                       // empty bag on purpose
+  const x = s.farmer.x + 5;
+  const y = s.farmer.y + 5;
+
+  assert(canAfford(s, 'dirtRoad').ok, 'earth is free; the cost is the farmer\'s time');
+  assert(canPlaceAt(s, 'dirtRoad', x, y), 'it goes on open grass');
+  completeBuild(s, { buildKind: 'dirtRoad', x, y });
+  assertEqual(s.grid.getGround(x, y), GROUND.DIRT, 'and lays bare earth');
+
+  assert(!canPlaceAt(s, 'dirtRoad', x, y), 'laying it twice is a no-op, not a double charge');
+  assertEqual(structureAt(s, x, y).kind, 'dirtRoad', 'the clear tool can find it again');
+  assert(demolish(s, x, y).ok, 'and take it up');
+  assertEqual(s.grid.getGround(x, y), GROUND.GRASS, 'leaving grass, not a scar');
+});
+
+test('a dirt road is not the same thing as the stone road', () => {
+  // Two separate buildables sharing one tool; mixing their ground ids up would
+  // make demolishing one take up the other.
+  assert(buildDef('road').ground !== buildDef('dirtRoad').ground, 'different ground');
+  assertEqual(kindForGround(GROUND.DIRT), 'dirtRoad', 'earth belongs to the dirt road');
+  assertEqual(kindForGround(GROUND.ROAD), 'road', 'and cobbles to the stone one');
+});
+
+test('a dirt road draws its edges, corners and bends from the right tiles', () => {
+  // The nine-slice is easy to get subtly wrong, and wrong here means a farm
+  // full of hard square edges. Assert the actual sprite chosen for each case.
+  const s = farmWithMaterials(9301);
+  const ox = 20;
+  const oy = 20;
+  const lay = (dx, dy) => s.grid.setGround(ox + dx, oy + dy, GROUND.DIRT);
+
+  // A solid 3x3 block: every edge and convex corner in one shape.
+  for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) lay(dx, dy);
+
+  const at = (dx, dy) => dirtPieceAt(s, ox + dx, oy + dy);
+  assertEqual(at(0, 0), TOWN.dirtTL, 'top-left');
+  assertEqual(at(1, 0), TOWN.dirtT, 'top edge');
+  assertEqual(at(2, 0), TOWN.dirtTR, 'top-right');
+  assertEqual(at(0, 1), TOWN.dirtL, 'left edge');
+  assertEqual(at(1, 1), TOWN.dirtC, 'the middle is plain earth');
+  assertEqual(at(2, 1), TOWN.dirtR, 'right edge');
+  assertEqual(at(0, 2), TOWN.dirtBL, 'bottom-left');
+  assertEqual(at(1, 2), TOWN.dirtB, 'bottom edge');
+  assertEqual(at(2, 2), TOWN.dirtBR, 'bottom-right');
+});
+
+test('the inside of a bend gets a grass wedge, not plain earth', () => {
+  // This is what the sheet's four extra tiles exist for. Without them the turn
+  // draws as solid earth with a square notch of grass sitting in it.
+  const ox = 20;
+  const oy = 20;
+  const around = [[0, 0], [1, 0], [2, 0], [0, 1], [1, 1], [2, 1], [0, 2], [1, 2], [2, 2]];
+
+  const bend = (missing) => {
+    const s = farmWithMaterials(9302);
+    for (const [dx, dy] of around) {
+      if (dx === missing[0] && dy === missing[1]) continue;
+      s.grid.setGround(ox + dx, oy + dy, GROUND.DIRT);
+    }
+    return dirtCornersAt(s, ox + 1, oy + 1);
+  };
+
+  assertEqual(bend([0, 0]), ['innerTL'], 'grass tucked into the top-left of the bend');
+  assertEqual(bend([2, 0]), ['innerTR'], 'top-right');
+  assertEqual(bend([0, 2]), ['innerBL'], 'bottom-left');
+  assertEqual(bend([2, 2]), ['innerBR'], 'bottom-right');
+});
+
+test('a crossroads gets all four wedges, not one of them', () => {
+  // The reason the corners are composited a quarter-tile at a time instead of
+  // being chosen as a single tile: here every diagonal is grass, and picking
+  // one inner-corner tile would leave three corners wrong.
+  const s = farmWithMaterials(9303);
+  const ox = 20;
+  const oy = 20;
+  for (let i = 0; i < 5; i++) {
+    s.grid.setGround(ox + i, oy + 2, GROUND.DIRT);
+    s.grid.setGround(ox + 2, oy + i, GROUND.DIRT);
+  }
+
+  assertEqual(dirtPieceAt(s, ox + 2, oy + 2), TOWN.dirtC, 'the junction itself is solid earth');
+  assertEqual(dirtCornersAt(s, ox + 2, oy + 2).sort(),
+    ['innerBL', 'innerBR', 'innerTL', 'innerTR'], 'with a wedge in every corner');
+});
+
+test('a solid field of dirt needs no wedges at all', () => {
+  const s = farmWithMaterials(9304);
+  const ox = 20;
+  const oy = 20;
+  for (let dy = 0; dy < 5; dy++) for (let dx = 0; dx < 5; dx++) {
+    s.grid.setGround(ox + dx, oy + dy, GROUND.DIRT);
+  }
+  assertEqual(dirtCornersAt(s, ox + 2, oy + 2), [], 'nothing to tuck in');
 });
 
 // --- mushrooms ----------------------------------------------------------

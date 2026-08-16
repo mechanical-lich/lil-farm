@@ -7,7 +7,9 @@
 import { TILE } from '../config.js';
 import { SPRITES, EMOTES } from './sprites.js';
 import { blit } from './tilerender.js';
-import { animalDef, isNeglected, isThirsty, currentEmote, isReady } from '../sim/animals.js';
+import {
+  animalDef, isNeglected, isThirsty, currentEmote, isReady, variantOf,
+} from '../sim/animals.js';
 
 /**
  * Everything that moves, bucketed by the tile row it should sort into.
@@ -127,7 +129,9 @@ function drawAnimal(ctx, sheets, state, a, pos) {
 
   const x = pos.x * TILE;
   const y = pos.y * TILE;
-  blit(ctx, sheets, SPRITES[def.sprite], Math.round(x), Math.round(y) - 1, a.facing === 'left');
+  // Row picks the animal, column picks the colour it was born.
+  blit(ctx, sheets, [variantOf(a), def.row, 'animals'],
+    Math.round(x), Math.round(y) - 1, a.facing === 'left');
 
   if (isReady(a)) {
     // A gentle bob so a collectable animal catches the eye while panning.
@@ -140,10 +144,10 @@ function drawAnimal(ctx, sheets, state, a, pos) {
 }
 
 /** One animal sprite at a tile, used for the placement ghost. */
-export function drawAnimalSprite(ctx, sheets, type, at) {
+export function drawAnimalSprite(ctx, sheets, type, at, variant = 0) {
   const def = animalDef(type);
   if (!def) return;
-  blit(ctx, sheets, SPRITES[def.sprite], at.x * TILE, at.y * TILE - 1);
+  blit(ctx, sheets, [variant, def.row, 'animals'], at.x * TILE, at.y * TILE - 1);
 }
 
 function drawBadge(ctx, x, y, fill, edge) {

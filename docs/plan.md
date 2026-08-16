@@ -145,6 +145,41 @@ their eggs go on the ground, so there's nothing to bank.
 The v3 -> v4 migration converts `ready` to `stock`, because a cow standing there
 ready had earned its milk and shouldn't quietly lose it on an update.
 
+**Animal colours are counted off the sheet, not hardcoded.** `loadSheets` reads
+`assets/animals.png`'s width and calls `setAnimalVariants(width / TILE)`, so
+adding a column to the image puts a new colour in the game with no code change —
+which is what the artist actually wants. `ANIMAL_VARIANTS` in config is only the
+headless fallback, for tests and the save migration.
+
+The variant is **stored on the animal**, rolled once at purchase from
+`state.rng`. That keeps replay deterministic and means an animal's colour is
+part of the farm rather than a function of where it happens to be standing.
+`variantOf()` clamps for drawing: a save made when the sheet had more columns
+than it has now would otherwise index off the end and draw nothing.
+
+A test reads the PNG's own header and asserts every animal's `row` exists on the
+sheet and that each has its own. Adding an animal to `ANIMALS` without adding a
+row to the image would otherwise draw nothing, and no other test would catch it
+— there's no canvas in the headless suite.
+
+**Pin old save versions by number in tests, not `SAVE_VERSION - 1`.** The
+banking migration test used the relative form and quietly stopped exercising the
+migration it was named after the moment a version was added after it.
+
+**The dirt road's autotiling is composited, not chosen.** `dirtPieceAt` picks
+the nine-slice tile (edges and convex corners); `dirtCornersAt` returns the
+concave corners, each drawn clipped to its own quarter of the tile. The reason
+is the crossroads case: every diagonal is grass, and the sheet's inner-corner
+tiles are solid earth with a single wedge, so picking one tile leaves three
+corners wrong and drawing two paints over the first. Both are exported and
+tested without a canvas — a nine-slice is easy to get subtly wrong and the
+result is a farm full of hard square edges, which is hard to eyeball.
+
+The town sheet's tiles were catalogued by **sampling the PNG's pixels**, not by
+eye: for each candidate tile, which edges and corners are green. That's how the
+four concave corners at (3,3)-(6,3) were confirmed. Worth repeating for any new
+tile set — this project has mis-catalogued sprites by eye more than once.
+
 **Mushrooms reuse the weed spawner's shape** — capped, one-tick-in-N, `state.rng`
 only — which is exactly what that file said it was there to be. What's different
 is that *which* mushroom grew is state, not a hash of the tile: it lives in
@@ -282,6 +317,11 @@ at all while the farmer is on it, which reads as swung open.
   tool-shaped at small sizes.
 - `DERIVED.dirt` still exists in `sprites.js` but is now unused by the ground layer; the
   town sheet's real dirt replaced it.
+- Town sheet `(3,3)`–`(6,3)` are the dirt set's **concave corners** — flat on every edge
+  with a grass wedge in one corner (TL, TR, BR, BL in that order). Confirmed by sampling
+  the PNG's pixels, not by eye. They complete the nine-slice at `(0,1)`–`(2,3)`.
+
+207 headless tests pass via `npm test`.
 
 ## 0. Ground rules
 

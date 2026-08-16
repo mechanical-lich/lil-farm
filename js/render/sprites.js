@@ -4,6 +4,7 @@
 //   'town'   — assets/town_tilemap_packed.png  grass, dirt, paving, fences, trees
 //   'emotes' — assets/emotes.png               speech bubbles over the animals
 //   'shrooms' — assets/mushrooms.png           one row of 16 foraged mushrooms
+//   'animals' — assets/animals.png              a row per animal, a column per colour
 //
 // Both share the same palette (#84c669 grass, #eaa56c dirt), so tiles from the
 // two sheets sit next to each other seamlessly.
@@ -17,6 +18,7 @@
 // draws the sheet magnified with col/row labels.
 
 import { TILE } from '../config.js';
+import { setAnimalVariants } from '../sim/animals.js';
 
 /**
  * The soil capsule set — the art tilling is actually drawn with.
@@ -50,9 +52,11 @@ export const SOIL = {
  * GRASS: (0,0) is 100% grass with no decoration — the plain fill. (1,0) and
  * (2,0) are the same grass with clumps and flowers.
  *
- * DIRT: a true 3x3 nine-slice. (1,2) is 100% dirt with no edges (the interior);
- * the ring around it carries the grass boundary. This replaces the derived
- * dirt tile the farm sheet forced on us.
+ * DIRT: a true 3x3 nine-slice — (1,2) is 100% dirt with no edges (the
+ * interior) and the ring around it carries the grass boundary — plus four
+ * *inner* corners at (3,3)-(6,3) for concave joins. With those, a path that
+ * turns a corner gets a proper rounded edge instead of a notch of grass left
+ * sitting in the bend.
  *
  * FENCE: a full set — a nine-slice for enclosures, plus standalone horizontal
  * and vertical runs with proper end posts.
@@ -65,6 +69,12 @@ export const TOWN = {
   dirtTL: [0, 1, 'town'], dirtT: [1, 1, 'town'], dirtTR: [2, 1, 'town'],
   dirtL: [0, 2, 'town'], dirtC: [1, 2, 'town'], dirtR: [2, 2, 'town'],
   dirtBL: [0, 3, 'town'], dirtB: [1, 3, 'town'], dirtBR: [2, 3, 'town'],
+  // Inner (concave) corners: flat on all four sides with a grass wedge in one
+  // corner, for where two arms of a path meet round an outside bend. Verified
+  // by sampling the sheet's pixels rather than by eye — each of these has grass
+  // in exactly one corner and none along any edge.
+  dirtInnerTL: [3, 3, 'town'], dirtInnerTR: [4, 3, 'town'],
+  dirtInnerBR: [5, 3, 'town'], dirtInnerBL: [6, 3, 'town'],
 
   paved: [7, 3, 'town'],
 
@@ -168,13 +178,10 @@ export const SPRITES = {
   // Eggs a hen has dropped, waiting to be picked up.
   egg: [5, 10],
 
-  // Characters
+  // Characters. The livestock that used to live here has moved to its own
+  // sheet, assets/animals.png, which carries a colour variation per column.
   farmer: [0, 9],
   farmerHat: [1, 9],
-  sheep: [0, 10],
-  cow: [1, 10],
-  chicken: [2, 10],
-  duck: [3, 10],
 };
 
 /**
@@ -261,17 +268,25 @@ function loadImage(src) {
 /**
  * Loads both tilesheets and prepares derived tiles.
  * @returns {Promise<{farm: HTMLImageElement, town: HTMLImageElement,
- *   emotes: HTMLImageElement, shrooms: HTMLImageElement}>}
+ *   emotes: HTMLImageElement, shrooms: HTMLImageElement,
+ *   animals: HTMLImageElement}>}
  */
 export async function loadSheets() {
-  const [farm, town, emotes, shrooms] = await Promise.all([
+  const [farm, town, emotes, shrooms, animals] = await Promise.all([
     loadImage('assets/tilemap_packed.png'),
     loadImage('assets/town_tilemap_packed.png'),
     loadImage('assets/emotes.png'),
     loadImage('assets/mushrooms.png'),
+    loadImage('assets/animals.png'),
   ]);
   buildCapsules(farm);
-  return { farm, town, emotes, shrooms };
+
+  // How many colours an animal comes in is however many columns the artist put
+  // on the sheet. Reading it here means adding a column to the image is the
+  // whole job — there's no constant to remember to bump.
+  setAnimalVariants(Math.round(animals.width / TILE));
+
+  return { farm, town, emotes, shrooms, animals };
 }
 
 /** Resolves which sheet image a sprite reference belongs to. */

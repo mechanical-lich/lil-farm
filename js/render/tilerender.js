@@ -42,6 +42,68 @@ function tilledPiece(state, x, y) {
  * neighbours are part of the same patch. Used for dirt, which appears in
  * arbitrary shapes (wherever a tree was felled) rather than tidy rows.
  */
+/**
+ * Which dirt tile belongs at this cell, given its neighbours. Exported so the
+ * autotiling can be tested without a canvas — getting a nine-slice subtly wrong
+ * means a farm full of hard square edges, and that's hard to eyeball.
+ */
+export function dirtPieceAt(state, x, y) {
+  return ninePiece(isDirtAt(state), x, y, DIRT_SET);
+}
+
+const isDirtAt = (state) => (nx, ny) => state.grid.getGround(nx, ny) === GROUND.DIRT;
+
+/** Quadrant of a tile each concave corner occupies, in pixels. */
+const QUADRANT = {
+  innerTL: [0, 0], innerTR: [TILE / 2, 0],
+  innerBL: [0, TILE / 2], innerBR: [TILE / 2, TILE / 2],
+};
+
+/**
+ * The concave corners this cell needs — the insides of bends.
+ *
+ * A corner needs a grass wedge when both of its neighbours are dirt but the
+ * diagonal between them isn't: the path wraps round an outside bend, and
+ * without the wedge the turn draws as solid earth with a square notch of grass
+ * sitting in it.
+ *
+ * Returned as a list and **composited a quarter-tile at a time** rather than
+ * picked as a single tile. The sheet's inner-corner tiles are solid earth with
+ * one wedge each, so drawing two of them would have the second paint over the
+ * first; clipping each to its own quadrant lets all four appear at once. That
+ * matters at a crossroads, where every diagonal is grass and picking one tile
+ * would leave three corners wrong.
+ */
+export function dirtCornersAt(state, x, y) {
+  const same = isDirtAt(state);
+  const n = same(x, y - 1);
+  const s = same(x, y + 1);
+  const w = same(x - 1, y);
+  const e = same(x + 1, y);
+
+  const out = [];
+  if (n && w && !same(x - 1, y - 1)) out.push('innerTL');
+  if (n && e && !same(x + 1, y - 1)) out.push('innerTR');
+  if (s && w && !same(x - 1, y + 1)) out.push('innerBL');
+  if (s && e && !same(x + 1, y + 1)) out.push('innerBR');
+  return out;
+}
+
+/** Draws one inner corner, clipped to its own quarter of the tile. */
+function blitCorner(ctx, sheets, corner, px, py) {
+  const [qx, qy] = QUADRANT[corner];
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(px + qx, py + qy, TILE / 2, TILE / 2);
+  ctx.clip();
+  blit(ctx, sheets, DIRT_SET[corner], px, py);
+  ctx.restore();
+}
+
+/**
+ * Picks the tile for one cell of an autotiled area: straight edges and the
+ * convex corners. Concave corners are composited on top — see dirtCornersAt.
+ */
 function ninePiece(same, x, y, set) {
   const n = same(x, y - 1);
   const s = same(x, y + 1);
@@ -64,6 +126,9 @@ const DIRT_SET = {
   TL: TOWN.dirtTL, T: TOWN.dirtT, TR: TOWN.dirtTR,
   L: TOWN.dirtL, C: TOWN.dirtC, R: TOWN.dirtR,
   BL: TOWN.dirtBL, B: TOWN.dirtB, BR: TOWN.dirtBR,
+  // Concave corners, named for where the grass sits in them.
+  innerTL: TOWN.dirtInnerTL, innerTR: TOWN.dirtInnerTR,
+  innerBL: TOWN.dirtInnerBL, innerBR: TOWN.dirtInnerBR,
 };
 
 /** Ground layer: real grass and dirt tiles, tilled beds, and paving. */
@@ -91,10 +156,13 @@ export function drawGround(ctx, sheets, state, view) {
       } else if (g === GROUND.ROAD) {
         blit(ctx, sheets, TOWN.paved, x * TILE, y * TILE);
       } else {
-        // Bare earth, e.g. where a tree stood. Nine-sliced so a cleared patch
-        // gets a proper grassy boundary instead of a hard square edge.
-        const isDirt = (nx, ny) => state.grid.getGround(nx, ny) === GROUND.DIRT;
-        blit(ctx, sheets, ninePiece(isDirt, x, y, DIRT_SET), x * TILE, y * TILE);
+        // Bare earth: the barn yard, and any dirt road the player has laid.
+        // Autotiled so a run of it gets a proper grassy boundary — edges,
+        // corners and the insides of bends — instead of hard square edges.
+        blit(ctx, sheets, dirtPieceAt(state, x, y), x * TILE, y * TILE);
+        for (const corner of dirtCornersAt(state, x, y)) {
+          blitCorner(ctx, sheets, corner, x * TILE, y * TILE);
+        }
       }
     }
   }

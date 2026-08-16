@@ -10,9 +10,18 @@ export const CATCHUP_CHUNK = 20000;     // ticks per chunk before yielding to th
 
 // --- Persistence --------------------------------------------------------
 export const SAVE_KEY = 'lilfarm.save.v1';
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 export const AUTOSAVE_MIN_MS = 1000;    // never write more often than this
 export const AUTOSAVE_MAX_MS = 10000;   // always write at least this often when dirty
+
+// --- Animals ------------------------------------------------------------
+//
+// Colour variations per animal: the number of columns on assets/animals.png.
+// This is only the fallback — the real count is read off the sheet when it
+// loads (see setAnimalVariants), so adding a column to the image is all it
+// takes to put a new colour in the game. It's here so the simulation has an
+// answer when it runs headless, in tests and in the save migration.
+export const ANIMAL_VARIANTS = 3;
 
 // --- The farmer ---------------------------------------------------------
 // Tiles walked per tick. The renderer interpolates along every tile stepped
