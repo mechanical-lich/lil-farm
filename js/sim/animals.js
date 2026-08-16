@@ -146,7 +146,11 @@ export function petAnimal(state, animal) {
   const gained = warm ? 0 : Math.min(PET_GAIN, AFFECTION_MAX - (animal.affection || 0));
 
   animal.affection = (animal.affection || 0) + gained;
-  animal.pettedAt = state.tickCount;
+  // Only a fuss that counted resets the clock. Stamping it on every tap would
+  // slide the window forward forever, so someone who greets their cow on every
+  // visit would never gain a point — the exact opposite of "earned by visiting
+  // often", which is what this cooldown is here to reward.
+  if (gained > 0) animal.pettedAt = state.tickCount;
   showEmote(animal, state, gained > 0 ? 'hearts' : 'smile');
 
   emitUnlessSuspended('animal:petted', {
@@ -386,7 +390,10 @@ export function updateAnimals(state) {
     }
 
     updateEmote(state, a);
-    moveAnimal(state, a);
+    // An animal the farmer is on his way to tend stands still and waits for
+    // him. Without this the task follows it around and he trails after it,
+    // which looks less like milking a cow than chasing one.
+    if (!beingTended(state, a)) moveAnimal(state, a);
   }
 }
 
@@ -471,6 +478,13 @@ function drinkOrEat(state, a, trough, kind) {
   else a.food = FOOD_DURATION;
 
   emitUnlessSuspended('world:changed', { x: trough.x, y: trough.y });
+}
+
+/** Is this the animal the farmer is currently working on, or heading for? */
+function beingTended(state, a) {
+  if (state.farmer.taskId === null) return false;
+  const task = state.tasks.find((t) => t.id === state.farmer.taskId);
+  return !!task && task.animalId === a.id;
 }
 
 const ORTHO = [[0, -1], [1, 0], [0, 1], [-1, 0]];

@@ -11,10 +11,10 @@
 import { FARMER_SPEED } from '../config.js';
 import { findPath, besideBox, insideBox } from '../world/pathfind.js';
 import { OBJ, objDef, GROUND } from '../world/tiledefs.js';
-import { deferTask, completeTask } from './tasks.js';
+import { deferTask, completeTask, clearBuildSite } from './tasks.js';
 import { addItems, removeItem } from './inventory.js';
 import { plantCrop, waterTile, harvestCrop, seedIdFor } from './crops.js';
-import { completeBuild, demolish } from './build.js';
+import { completeBuild, demolish, canCompleteBuild } from './build.js';
 import { fillWaterTrough, fillFeedTrough, collectFrom } from './animals.js';
 import { forage } from './mushrooms.js';
 import { emitUnlessSuspended } from '../engine/events.js';
@@ -238,9 +238,14 @@ function applyTaskResult(state, task) {
     case 'build':
       // The materials may have been spent elsewhere while this sat in the
       // queue; say so rather than silently building something for free.
-      if (!completeBuild(state, task)) {
+      // Checked *before* clearing the site, so an unaffordable barn doesn't
+      // cost the player an egg on the way to failing.
+      if (!canCompleteBuild(state, task)) {
         emitUnlessSuspended('task:failed', { task, reason: `not enough materials for a ${task.detail}` });
+        break;
       }
+      gained = clearBuildSite(state, task);
+      completeBuild(state, task);
       break;
 
     default:

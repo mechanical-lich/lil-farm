@@ -8,7 +8,7 @@
 // ⚠ Bump CACHE_VERSION on every deploy. Assets are served cache-first, so
 // without a bump a returning player keeps the old build indefinitely.
 
-const CACHE_VERSION = 'lil-farm-v13';
+const CACHE_VERSION = 'lil-farm-v18';
 
 const SHELL = [
   './',
@@ -102,14 +102,16 @@ self.addEventListener('fetch', (event) => {
   // Everything else is versioned by CACHE_VERSION, so cache-first is safe and
   // keeps the game instant on a cold open.
   event.respondWith((async () => {
-    const cached = await caches.match(request);
+    // Deliberately this version's cache, not caches.match(): the bare form
+    // searches every cache, including the previous version's, which still
+    // exists between install and activate. A stale module served from it would
+    // then be written into the new cache and pinned there for good.
+    const cache = await caches.open(CACHE_VERSION);
+    const cached = await cache.match(request);
     if (cached) return cached;
     try {
       const response = await fetch(request);
-      if (response.ok) {
-        const cache = await caches.open(CACHE_VERSION);
-        cache.put(request, response.clone());
-      }
+      if (response.ok) cache.put(request, response.clone());
       return response;
     } catch {
       return Response.error();

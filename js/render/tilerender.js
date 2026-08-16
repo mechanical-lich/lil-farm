@@ -2,9 +2,13 @@
 // the caller has already applied the camera transform.
 
 import { TILE } from '../config.js';
+
+/** Half a tile: autotiling works a quarter of a tile at a time. */
+const HALF = TILE / 2;
 import { GROUND, OBJ, isTilled, isWater } from '../world/tiledefs.js';
 import { SPRITES, TOWN, WATER, RIVER, CAPSULES, srcRect, sheetFor } from './sprites.js';
 import { mushroomAt } from '../sim/mushrooms.js';
+import { pendingGroundTiles } from '../sim/build.js';
 import { hash2d } from '../engine/rng.js';
 import { cropStage, isStalled, spoilRemaining, SPOIL_TICKS } from '../sim/crops.js';
 
@@ -43,76 +47,81 @@ function tilledPiece(state, x, y) {
  * arbitrary shapes (wherever a tree was felled) rather than tidy rows.
  */
 /**
- * Which dirt tile belongs at this cell, given its neighbours. Exported so the
- * autotiling can be tested without a canvas — getting a nine-slice subtly wrong
- * means a farm full of hard square edges, and that's hard to eyeball.
- */
-export function dirtPieceAt(state, x, y) {
-  return ninePiece(isDirtAt(state), x, y, DIRT_SET);
-}
-
-const isDirtAt = (state) => (nx, ny) => state.grid.getGround(nx, ny) === GROUND.DIRT;
-
-/** Water of either kind counts as water, so a river joins a pond seamlessly. */
-const isWaterAt = (state) => (nx, ny) => isWater(state.grid.getGround(nx, ny));
-
-export function waterPieceAt(state, x, y) {
-  return ninePiece(isWaterAt(state), x, y, WATER);
-}
-
-export function waterCornersAt(state, x, y) {
-  return concaveCorners(isWaterAt(state), x, y);
-}
-
-/** Quadrant of a tile each concave corner occupies, in pixels. */
-const QUADRANT = {
-  innerTL: [0, 0], innerTR: [TILE / 2, 0],
-  innerBL: [0, TILE / 2], innerBR: [TILE / 2, TILE / 2],
-};
-
-/**
- * The concave corners this cell needs — the insides of bends.
+ * Which piece each quarter of an autotiled cell should be cut from.
  *
- * A corner needs a grass wedge when both of its neighbours are dirt but the
- * diagonal between them isn't: the path wraps round an outside bend, and
- * without the wedge the turn draws as solid earth with a square notch of grass
- * sitting in it.
+ * Choosing one tile per *tile* cannot work: a 13-piece set has no answer for
+ * "grass on three sides", which is what every one-tile-wide arm and every
+ * half-dug pond is made of. The nine-slice would fall back to a straight edge
+ * and leave two sides of the tile as open water butting into grass.
  *
- * Returned as a list and **composited a quarter-tile at a time** rather than
- * picked as a single tile. The sheet's inner-corner tiles are solid earth with
- * one wedge each, so drawing two of them would have the second paint over the
- * first; clipping each to its own quadrant lets all four appear at once. That
- * matters at a crossroads, where every diagonal is grass and picking one tile
- * would leave three corners wrong.
+ * Choosing one piece per *quarter* has an answer for every arrangement, from
+ * the same 13 pieces. Each quadrant looks at the three neighbours that touch
+ * it — two sides and the diagonal between them — and takes its 8x8 corner from
+ * whichever piece already draws that situation:
+ *
+ *   both sides grass        the outer corner
+ *   one side grass          that edge
+ *   both sides water,       the concave corner (the inside of a bend)
+ *     diagonal grass
+ *   all three water         plain interior
+ *
+ * @returns {{tl: string, tr: string, bl: string, br: string}} keys into a set
  */
-export function dirtCornersAt(state, x, y) {
-  return concaveCorners(isDirtAt(state), x, y);
-}
-
-function concaveCorners(same, x, y) {
+export function autotileQuadrants(same, x, y) {
   const n = same(x, y - 1);
   const s = same(x, y + 1);
   const w = same(x - 1, y);
   const e = same(x + 1, y);
 
-  const out = [];
-  if (n && w && !same(x - 1, y - 1)) out.push('innerTL');
-  if (n && e && !same(x + 1, y - 1)) out.push('innerTR');
-  if (s && w && !same(x - 1, y + 1)) out.push('innerBL');
-  if (s && e && !same(x + 1, y + 1)) out.push('innerBR');
-  return out;
+  const pick = (a, b, diagonal, corner, edgeA, edgeB, inner) => {
+    if (!a && !b) return corner;
+    if (!a) return edgeA;
+    if (!b) return edgeB;
+    return diagonal ? 'C' : inner;
+  };
+
+  return {
+    tl: pick(n, w, same(x - 1, y - 1), 'TL', 'T', 'L', 'innerTL'),
+    tr: pick(n, e, same(x + 1, y - 1), 'TR', 'T', 'R', 'innerTR'),
+    bl: pick(s, w, same(x - 1, y + 1), 'BL', 'B', 'L', 'innerBL'),
+    br: pick(s, e, same(x + 1, y + 1), 'BR', 'B', 'R', 'innerBR'),
+  };
 }
 
-/** Draws one inner corner, clipped to its own quarter of the tile. */
-function blitCorner(ctx, sheets, set, corner, px, py) {
-  const [qx, qy] = QUADRANT[corner];
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(px + qx, py + qy, TILE / 2, TILE / 2);
-  ctx.clip();
-  blit(ctx, sheets, set[corner], px, py);
-  ctx.restore();
+/** Quarter-tile offsets, in the order autotileQuadrants reports them. */
+const QUADS = { tl: [0, 0], tr: [HALF, 0], bl: [0, HALF], br: [HALF, HALF] };
+
+/**
+ * Draws one autotiled cell as four quarters.
+ *
+ * Each quarter is the *same* quarter of its chosen piece, so the art lines up
+ * with itself — the top-left 8x8 of the top-left corner piece really is a
+ * top-left corner. Source sub-rects rather than clipping: four drawImage calls
+ * with no canvas state changes at all.
+ */
+export function blitAutotile(ctx, sheets, set, same, x, y) {
+  const quads = autotileQuadrants(same, x, y);
+  const px = x * TILE;
+  const py = y * TILE;
+
+  for (const [corner, key] of Object.entries(quads)) {
+    const sprite = set[key] || set.C;
+    const { sx, sy } = srcRect(sprite);
+    const [qx, qy] = QUADS[corner];
+    ctx.drawImage(sheetFor(sheets, sprite),
+      sx + qx, sy + qy, HALF, HALF,
+      px + qx, py + qy, HALF, HALF);
+  }
 }
+
+export const isDirtAt = (state, planned = null) => (nx, ny) => (
+  state.grid.getGround(nx, ny) === GROUND.DIRT || !!planned?.has(`${nx},${ny}`)
+);
+
+/** Water of either kind counts as water, so a river joins a pond seamlessly. */
+export const isWaterAt = (state, planned = null) => (nx, ny) => (
+  isWater(state.grid.getGround(nx, ny)) || !!planned?.has(`${nx},${ny}`)
+);
 
 /**
  * Which river piece belongs here, from the water it touches.
@@ -125,8 +134,7 @@ function blitCorner(ctx, sheets, set, corner, px, py) {
  *
  * @returns {{sprite: number[], turns: number}} turns are quarter turns clockwise
  */
-export function riverPieceAt(state, x, y) {
-  const same = isWaterAt(state);
+export function riverPieceAt(state, x, y, same = isWaterAt(state)) {
   const n = same(x, y - 1);
   const s = same(x, y + 1);
   const w = same(x - 1, y);
@@ -148,28 +156,6 @@ export function riverPieceAt(state, x, y) {
   return { sprite: RIVER.straight, turns: (w || e) ? 1 : 0 };
 }
 
-/**
- * Picks the tile for one cell of an autotiled area: straight edges and the
- * convex corners. Concave corners are composited on top — see dirtCornersAt.
- */
-function ninePiece(same, x, y, set) {
-  const n = same(x, y - 1);
-  const s = same(x, y + 1);
-  const w = same(x - 1, y);
-  const e = same(x + 1, y);
-
-  if (n && s && w && e) return set.C;
-  if (!n && s && e && !w) return set.TL;
-  if (!n && s && w && !e) return set.TR;
-  if (n && !s && e && !w) return set.BL;
-  if (n && !s && w && !e) return set.BR;
-  if (!n && s) return set.T;
-  if (n && !s) return set.B;
-  if (!w && e) return set.L;
-  if (w && !e) return set.R;
-  return set.C;
-}
-
 const DIRT_SET = {
   TL: TOWN.dirtTL, T: TOWN.dirtT, TR: TOWN.dirtTR,
   L: TOWN.dirtL, C: TOWN.dirtC, R: TOWN.dirtR,
@@ -183,48 +169,91 @@ const DIRT_SET = {
 export function drawGround(ctx, sheets, state, view) {
   const grid = state.grid;
 
+  // Ground the farmer has been told to lay but hasn't reached yet. Counting it
+  // in while autotiling means a pond or a path has the outline of the shape
+  // it's going to be from the moment it's ordered, rather than every
+  // unfinished tile leaving a bitten edge behind.
+  const planned = pendingGroundTiles(state);
+  const plannedWater = new Set();
+  const plannedDirt = new Set();
+  for (const [key, ground] of planned) {
+    if (isWater(ground)) plannedWater.add(key);
+    else if (ground === GROUND.DIRT) plannedDirt.add(key);
+  }
+
+  const near = {
+    water: isWaterAt(state, plannedWater),
+    dirt: isDirtAt(state, plannedDirt),
+  };
+
   for (let y = view.y0; y <= view.y1; y++) {
     for (let x = view.x0; x <= view.x1; x++) {
       const g = grid.getGround(x, y);
-      if (g === GROUND.GRASS) {
-        // The town sheet has a real grass tile plus two decorated variants.
-        // Scattering them deterministically keeps open fields from reading as
-        // one flat slab, without the procedural blades we used to fake.
-        const h = hash2d(x, y);
-        const tile = h < 0.08 ? TOWN.grassClump : h < 0.11 ? TOWN.grassFlower : TOWN.grass;
-        blit(ctx, sheets, tile, x * TILE, y * TILE);
-      } else if (isTilled(g)) {
-        // The capsule art has its grass background knocked out, so whatever the
-        // bed was ploughed from still shows around its rounded ends.
-        // Beds sit on whatever the ground was, so paint grass underneath first.
-        blit(ctx, sheets, TOWN.grass, x * TILE, y * TILE);
-        const set = CAPSULES[g === GROUND.TILLED_WET ? 'wet' : 'dry'];
-        const piece = set?.[tilledPiece(state, x, y)];
-        if (piece) ctx.drawImage(piece, x * TILE, y * TILE);
-      } else if (g === GROUND.ROAD) {
-        blit(ctx, sheets, TOWN.paved, x * TILE, y * TILE);
-      } else if (g === GROUND.WATER) {
-        // Grass underneath: the pond's edge tiles are part water, part bank.
-        blit(ctx, sheets, TOWN.grass, x * TILE, y * TILE);
-        blit(ctx, sheets, waterPieceAt(state, x, y), x * TILE, y * TILE);
-        for (const corner of waterCornersAt(state, x, y)) {
-          blitCorner(ctx, sheets, WATER, corner, x * TILE, y * TILE);
-        }
-      } else if (g === GROUND.RIVER) {
-        blit(ctx, sheets, TOWN.grass, x * TILE, y * TILE);
-        const { sprite, turns } = riverPieceAt(state, x, y);
-        blitTurned(ctx, sheets, sprite, x * TILE, y * TILE, turns);
-      } else {
-        // Bare earth: the barn yard, and any dirt road the player has laid.
-        // Autotiled so a run of it gets a proper grassy boundary — edges,
-        // corners and the insides of bends — instead of hard square edges.
-        blit(ctx, sheets, dirtPieceAt(state, x, y), x * TILE, y * TILE);
-        for (const corner of dirtCornersAt(state, x, y)) {
-          blitCorner(ctx, sheets, DIRT_SET, corner, x * TILE, y * TILE);
-        }
+      paintGround(ctx, sheets, state, g, x, y, near);
+
+      // Then, over the top, whatever is on its way here — faint enough to read
+      // as a plan rather than as ground that is already down.
+      const coming = planned.get(`${x},${y}`);
+      if (coming != null && coming !== g) {
+        ctx.save();
+        ctx.globalAlpha = 0.45;
+        paintGround(ctx, sheets, state, coming, x, y, near);
+        ctx.restore();
       }
     }
   }
+}
+
+/**
+ * Paints one tile of ground. Shared by the real ground and the faint preview
+ * of ground that is only ordered so far, so the two can never drift apart.
+ */
+function paintGround(ctx, sheets, state, g, x, y, near) {
+  const px = x * TILE;
+  const py = y * TILE;
+
+  if (g === GROUND.GRASS) {
+    // The town sheet has a real grass tile plus two decorated variants.
+    // Scattering them deterministically keeps open fields from reading as one
+    // flat slab, without the procedural blades we used to fake.
+    const h = hash2d(x, y);
+    blit(ctx, sheets, h < 0.08 ? TOWN.grassClump : h < 0.11 ? TOWN.grassFlower : TOWN.grass, px, py);
+    return;
+  }
+
+  if (isTilled(g)) {
+    // The capsule art has its grass background knocked out, so whatever the
+    // bed was ploughed from still shows around its rounded ends.
+    blit(ctx, sheets, TOWN.grass, px, py);
+    const set = CAPSULES[g === GROUND.TILLED_WET ? 'wet' : 'dry'];
+    const piece = set?.[tilledPiece(state, x, y)];
+    if (piece) ctx.drawImage(piece, px, py);
+    return;
+  }
+
+  if (g === GROUND.ROAD) {
+    blit(ctx, sheets, TOWN.paved, px, py);
+    return;
+  }
+
+  if (g === GROUND.WATER) {
+    // Grass underneath: the pond's edge tiles are part water, part bank.
+    blit(ctx, sheets, TOWN.grass, px, py);
+    blitAutotile(ctx, sheets, WATER, near.water, x, y);
+    return;
+  }
+
+  if (g === GROUND.RIVER) {
+    blit(ctx, sheets, TOWN.grass, px, py);
+    const { sprite, turns } = riverPieceAt(state, x, y, near.water);
+    blitTurned(ctx, sheets, sprite, px, py, turns);
+    return;
+  }
+
+  // Bare earth: the barn yard, and any dirt road the player has laid.
+  // Autotiled so a run of it gets a proper grassy boundary — edges, corners
+  // and the insides of bends — instead of hard square edges.
+  blitAutotile(ctx, sheets, DIRT_SET, near.dirt, x, y);
 }
 
 /**

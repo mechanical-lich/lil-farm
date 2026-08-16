@@ -116,7 +116,8 @@ Barns are the answer to "what are the farm tiles for" — they're what lets you 
 ### Water
 Two buildables, both dug rather than bought — they cost only the farmer's time, though a good deal more of it than a path.
 
-- **Pond** — standing water, dug in whatever shape you like. Autotiles as an area: a sandy north shore, grassy banks, and proper concave corners on the inside of a bend, the same machinery the dirt road uses.
+- **Pond** — standing water, dug in whatever shape you like. Autotiles as an area, the same way the dirt road does: a sandy north shore, grassy banks, and proper corners whatever the shape — a horseshoe, a one-tile channel, an island in the middle.
+- **Ground still to be laid is drawn faintly, and counts while the edges are worked out.**  This applies to every ground you can build — pond, river and dirt road alike.  Without it the shape grows a fresh set of wrong edges after every tile the farmer finishes: a half-dug pond showed a bite taken out of it and a sandy beach in the middle of the water, and a half-laid path kept sprouting an end cap that moved along as it was built.
 - **River** — flowing water, **one tile wide**, which picks its piece from what it connects to: a straight run, or one of four bends. The sheet has no east-west straight, so the north-south one is turned a quarter turn. A junction of three or more, and a lone tile with none, both fall back to open water, which reads as a pool where the channels meet.
 
 The two count as the same thing for autotiling, so **a river runs into a pond without a seam**.
@@ -136,9 +137,23 @@ Two of them, and they read very differently:
 - **Stone road** — the cobbles from the town sheet, 1 stone a tile. A tidy, built surface. The tile has its own grass border baked in, so a run of it needs no edge work.
 - **Dirt road** — worn earth. It **costs nothing**: you're not laying a surface, you're wearing a path, and the price is the farmer's time. It shares its ground with the barn's yard, so a path can run straight into the yard and read as one piece of ground.
 
-The dirt road **autotiles properly**: the town sheet has a full 3x3 nine-slice for the straight edges and convex corners, *and* four concave corners for the insides of bends. Without those last four a path turning a corner draws as solid earth with a square notch of grass sitting in the turn.
+### How the ground autotiles
+Dirt and water both use the same 13-piece set: a 3x3 nine-slice for straight edges and outside corners, plus four concave corners for the insides of bends.
 
-The four wedges are **composited a quarter-tile at a time** rather than picked as a single tile. Each concave tile on the sheet is solid earth with one grass wedge, so drawing two would have the second paint over the first. Clipping each to its own quadrant lets all four appear at once — which is what a crossroads needs, where every diagonal is grass and choosing one tile would leave three corners wrong.
+**Every cell is assembled a quarter at a time**, not chosen as a single tile.  Each quarter looks at the three neighbours that touch it — two sides and the diagonal between them — and takes its corner from whichever piece already draws that situation.
+
+This is not a refinement; it's the only thing that works.  Choosing one tile per cell has no answer for **grass on three sides**, which is what every one-tile-wide arm, every dead end and every half-dug pond is made of — the nine-slice falls back to a straight edge and leaves two sides of the tile as bare fill butting into grass.  It also can't draw a crossroads, where all four diagonals need a wedge and a single tile can only supply one.  Per-quarter has an answer for all of it, from the same 13 pieces.
+
+### A build site is held for the build
+Materials are reserved when work is queued.  So is **the ground itself**: while a build waits its turn, nothing else may take the tiles it will stand on.  Nothing sprouts there, no second build can be ordered across it, and it can't be ploughed.  The footprint is already outlined on the map, so a reserved tile reads as spoken for — and tapping one says so.
+
+This matters most for a barn, which takes two minutes to raise.  Without it, a mushroom coming up inside the footprint leaves only bad choices: cancel the barn, or pave over the mushroom and strand its record forever.
+
+**Clearing is still allowed** on a reserved site — pulling a rock off the plot helps rather than hinders.
+
+Reservation can't stop everything: a hen wanders where she likes and lays where she stands.  So the last thing before the walls go up is the farmer **clearing the site and keeping what he finds** — the egg goes in the bag, a mushroom goes in the bag and the journal.  Because reservation has already excluded everything the player put there deliberately, this only ever finds things that arrived on their own.  **The build is never cancelled and nothing is destroyed.**
+
+If the materials have been spent elsewhere in the meantime the build fails and says so — and the site is left alone, rather than being cleared for a barn that was never going up.
 
 **Anything you build can be removed again, and gives back half its materials** (rounded down, so a 1-stone road refunds nothing).
 
@@ -181,6 +196,7 @@ Animals can not open gates.
 - Filling a **water trough is free** — the work is carrying it, not finding it.
 - Filling a **feed trough** consumes 3 units of food, chosen automatically: the **cheapest crop** you have enough of, so a stray tap never burns the eggplants.
 - **Feed can also be bought** from the shop at $15 a unit.  It's deliberately dearer than using your own crops — about $45 a trough against roughly $30 of carrots — and is only ever used as a **fallback** when no crop is spare.  It exists so an empty larder never means hungry animals, not as the everyday choice.  Feed resells for far less than it costs, so stockpiling it is convenience rather than a way to store value.
+- **A cow is milked where it is**, not where it was standing when you tapped it. The job follows the animal around, and an animal the farmer is on his way to tend stands still and waits for him — otherwise he trails after it, which looks less like milking a cow than chasing one. Selling an animal takes any work aimed at it with it.
 - Tapping an animal that's ready collects from it; tapping an egg picks it up; tapping a trough fills it.  Tapping an animal that wants nothing **pets** it — see Affection below.
 - Neglected animals show a marker (blue when thirsty, amber when hungry) and ready ones bob with a badge.
 
@@ -206,6 +222,10 @@ Animals show a speech bubble now and again, from the Kenney emote sheet. What th
 Needs come first, because a thirsty animal telling you how happy it is would be useless: hungry *and* thirsty is an angry face, thirsty is droplets, hungry is a sad face, something to collect is a star. Only after all that does it say how it feels about you — a heart, music, a smile, or a bored "zzz" if it barely knows you. **The fonder an animal is, the more often it pipes up**, and a neglected one speaks up regardless.
 
 ## Coming back
+The farm keeps running with the tab closed — and now also while the tab is merely *hidden*. Nothing runs in a backgrounded tab, so the simulation falls behind; it catches up quietly the moment you look at it again, rather than staying behind until the next reload. A real absence (ten minutes or more) still gets the welcome-back card; glancing at another tab doesn't.
+
+**Being away longer than seven days doesn't queue up seven days at a time.** The catch-up cap discards the excess rather than leaving it on the clock, so a month away is one catch-up, not four.
+
 The whole premise is that the farm runs with the tab closed, so returning shows a **"while you were away" card** rather than silently presenting a changed field.
 
 - It reports what happened — jobs finished, what was collected, crops ripened, crops spoiled, animals with something to collect.

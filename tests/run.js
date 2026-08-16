@@ -23,7 +23,10 @@ import {
   mushroomAt, rollSpecies, journalCount, journalFound, journalRows,
   canSprout as canSproutShroom,
 } from '../js/sim/mushrooms.js';
-import { addTask, cancelTask, prioritizeTask, taskForTile, tillRow, queueTillRow } from '../js/sim/tasks.js';
+import {
+  addTask, cancelTask, prioritizeTask, taskForTile, tillRow, queueTillRow, clearBuildSite,
+  followAnimals,
+} from '../js/sim/tasks.js';
 import {
   CROPS, SOIL_DRY_TICKS, plantCrop, waterTile, harvestCrop,
   cropAt, isRipe, isStalled, spoilRemaining, SPOIL_TICKS, updateCrops,
@@ -43,11 +46,12 @@ import {
 import {
   BUILDABLES, canPlaceAt, canAfford, footprint, troughAnchorAt,
   completeBuild, demolish, structureAt, buildingAt, animalCapacity, BARN_CAPACITY,
-  placeStructure, buildDef, kindForGround,
+  placeStructure, buildDef, kindForGround, isReserved, canCompleteBuild,
+  pendingWaterTiles, pendingGroundTiles, footprint as buildFootprint,
 } from '../js/sim/build.js';
 import { TOWN, WATER, RIVER } from '../js/render/sprites.js';
 import {
-  dirtPieceAt, dirtCornersAt, waterPieceAt, waterCornersAt, riverPieceAt,
+  riverPieceAt, autotileQuadrants, isWaterAt, isDirtAt as isDirt,
 } from '../js/render/tilerender.js';
 import { addItems } from '../js/sim/inventory.js';
 import { newGame as newGameRaw, serialize, deserialize } from '../js/state.js';
@@ -55,35 +59,43 @@ import { tick } from '../js/sim/tick.js';
 import {
   migrate, Autosaver, exportSave, validateSave, loadSave, listBackups, backupKey,
 } from '../js/engine/save.js';
-import { runCatchup } from '../js/engine/loop.js';
+import { runCatchup, GameLoop, discardSkipped } from '../js/engine/loop.js';
 import {
   on, suspend, resume, startTally, stopTally, emitUnlessSuspended,
 } from '../js/engine/events.js';
 import { buildSummary } from '../js/ui/summary.js';
 import {
   TICK_MS, SAVE_VERSION, FARMER_SPEED, MAP_W, MAP_H, CELL_W, CELL_H, SAVE_KEY,
-  TILE, ANIMAL_VARIANTS,
+  TILE, ANIMAL_VARIANTS, MAX_CATCHUP_TICKS, CATCHUP_CHUNK,
 } from '../js/config.js';
 
 let passed = 0;
 const failures = [];
-// Async tests are rare here (only the catch-up integration needs one), so they
-// are collected and awaited at the end rather than serialising the whole run.
-const pending = [];
+
+/**
+ * Tests are collected here and run one at a time at the end of the file.
+ *
+ * They used to run as they were declared, with async ones left to finish in
+ * the background — which meant an async test's `await` handed control to the
+ * *next* tests while its event listeners were still registered. A later test
+ * that fired `task:done` would be counted by an earlier test's listener, and
+ * the failure appeared in the innocent test. Sequential is slower by nothing
+ * measurable and removes a whole class of confusing failure.
+ */
+const tests = [];
 
 function test(name, fn) {
-  try {
-    const result = fn();
-    if (result && typeof result.then === 'function') {
-      pending.push(result.then(
-        () => { passed++; },
-        (err) => { failures.push({ name, err }); },
-      ));
-    } else {
+  tests.push({ name, fn });
+}
+
+async function runAll() {
+  for (const { name, fn } of tests) {
+    try {
+      await fn();
       passed++;
+    } catch (err) {
+      failures.push({ name, err });
     }
-  } catch (err) {
-    failures.push({ name, err });
   }
 }
 
@@ -2157,6 +2169,22 @@ test('petting again straight away is welcome but does not count', () => {
   assertEqual(petAnimal(s, animal).gained, PET_GAIN, 'but later it counts again');
 });
 
+test('petting too often does not push the reward further away', () => {
+  // The trap: stamping the cooldown on every tap slides the window forward, so
+  // a player who greets their animals on every visit gains nothing, ever.
+  const { s, animal } = farmWithAnimal('cow', 8109);
+  petAnimal(s, animal);
+  assertEqual(animal.affection, PET_GAIN, 'the first fuss counts');
+
+  // Keep petting throughout the cooldown, as anyone actually playing would.
+  for (let i = 0; i < PET_COOLDOWN; i++) {
+    s.tickCount += 1;
+    petAnimal(s, animal);
+  }
+  assertEqual(animal.affection, PET_GAIN * 2,
+    'the moment the cooldown is up, the next fuss counts — no matter how many came before');
+});
+
 test('a loved animal eats and drinks less', () => {
   const plain = farmWithAnimal('cow', 8102);
   const loved = farmWithAnimal('cow', 8102);
@@ -2333,6 +2361,203 @@ test('animals from before colours are spread across them, not all identical', ()
     'an established farm should not turn into a herd of clones');
 });
 
+// --- work follows the animal --------------------------------------------
+
+test('milking happens at the cow, not where it was when you tapped it', () => {
+  const { s, animal } = farmWithAnimal('cow', 9700);
+  animal.stock = 1;
+
+  const task = addTask(s, taskForTile(s, animal.x, animal.y, 'auto'));
+  assertEqual(task.type, 'collect', 'tapping a ready cow queues a milking');
+  const queuedAt = { x: task.x, y: task.y };
+
+  // The cow wanders off before the farmer gets there.
+  animal.x += 6;
+  animal.y += 3;
+  followAnimals(s);
+
+  assertEqual(task.x, animal.x, 'the task went with it');
+  assertEqual(task.y, animal.y, 'on both axes');
+  assert(task.x !== queuedAt.x || task.y !== queuedAt.y, 'and is no longer where it was tapped');
+});
+
+test('the farmer walks to the cow and comes back with the milk', () => {
+  const { s, animal } = farmWithAnimal('cow', 9701);
+  animal.stock = 2;
+  animal.x = s.farmer.x + 10;                       // well across the field
+  animal.y = s.farmer.y + 6;
+
+  addTask(s, taskForTile(s, animal.x, animal.y, 'auto'));
+  let n = 0;
+  while (s.tasks.length && n < 2000) { tick(s); n++; }
+
+  assertEqual(countItem(s, 'milk'), 2, 'the milk is in the bag');
+  assertEqual(animal.stock, 0, 'and the cow has been emptied');
+  // He has to have actually got there — collecting from across the farm is the
+  // bug this is guarding.
+  const away = Math.abs(s.farmer.x - animal.x) + Math.abs(s.farmer.y - animal.y);
+  assert(away <= 2, `the farmer should be at the cow, not ${away} tiles away`);
+});
+
+test('an animal stands still while it is being tended', () => {
+  const { s, animal } = farmWithAnimal('sheep', 9702);
+  animal.stock = 1;
+  addTask(s, taskForTile(s, animal.x, animal.y, 'auto'));
+
+  // Give the farmer time to claim it, then watch the sheep for a good while.
+  tick(s);
+  const held = { x: animal.x, y: animal.y };
+  for (let i = 0; i < 60 && s.tasks.length; i++) tick(s);
+
+  assertEqual({ x: animal.x, y: animal.y }, held, 'it waited to be sheared');
+});
+
+test('tapping a ready animal twice queues one job, not two', () => {
+  // The task moves with the animal, so the one-per-tile check cannot catch a
+  // second tap from a different spot.
+  const { s, animal } = farmWithAnimal('cow', 9703);
+  animal.stock = 1;
+
+  assert(addTask(s, taskForTile(s, animal.x, animal.y, 'auto')), 'first tap queues it');
+  animal.x += 3;
+  followAnimals(s);
+  assertEqual(addTask(s, taskForTile(s, animal.x, animal.y, 'auto')), null,
+    'the second tap is refused, wherever it lands');
+  assertEqual(s.tasks.length, 1, 'one milking, not two');
+});
+
+test('work aimed at a sold animal is dropped, not left pointing at nothing', () => {
+  const { s, animal } = farmWithAnimal('cow', 9704);
+  animal.stock = 1;
+  addTask(s, taskForTile(s, animal.x, animal.y, 'auto'));
+
+  s.animals = [];                                   // sold at the shop
+  followAnimals(s);
+  assertEqual(s.tasks.length, 0, 'the milking went with it');
+});
+
+// --- a build site is reserved while it waits ----------------------------
+
+test('a queued build reserves the ground it will stand on', () => {
+  const s = farmWithMaterials(9600);
+  const x = s.farmer.x + 4;
+  const y = s.farmer.y + 4;
+  addTask(s, taskForTile(s, x, y, 'build', { buildKind: 'barn' }));
+
+  const tiles = footprint('barn', x, y);
+  for (const t of tiles) assert(isReserved(s, t.x, t.y), `${t.x},${t.y} is spoken for`);
+  assert(!isReserved(s, x - 1, y), 'but only the footprint');
+});
+
+test('nothing sprouts on a site a build is waiting for', () => {
+  // A barn takes two minutes. Without this, a mushroom appearing in the
+  // footprint is paved over and its record stranded — unforageable forever,
+  // and permanently eating a slot in the spawn cap.
+  const s = farmWithMaterials(9601);
+  const x = s.farmer.x + 4;
+  const y = s.farmer.y + 4;
+  addTask(s, taskForTile(s, x, y, 'build', { buildKind: 'barn' }));
+
+  for (const t of footprint('barn', x, y)) {
+    assert(!canSproutShroom(s, t.x, t.y), 'no mushrooms on the site');
+    assert(!canSprout(s, t.x, t.y), 'and no weeds either');
+  }
+});
+
+test('two builds cannot claim the same ground', () => {
+  const s = farmWithMaterials(9602);
+  const x = s.farmer.x + 4;
+  const y = s.farmer.y + 4;
+  addTask(s, taskForTile(s, x, y, 'build', { buildKind: 'barn' }));
+
+  // Overlapping, not identical — the queue's own duplicate check wouldn't
+  // catch this, and the second build would pay for one that overwrote the first.
+  assert(!canPlaceAt(s, 'barn', x + 1, y), 'no overlapping barn');
+  assert(!canPlaceAt(s, 'fence', x, y), 'nor a fence through the middle of it');
+  assertEqual(taskForTile(s, x + 1, y, 'build', { buildKind: 'barn' }), null,
+    'so no task is offered');
+  assert(canPlaceAt(s, 'barn', x + 4, y), 'clear of it is still fine');
+});
+
+test('a build site cannot be ploughed out from under itself', () => {
+  const s = farmWithMaterials(9603);
+  const x = s.farmer.x + 4;
+  const y = s.farmer.y + 4;
+  addTask(s, taskForTile(s, x, y, 'build', { buildKind: 'barn' }));
+
+  assertEqual(taskForTile(s, x, y, 'till'), null, 'no tilling the site');
+  // Clearing is still allowed: pulling a rock off the site helps, not hinders.
+  s.grid.setObject(x, y, OBJ.ROCK);
+  assert(taskForTile(s, x, y, 'clear'), 'but a rock in the way can still be cleared');
+});
+
+test('the farmer clears the site and keeps what he finds', () => {
+  // A hen lays where she stands, so an egg can still turn up on a reserved
+  // site. The build must not be cancelled and the egg must not vanish.
+  const s = farmWithMaterials(9604);
+  const x = s.farmer.x + 4;
+  const y = s.farmer.y + 4;
+  const task = taskForTile(s, x, y, 'build', { buildKind: 'barn' });
+  addTask(s, task);
+
+  const spot = footprint('barn', x, y)[1];
+  s.grid.setObject(spot.x, spot.y, OBJ.EGG);
+
+  const gained = clearBuildSite(s, task);
+  assertEqual(gained, { egg: 1 }, 'the egg goes in the bag');
+  assertEqual(countItem(s, 'egg'), 1, 'really in the bag');
+  assertEqual(s.grid.getObject(spot.x, spot.y), OBJ.NONE, 'and off the site');
+
+  assert(completeBuild(s, task), 'and the barn still goes up');
+  assertEqual(s.buildings.length, 1, 'exactly one barn');
+});
+
+test('a mushroom on a build site is picked, not paved over', () => {
+  const s = farmWithMaterials(9605);
+  const x = s.farmer.x + 4;
+  const y = s.farmer.y + 4;
+  const task = taskForTile(s, x, y, 'build', { buildKind: 'barn' });
+  addTask(s, task);
+
+  const spot = footprint('barn', x, y)[2];
+  sprout(s, spot.x, spot.y, 'red_toadstool');
+
+  clearBuildSite(s, task);
+  completeBuild(s, task);
+
+  assertEqual(countItem(s, 'mushroom_toadstool'), 1, 'it went in the bag');
+  assertEqual(journalCount(s, 'red_toadstool'), 1, 'and into the journal');
+  assertEqual(s.mushrooms[`${spot.x},${spot.y}`], undefined,
+    'and left no record stranded under the barn');
+});
+
+test('an unaffordable build costs nothing, not even what is lying on the site', () => {
+  const s = farmWithMaterials(9606);
+  s.inventory = {};                                  // no materials at all
+  const x = s.farmer.x + 4;
+  const y = s.farmer.y + 4;
+  const task = { type: 'build', buildKind: 'barn', x, y, work: 1, progress: 0 };
+
+  const spot = footprint('barn', x, y)[0];
+  s.grid.setObject(spot.x, spot.y, OBJ.EGG);
+
+  assert(!canCompleteBuild(s, task), 'it cannot be paid for');
+  assertEqual(s.grid.getObject(spot.x, spot.y), OBJ.EGG,
+    'so the site is left alone rather than cleared for nothing');
+});
+
+test('the reservation lifts when the build is done or cancelled', () => {
+  const s = farmWithMaterials(9607);
+  const x = s.farmer.x + 4;
+  const y = s.farmer.y + 4;
+  const task = addTask(s, taskForTile(s, x, y, 'build', { buildKind: 'barn' }));
+  assert(isReserved(s, x, y), 'reserved while it waits');
+
+  cancelTask(s, task.id);
+  assert(!isReserved(s, x, y), 'and free again once the order is cancelled');
+  assert(canSproutShroom(s, x, y), 'so mushrooms may come back');
+});
+
 // --- water --------------------------------------------------------------
 
 test('water is dug for free and can be filled back in', () => {
@@ -2485,7 +2710,8 @@ test('a river runs into a pond without a seam', () => {
 
   assertEqual(riverPieceAt(s, ox, oy).sprite, RIVER.straight, 'the river reads as continuing');
   // And the pond counts the river as water on its northern edge.
-  assert(!waterCornersAt(s, ox, oy + 1).includes('innerTL'), 'no notch where they meet');
+  const pond = autotileQuadrants(isWaterAt(s), ox, oy + 1);
+  assert(pond.tl !== 'innerTL' && pond.tr !== 'innerTR', 'no notch where they meet');
 });
 
 test('a pond autotiles like the dirt road, corners and all', () => {
@@ -2495,16 +2721,59 @@ test('a pond autotiles like the dirt road, corners and all', () => {
   for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) {
     s.grid.setGround(ox + dx, oy + dy, GROUND.WATER);
   }
-  assertEqual(waterPieceAt(s, ox, oy), WATER.TL, 'top-left bank');
-  assertEqual(waterPieceAt(s, ox + 1, oy + 1), WATER.C, 'open water in the middle');
-  assertEqual(waterPieceAt(s, ox + 2, oy + 2), WATER.BR, 'bottom-right bank');
+  const at = (dx, dy) => autotileQuadrants(isWaterAt(s), ox + dx, oy + dy);
+
+  assertEqual(at(0, 0).tl, 'TL', 'top-left bank');
+  assertEqual(at(1, 1), { tl: 'C', tr: 'C', bl: 'C', br: 'C' }, 'open water in the middle');
+  assertEqual(at(2, 2).br, 'BR', 'bottom-right bank');
 
   // Dig an L and the inside of the bend gets a wedge, as the dirt road does.
   const l = farmWithMaterials(9512);
   for (const [dx, dy] of [[1, 0], [2, 0], [0, 1], [1, 1], [2, 1], [0, 2], [1, 2], [2, 2]]) {
     l.grid.setGround(ox + dx, oy + dy, GROUND.WATER);
   }
-  assertEqual(waterCornersAt(l, ox + 1, oy + 1), ['innerTL'], 'grass tucked into the bend');
+  assertEqual(autotileQuadrants(isWaterAt(l), ox + 1, oy + 1).tl, 'innerTL',
+    'grass tucked into the bend');
+});
+
+test('a half-dug pond has no bare edges and no beach in the middle', () => {
+  // The shape that started this: a 3x2 pond with the top-middle tile not yet
+  // dug. Every tile around the gap must be banked on every side that touches
+  // grass — including the two that have grass on three sides at once, which a
+  // nine-slice has no tile for and used to draw as a hard cut.
+  const s = farmWithMaterials(9513);
+  const ox = 20;
+  const oy = 20;
+  for (const [dx, dy] of [[0, 0], [2, 0], [0, 1], [1, 1], [2, 1]]) {
+    s.grid.setGround(ox + dx, oy + dy, GROUND.WATER);
+  }
+  const at = (dx, dy) => autotileQuadrants(isWaterAt(s), ox + dx, oy + dy);
+
+  assertEqual(at(0, 0), { tl: 'TL', tr: 'TR', bl: 'L', br: 'R' },
+    'the arm beside the gap is banked on both sides, not cut off square');
+  assertEqual(at(2, 0), { tl: 'TL', tr: 'TR', bl: 'L', br: 'R' }, 'and so is the other one');
+});
+
+test('water still to be dug is drawn as part of the pond', () => {
+  // Queued but not yet dug: counted as water while working out the banks, so
+  // the outline is right from the moment it is ordered. Otherwise the pond
+  // grows a fresh set of wrong edges after every tile the farmer finishes.
+  const s = farmWithMaterials(9514);
+  const ox = 20;
+  const oy = 20;
+  for (const [dx, dy] of [[0, 0], [2, 0], [0, 1], [1, 1], [2, 1]]) {
+    s.grid.setGround(ox + dx, oy + dy, GROUND.WATER);
+  }
+  addTask(s, taskForTile(s, ox + 1, oy, 'build', { buildKind: 'pond' }));
+
+  const planned = pendingWaterTiles(s);
+  assert(planned.has(`${ox + 1},${oy}`), 'the ordered tile counts as water-to-be');
+
+  const at = (dx, dy) => autotileQuadrants(isWaterAt(s, planned), ox + dx, oy + dy);
+  assertEqual(at(0, 0), { tl: 'TL', tr: 'T', bl: 'L', br: 'C' },
+    'the arm now reads as the side of a pond, not a spur');
+  assertEqual(at(1, 0), { tl: 'T', tr: 'T', bl: 'C', br: 'C' },
+    'and the gap is drawn as the top edge it is about to become');
 });
 
 // --- the dirt road ------------------------------------------------------
@@ -2534,32 +2803,28 @@ test('a dirt road is not the same thing as the stone road', () => {
   assertEqual(kindForGround(GROUND.ROAD), 'road', 'and cobbles to the stone one');
 });
 
-test('a dirt road draws its edges, corners and bends from the right tiles', () => {
-  // The nine-slice is easy to get subtly wrong, and wrong here means a farm
-  // full of hard square edges. Assert the actual sprite chosen for each case.
+test('a dirt road draws its edges and corners from the right pieces', () => {
+  // A nine-slice is easy to get subtly wrong, and wrong here means a farm full
+  // of hard square edges. Assert the piece each quarter of each tile comes from.
   const s = farmWithMaterials(9301);
   const ox = 20;
   const oy = 20;
-  const lay = (dx, dy) => s.grid.setGround(ox + dx, oy + dy, GROUND.DIRT);
+  for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) {
+    s.grid.setGround(ox + dx, oy + dy, GROUND.DIRT);
+  }
+  const at = (dx, dy) => autotileQuadrants(isDirt(s), ox + dx, oy + dy);
 
-  // A solid 3x3 block: every edge and convex corner in one shape.
-  for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) lay(dx, dy);
-
-  const at = (dx, dy) => dirtPieceAt(s, ox + dx, oy + dy);
-  assertEqual(at(0, 0), TOWN.dirtTL, 'top-left');
-  assertEqual(at(1, 0), TOWN.dirtT, 'top edge');
-  assertEqual(at(2, 0), TOWN.dirtTR, 'top-right');
-  assertEqual(at(0, 1), TOWN.dirtL, 'left edge');
-  assertEqual(at(1, 1), TOWN.dirtC, 'the middle is plain earth');
-  assertEqual(at(2, 1), TOWN.dirtR, 'right edge');
-  assertEqual(at(0, 2), TOWN.dirtBL, 'bottom-left');
-  assertEqual(at(1, 2), TOWN.dirtB, 'bottom edge');
-  assertEqual(at(2, 2), TOWN.dirtBR, 'bottom-right');
+  assertEqual(at(0, 0), { tl: 'TL', tr: 'T', bl: 'L', br: 'C' }, 'top-left tile');
+  assertEqual(at(1, 0), { tl: 'T', tr: 'T', bl: 'C', br: 'C' }, 'top edge');
+  assertEqual(at(2, 0), { tl: 'T', tr: 'TR', bl: 'C', br: 'R' }, 'top-right tile');
+  assertEqual(at(1, 1), { tl: 'C', tr: 'C', bl: 'C', br: 'C' }, 'the middle is plain earth');
+  assertEqual(at(0, 2), { tl: 'L', tr: 'C', bl: 'BL', br: 'B' }, 'bottom-left tile');
+  assertEqual(at(2, 2), { tl: 'C', tr: 'R', bl: 'B', br: 'BR' }, 'bottom-right tile');
 });
 
 test('the inside of a bend gets a grass wedge, not plain earth', () => {
-  // This is what the sheet's four extra tiles exist for. Without them the turn
-  // draws as solid earth with a square notch of grass sitting in it.
+  // This is what the sheet's four extra pieces exist for. Without them the
+  // turn draws as solid earth with a square notch of grass sitting in it.
   const ox = 20;
   const oy = 20;
   const around = [[0, 0], [1, 0], [2, 0], [0, 1], [1, 1], [2, 1], [0, 2], [1, 2], [2, 2]];
@@ -2570,19 +2835,19 @@ test('the inside of a bend gets a grass wedge, not plain earth', () => {
       if (dx === missing[0] && dy === missing[1]) continue;
       s.grid.setGround(ox + dx, oy + dy, GROUND.DIRT);
     }
-    return dirtCornersAt(s, ox + 1, oy + 1);
+    return autotileQuadrants(isDirt(s), ox + 1, oy + 1);
   };
 
-  assertEqual(bend([0, 0]), ['innerTL'], 'grass tucked into the top-left of the bend');
-  assertEqual(bend([2, 0]), ['innerTR'], 'top-right');
-  assertEqual(bend([0, 2]), ['innerBL'], 'bottom-left');
-  assertEqual(bend([2, 2]), ['innerBR'], 'bottom-right');
+  assertEqual(bend([0, 0]).tl, 'innerTL', 'grass tucked into the top-left of the bend');
+  assertEqual(bend([2, 0]).tr, 'innerTR', 'top-right');
+  assertEqual(bend([0, 2]).bl, 'innerBL', 'bottom-left');
+  assertEqual(bend([2, 2]).br, 'innerBR', 'bottom-right');
+  assertEqual(bend([0, 0]).br, 'C', 'and the far side of the tile is untouched');
 });
 
 test('a crossroads gets all four wedges, not one of them', () => {
-  // The reason the corners are composited a quarter-tile at a time instead of
-  // being chosen as a single tile: here every diagonal is grass, and picking
-  // one inner-corner tile would leave three corners wrong.
+  // Every diagonal is grass here. Picking a single tile for the cell could
+  // only ever get one of the four corners right.
   const s = farmWithMaterials(9303);
   const ox = 20;
   const oy = 20;
@@ -2590,20 +2855,68 @@ test('a crossroads gets all four wedges, not one of them', () => {
     s.grid.setGround(ox + i, oy + 2, GROUND.DIRT);
     s.grid.setGround(ox + 2, oy + i, GROUND.DIRT);
   }
-
-  assertEqual(dirtPieceAt(s, ox + 2, oy + 2), TOWN.dirtC, 'the junction itself is solid earth');
-  assertEqual(dirtCornersAt(s, ox + 2, oy + 2).sort(),
-    ['innerBL', 'innerBR', 'innerTL', 'innerTR'], 'with a wedge in every corner');
+  assertEqual(autotileQuadrants(isDirt(s), ox + 2, oy + 2),
+    { tl: 'innerTL', tr: 'innerTR', bl: 'innerBL', br: 'innerBR' },
+    'a wedge in every corner');
 });
 
-test('a solid field of dirt needs no wedges at all', () => {
+test('a dirt road still to be laid is drawn as part of the path', () => {
+  // Same treatment as water: the ordered tiles count while the edges are
+  // worked out, so a path has the shape it is going to be rather than growing
+  // a new end cap after every tile the farmer finishes.
+  const s = farmWithMaterials(9307);
+  const ox = 20;
+  const oy = 20;
+  for (let i = 0; i < 3; i++) s.grid.setGround(ox + i, oy, GROUND.DIRT);
+  addTask(s, taskForTile(s, ox + 3, oy, 'build', { buildKind: 'dirtRoad' }));
+
+  const planned = pendingGroundTiles(s);
+  assertEqual(planned.get(`${ox + 3},${oy}`), GROUND.DIRT, 'the ordered tile knows what it will be');
+
+  const plannedDirt = new Set([...planned].filter(([, g]) => g === GROUND.DIRT).map(([k]) => k));
+  const laid = autotileQuadrants(isDirt(s), ox + 2, oy);
+  const withPlan = autotileQuadrants(isDirt(s, plannedDirt), ox + 2, oy);
+
+  assertEqual(laid.tr, 'TR', 'on its own the path ends in a cap');
+  assertEqual(withPlan.tr, 'T', 'but with the rest ordered it reads as carrying on');
+});
+
+test('a pending build of something that is not ground is ignored', () => {
+  // Only ground buildables have a preview; a barn is drawn by its own record.
+  const s = farmWithMaterials(9308);
+  addTask(s, taskForTile(s, 20, 20, 'build', { buildKind: 'barn' }));
+  assertEqual(pendingGroundTiles(s).size, 0, 'nothing to preview');
+});
+
+test('a one-tile-wide arm is banked on both sides', () => {
+  // The case a nine-slice cannot express: grass on three sides at once. It
+  // used to fall back to a straight edge and leave two sides of the tile as
+  // bare fill butting into grass — the hard cut at the end of every path.
   const s = farmWithMaterials(9304);
   const ox = 20;
   const oy = 20;
+  s.grid.setGround(ox, oy, GROUND.DIRT);          // the tip
+  s.grid.setGround(ox, oy + 1, GROUND.DIRT);      // ...of a vertical arm
+
+  assertEqual(autotileQuadrants(isDirt(s), ox, oy),
+    { tl: 'TL', tr: 'TR', bl: 'L', br: 'R' },
+    'capped on top, banked left and right');
+});
+
+test('a single lonely tile is banked on all four sides', () => {
+  const s = farmWithMaterials(9305);
+  s.grid.setGround(20, 20, GROUND.DIRT);
+  assertEqual(autotileQuadrants(isDirt(s), 20, 20),
+    { tl: 'TL', tr: 'TR', bl: 'BL', br: 'BR' }, 'a tile on its own is all corners');
+});
+
+test('a solid field needs no wedges at all', () => {
+  const s = farmWithMaterials(9306);
   for (let dy = 0; dy < 5; dy++) for (let dx = 0; dx < 5; dx++) {
-    s.grid.setGround(ox + dx, oy + dy, GROUND.DIRT);
+    s.grid.setGround(20 + dx, 20 + dy, GROUND.DIRT);
   }
-  assertEqual(dirtCornersAt(s, ox + 2, oy + 2), [], 'nothing to tuck in');
+  assertEqual(autotileQuadrants(isDirt(s), 22, 22),
+    { tl: 'C', tr: 'C', bl: 'C', br: 'C' }, 'nothing to tuck in');
 });
 
 // --- mushrooms ----------------------------------------------------------
@@ -3109,6 +3422,175 @@ test('a migrated farm can buy the land next door', () => {
   assert(buyPlot(live, px, py + 1).ok, 'and the purchase goes through');
 });
 
+// --- the tick clock -----------------------------------------------------
+
+/** A GameLoop that counts ticks and never touches the DOM. */
+function countingLoop(opts) {
+  let ticks = 0;
+  const loop = new GameLoop(() => { ticks++; }, () => {}, opts);
+  loop.nextTickTime = 1000 + TICK_MS;             // as start(1000) would leave it
+  return { loop, ticks: () => ticks };
+}
+
+test('pump runs one tick per elapsed second, and no more', () => {
+  const { loop, ticks } = countingLoop();
+  loop.pump(1000);
+  assertEqual(ticks(), 0, 'nothing is due yet');
+
+  loop.pump(1000 + TICK_MS * 3);
+  assertEqual(ticks(), 3, 'three seconds, three ticks');
+
+  loop.pump(1000 + TICK_MS * 3);
+  assertEqual(ticks(), 3, 'and pumping again without time passing does nothing');
+});
+
+test('pump refuses to run an unbounded backlog in one frame', () => {
+  // A throttled-but-alive tab can come back hours behind. Running it all in
+  // one frame would lock the page up.
+  const { loop, ticks } = countingLoop();
+  loop.pump(1000 + TICK_MS * 5000);
+
+  assertEqual(ticks(), loop.maxTicksPerFrame, 'it stops at the budget');
+  // ...and gives up on the rest rather than spending every future frame on it.
+  loop.pump(1000 + TICK_MS * 5000);
+  assertEqual(ticks(), loop.maxTicksPerFrame, 'the backlog was written off, not carried');
+});
+
+test('a big burst runs quietly, and says so', () => {
+  // Minutes of backlog dispatched live is a wall of simultaneous toasts for
+  // things that happened while nobody was looking.
+  let heard = 0;
+  let refreshed = 0;
+  const off = on('tasks:changed', () => { heard++; });
+  const { loop } = countingLoop({ onQuietCatchup: () => { refreshed++; } });
+  loop.tick = () => emitUnlessSuspended('tasks:changed');
+
+  loop.pump(1000 + TICK_MS * 200);
+  assertEqual(heard, 0, 'the burst is silent');
+  assertEqual(refreshed, 1, 'and the caller is told to refresh once');
+
+  // A normal frame still talks.
+  loop.pump(1000 + TICK_MS * 201);
+  assertEqual(heard, 1, 'ordinary ticks are not suppressed');
+  off();
+});
+
+test('alpha stays between 0 and 1 whatever the timing', () => {
+  const { loop } = countingLoop();
+  const seen = [];
+  loop.render = (a) => seen.push(a);
+  for (const t of [1000, 1000 + TICK_MS / 2, 1000 + TICK_MS * 3, 1000 + TICK_MS * 9000]) {
+    loop.pump(t);
+  }
+  for (const a of seen) assert(a >= 0 && a <= 1, `alpha ${a} is out of range`);
+});
+
+test('resync puts the clock back in step without running anything', () => {
+  const { loop, ticks } = countingLoop();
+  loop.resync(50_000);
+  loop.pump(50_000);
+  assertEqual(ticks(), 0, 'no replay of the stretch that was caught up elsewhere');
+});
+
+test('catch-up replays long absences in chunks, reporting progress', async () => {
+  // The chunked path was untested: the only catch-up test ran 600 ticks, well
+  // under the chunk size, so it never yielded once.
+  let ticks = 0;
+  const progress = [];
+  const result = await runCatchup((CATCHUP_CHUNK * 2 + 5) * TICK_MS,
+    () => { ticks++; }, (done, total) => progress.push([done, total]));
+
+  assertEqual(ticks, CATCHUP_CHUNK * 2 + 5, 'every tick ran');
+  assertEqual(result.ticks, ticks, 'and is reported');
+  assert(progress.length >= 3, `progress should be reported per chunk, got ${progress.length}`);
+  assertEqual(progress[progress.length - 1][0], ticks, 'ending at the total');
+});
+
+test('catch-up caps a very long absence and reports what it skipped', () => {
+  const wanted = MAX_CATCHUP_TICKS + 5000;
+  return runCatchup(wanted * TICK_MS, () => {}).then((result) => {
+    assertEqual(result.ticks, MAX_CATCHUP_TICKS, 'it replays the cap, not the lot');
+    assert(result.capped, 'and says it capped');
+    assertEqual(result.skipped, 5000, 'and how much it refused to replay');
+  });
+});
+
+test('skipped time is written off, not left on the clock', () => {
+  // The cap did not actually cap: lastTickTime only advanced by the ticks that
+  // ran, so a month away replayed seven days, then seven more on the next
+  // load, and so on. Four catch-ups to arrive where one belongs.
+  const s = newGameRaw(9900);
+  const monthAgo = 30 * 24 * 60 * 60 * 1000;
+  s.lastTickTime = 1_000_000;
+
+  const catchup = { ticks: MAX_CATCHUP_TICKS, capped: true, skipped: 1234 };
+  const before = s.lastTickTime;
+  assertEqual(discardSkipped(s, catchup), 1234, 'it reports what it discarded');
+  assertEqual(s.lastTickTime, before + 1234 * TICK_MS, 'and moves the clock past it');
+
+  // Nothing to discard when the absence fitted inside the cap.
+  assertEqual(discardSkipped(s, { ticks: 10, capped: false, skipped: 0 }), 0, 'no-op');
+  assert(monthAgo > MAX_CATCHUP_TICKS * TICK_MS, 'a month really does exceed the cap');
+});
+
+test('a capped absence does not come back as a fresh backlog', () => {
+  // End to end: replay the cap, discard the rest, and the farm is level with
+  // the wall clock rather than owing another seven days.
+  const s = newGameRaw(9901);
+  const now = s.lastTickTime + 30 * 24 * 60 * 60 * 1000;
+
+  return runCatchup(now - s.lastTickTime, () => tick(s)).then((catchup) => {
+    discardSkipped(s, catchup);
+    const stillOwed = Math.floor((now - s.lastTickTime) / TICK_MS);
+    assertEqual(stillOwed, 0, `the farm should be up to date, still owes ${stillOwed} ticks`);
+  });
+});
+
+// --- a save that is not a farm ------------------------------------------
+
+test('a save that parses but has no farm in it does not brick the game', () => {
+  // A write cut short by a full disk or a killed tab leaves something that
+  // parses perfectly and contains nothing. It used to reach boot and die on
+  // state.farmer.x — no backup, no fresh start, and no way back without
+  // clearing localStorage by hand, which is not a thing to ask of a player.
+  const store = fakeStorage();
+  const gutted = JSON.stringify({ version: SAVE_VERSION });
+  store.setItem(SAVE_KEY, gutted);
+
+  const loaded = withStorage(store, () => loadSave());
+  assertEqual(loaded, null, 'it is refused rather than half-loaded');
+  assertEqual(store.getItem(SAVE_KEY + '.corrupt'), gutted,
+    'and kept aside, so nothing is thrown away');
+});
+
+test('an unparseable save is kept aside too', () => {
+  const store = fakeStorage();
+  store.setItem(SAVE_KEY, '{not json at all');
+
+  assertEqual(withStorage(store, () => loadSave()), null, 'refused');
+  assert(store.getItem(SAVE_KEY + '.corrupt'), 'and kept');
+});
+
+test('a farm with a map and a farmer still loads', () => {
+  // The guard must not be so keen that it rejects real saves.
+  const store = fakeStorage();
+  store.setItem(SAVE_KEY, JSON.stringify(serialize(newGameRaw(9800))));
+
+  const loaded = withStorage(store, () => loadSave());
+  assert(loaded, 'a real save loads');
+  assertEqual(store.getItem(SAVE_KEY + '.corrupt'), null, 'and is not treated as corrupt');
+  assert(deserialize(loaded).grid.isOwned(loaded.farmer.x, loaded.farmer.y),
+    'and comes back playable');
+});
+
+test('deserialize never hands back a world nobody can walk on', () => {
+  // Unreachable through loadSave now, but a grid that owns nothing is a grid
+  // where nothing can move — a far more baffling failure than an empty map.
+  const bare = deserialize({ version: SAVE_VERSION, farmer: { x: 60, y: 60 }, seed: 1 });
+  assert(bare.grid.owned.size > 0, 'it owns somewhere');
+  assert(bare.grid.isWalkable(60, 60, 'farmer'), 'and the farmer can stand on it');
+});
+
 // --- backups before migrating -------------------------------------------
 
 /** A stand-in for localStorage, so the real load path can be exercised here. */
@@ -3264,17 +3746,39 @@ test('every module is precached by the service worker', () => {
   const sw = readFileSync('sw.js', 'utf8');
   const shell = [...sw.matchAll(/'\.\/([^']*)'/g)].map((m) => m[1]).filter(Boolean);
 
-  const modules = [];
-  (function walk(dir) {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const p = `${dir}/${entry.name}`;
-      if (entry.isDirectory()) walk(p);
-      else if (p.endsWith('.js')) modules.push(p.replace(/^\.\//, ''));
-    }
-  }('js'));
+  const modules = shippedFiles('js', ['.js']);
 
   const missing = modules.filter((m) => !shell.includes(m));
   assertEqual(missing, [], 'these modules would 404 when the game is opened offline');
+});
+
+test('every asset the game actually asks for is precached', () => {
+  // The check above only walked js/. Every art sheet so far has been added to
+  // the shell by hand, and a missed one is a 404 offline with nothing to catch
+  // it — assets/animals.png was exactly this near-miss.
+  //
+  // Referenced files, not every file on disk: an unused sheet sitting in
+  // assets/ shouldn't be forced into the shell, where it would cost every
+  // player a download for something nothing loads.
+  const sw = readFileSync('sw.js', 'utf8');
+  const shell = [...sw.matchAll(/'\.\/([^']*)'/g)].map((m) => m[1]).filter(Boolean);
+
+  const sources = [
+    'index.html', 'manifest.json',
+    ...shippedFiles('css', ['.css']),
+    ...shippedFiles('js', ['.js']),
+  ];
+  const referenced = new Set();
+  for (const file of sources) {
+    const text = readFileSync(file, 'utf8');
+    for (const m of text.matchAll(/(?:\.\.\/)?((?:assets|icons|css)\/[\w./-]+\.(?:png|css|json))/g)) {
+      referenced.add(m[1]);
+    }
+  }
+
+  assert(referenced.size >= 8, `expected to find the art sheets, found ${referenced.size}`);
+  const missing = [...referenced].filter((p) => !shell.includes(p)).sort();
+  assertEqual(missing, [], 'these would 404 when the game is opened offline');
 });
 
 test('the service worker does not precache files that no longer exist', () => {
@@ -3285,9 +3789,22 @@ test('the service worker does not precache files that no longer exist', () => {
   assertEqual(stale, [], 'the install step would fail to cache these');
 });
 
+/** Files of the given kinds under a directory, as shell-relative paths. */
+function shippedFiles(dir, extensions) {
+  const out = [];
+  (function walk(d) {
+    for (const entry of readdirSync(d, { withFileTypes: true })) {
+      const p = `${d}/${entry.name}`;
+      if (entry.isDirectory()) walk(p);
+      else if (extensions.some((ext) => p.endsWith(ext))) out.push(p.replace(/^\.\//, ''));
+    }
+  }(dir));
+  return out;
+}
+
 // --- report -------------------------------------------------------------
 
-await Promise.all(pending);
+await runAll();
 
 for (const { name, err } of failures) {
   console.error(`FAIL  ${name}\n      ${err.message.replace(/\n/g, '\n      ')}`);

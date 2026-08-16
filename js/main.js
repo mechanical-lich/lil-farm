@@ -4,13 +4,13 @@ import { TICK_MS, START_INVENTORY, TESTING } from './config.js';
 import { loadSheets } from './render/sprites.js';
 import { Renderer } from './render/renderer.js';
 import { Camera } from './render/camera.js';
-import { GameLoop, runCatchup } from './engine/loop.js';
+import { GameLoop, runCatchup, discardSkipped } from './engine/loop.js';
 import { loadSave, clearSave, Autosaver } from './engine/save.js';
 import { newGame, serialize, deserialize } from './state.js';
 import { tick as simTick } from './sim/tick.js';
 import { addTask, taskForTile, taskLabel, queueTillRow } from './sim/tasks.js';
 import { itemName, addItem } from './sim/inventory.js';
-import { canAfford, buildDef, canPlaceAt } from './sim/build.js';
+import { canAfford, buildDef, canPlaceAt, isReserved } from './sim/build.js';
 import { drawBuilding } from './render/tilerender.js';
 import { drawAnimalSprite } from './render/entityrender.js';
 import {
@@ -64,6 +64,9 @@ async function boot() {
   const catchup = await runCatchup(away, () => simTick(state), (done, total) => {
     els.bootText.textContent = `Catching up… ${Math.round((done / total) * 100)}%`;
   });
+  // Anything past the cap is written off rather than left on the clock, or it
+  // comes back as a fresh seven-day backlog every time the game is opened.
+  discardSkipped(state, catchup);
 
   initToasts();
   const autosaver = new Autosaver(() => serialize(state));
@@ -123,9 +126,13 @@ async function boot() {
       autosaver.maybeSave(Date.now());
       updateDebug(state, catchup, isNew);
     },
+    // A burst run with events suspended leaves the HUD showing whatever it
+    // showed before; a full redraw puts the money and the bag back in step.
+    { onQuietCatchup: () => hud.render() },
   );
 
   loop.start(Date.now());
+  wireWakeUp(state, loop);
 
   Object.assign(window.lilfarm, {
     state, camera, renderer, loop, autosaver,
@@ -422,7 +429,7 @@ function queueTileTask(state, toolbar, x, y, { announce }) {
     buildKind: toolbar.getBuildKind(),
   });
   if (!spec) {
-    if (announce) toast(noWorkReason(state, tool, toolbar));
+    if (announce) toast(noWorkReason(state, tool, toolbar, x, y));
     return;
   }
   const task = addTask(state, spec);
@@ -430,7 +437,11 @@ function queueTileTask(state, toolbar, x, y, { announce }) {
 }
 
 /** Explains an ignored tap, since silence just reads as a broken button. */
-function noWorkReason(state, tool, toolbar) {
+function noWorkReason(state, tool, toolbar, x, y) {
+  // A tile promised to a queued build looks empty but refuses everything, so
+  // say which it is rather than leaving the player prodding at it.
+  if (isReserved(state, x, y)) return "You've already got something queued there";
+
   switch (tool) {
     case 'build': {
       const def = buildDef(toolbar.getBuildKind());
@@ -492,6 +503,40 @@ function wireToastFeedback() {
     if (now - lastWarn < 4000) return;   // one grumble at a time
     lastWarn = now;
     toast(`Can't reach that ${task.detail || 'spot'} — trying later`, 'warn');
+  });
+}
+
+/**
+ * Catches the farm up when the tab comes back.
+ *
+ * Nothing runs in a backgrounded tab — requestAnimationFrame stops — so the
+ * simulation falls behind wall-clock for as long as it's hidden. It used to
+ * stay behind for the rest of the session: pump runs at most a few hundred
+ * ticks and then resyncs its own clock, writing off the rest, and only a
+ * reload put it right. Replaying the gap on the way back in, quietly, is what
+ * makes "the farm keeps running" true within a session as well as across one.
+ */
+const WAKE_SUMMARY_MIN_MS = 10 * 60 * 1000;
+
+function wireWakeUp(state, loop) {
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible') return;
+
+    const away = Date.now() - state.lastTickTime;
+    if (away < TICK_MS * 2) return;              // a glance away; pump will cope
+
+    const catchup = await runCatchup(away, () => simTick(state));
+    discardSkipped(state, catchup);
+    // The simulation is now level with the wall clock, so the loop must not
+    // also try to make up the same stretch of time.
+    loop.resync(Date.now());
+
+    // Only for a real absence. The card is a "welcome back", and getting one
+    // for glancing at another tab for two minutes is nagging, not news.
+    if (away >= WAKE_SUMMARY_MIN_MS) {
+      const summary = buildSummary(state, catchup);
+      if (summary) showSummary(summary);
+    }
   });
 }
 

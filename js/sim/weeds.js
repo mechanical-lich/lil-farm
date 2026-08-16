@@ -24,6 +24,7 @@ import { GEN } from '../config.js';
 import { GROUND, OBJ } from '../world/tiledefs.js';
 import { PLOT, plotCoords } from '../world/land.js';
 import { cropAt } from './crops.js';
+import { isReserved } from './build.js';
 
 /** Ticks between attempts. One every two minutes is a background nuisance. */
 export const WEED_INTERVAL = 120;
@@ -76,6 +77,8 @@ export function canSprout(state, x, y) {
   if (grid.getGround(x, y) !== GROUND.GRASS) return false;
   if (grid.getObject(x, y) !== OBJ.NONE) return false;
   if (cropAt(state, x, y)) return false;
+  // Ground a queued build is standing on is spoken for; see build.js.
+  if (isReserved(state, x, y)) return false;
   // Not underfoot: sprouting on top of the farmer or an animal looks wrong even
   // though weeds don't block anyone.
   if (state.farmer.x === x && state.farmer.y === y) return false;

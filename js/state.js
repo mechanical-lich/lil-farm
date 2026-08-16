@@ -6,6 +6,7 @@ import { Grid } from './world/grid.js';
 import { generateWorld, startingBarnAnchor } from './world/worldgen.js';
 import { placeStructure } from './sim/build.js';
 import { seedStartingMushrooms } from './sim/mushrooms.js';
+import { startingPlot } from './world/land.js';
 import { makeRng } from './engine/rng.js';
 
 /** @returns {object} a fresh game */
@@ -78,6 +79,13 @@ export function serialize(state) {
   };
 }
 
+function emptyMap() {
+  const grid = new Grid(MAP_W, MAP_H);
+  const centre = startingPlot({ x: Math.floor(MAP_W / 2), y: Math.floor(MAP_H / 2) });
+  grid.own(centre.px, centre.py);
+  return grid.toJSON();
+}
+
 /** Inverse of serialize(). Assumes migrations already ran. */
 export function deserialize(data) {
   const rng = makeRng(data.seed >>> 0);
@@ -90,7 +98,11 @@ export function deserialize(data) {
     tickCount: data.tickCount || 0,
     lastTickTime: data.lastTickTime || Date.now(),
     money: data.money || 0,
-    grid: Grid.fromJSON(data.map || { w: MAP_W, h: MAP_H, ground: [], objects: [] }),
+    // The fallback can only be reached by calling deserialize directly — both
+    // loadSave and validateSave refuse a save with no map. It still grants the
+    // starting cell, because a grid that owns nothing is a grid where nothing
+    // can walk, which is a far more confusing failure than an empty map.
+    grid: Grid.fromJSON(data.map || emptyMap()),
     farmer: data.farmer,
     animals: data.animals || [],
     nextAnimalId: data.nextAnimalId || 1,

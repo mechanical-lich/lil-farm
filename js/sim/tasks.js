@@ -5,11 +5,15 @@
 // later, so one unreachable rock never deadlocks the whole farm.
 
 import { emitUnlessSuspended } from '../engine/events.js';
+import { addItems } from './inventory.js';
 import { OBJ, GROUND, objDef, isTilled, isWater } from '../world/tiledefs.js';
 import { cropAt, isRipe, isStalled, cropDef } from './crops.js';
-import { buildDef, canPlaceAt, structureAt, demolishWork, troughAnchorAt } from './build.js';
+import {
+  buildDef, canPlaceAt, structureAt, demolishWork, troughAnchorAt, isReserved,
+  footprint,
+} from './build.js';
 import { animalDef, TROUGH_CAPACITY, isReady } from './animals.js';
-import { mushroomAt } from './mushrooms.js';
+import { mushroomAt, forage } from './mushrooms.js';
 
 /** Work is measured in ticks (1 tick = 1 second). */
 export const TASK_TYPES = {
@@ -46,10 +50,82 @@ export function taskLabel(task) {
   return task.detail ? `${base} ${task.detail}` : base;
 }
 
+/**
+ * Keeps animal-targeted work pointed at the animal.
+ *
+ * A cow is milked where it is, not where it was standing when you tapped it.
+ * The task carries an animalId and its x/y is refreshed each tick, so the
+ * farmer walks to wherever the cow has wandered instead of solemnly milking a
+ * patch of empty grass ten tiles away.
+ *
+ * A task whose animal has gone — sold — is dropped rather than left pointing
+ * at nothing.
+ */
+export function followAnimals(state) {
+  for (const task of state.tasks) {
+    if (task.animalId == null) continue;
+    const animal = (state.animals || []).find((a) => a.id === task.animalId);
+    if (!animal) {
+      cancelTask(state, task.id);
+      continue;
+    }
+    task.x = animal.x;
+    task.y = animal.y;
+  }
+}
+
+/**
+ * Clears whatever has turned up on a build site, keeping anything worth having.
+ *
+ * Reserving the footprint (see build.js) stops nearly everything from getting
+ * in the way, but not a hen: she wanders where she likes and lays where she
+ * stands. So the last thing before the walls go up is the farmer picking up
+ * what's lying about — and because reservation already excluded everything the
+ * player put there deliberately, this only ever finds things that arrived on
+ * their own. Nothing is destroyed and the build is never cancelled.
+ *
+ * @returns {object} items gained, in the same shape the task pipeline reports
+ */
+export function clearBuildSite(state, task) {
+  const gained = {};
+  const add = (items) => {
+    for (const [id, n] of Object.entries(items || {})) gained[id] = (gained[id] || 0) + n;
+  };
+
+  for (const t of footprint(task.buildKind, task.x, task.y)) {
+    if (mushroomAt(state, t.x, t.y)) {
+      // forage() clears the tile, banks the mushroom and writes the journal —
+      // and, critically, removes the state.mushrooms entry. Paving over one
+      // would strand that entry forever and eat a slot in the spawn cap.
+      // It banks the item itself, so this only records it for the report.
+      add(forage(state, t.x, t.y));
+      continue;
+    }
+
+    const obj = state.grid.getObject(t.x, t.y);
+    if (obj === OBJ.NONE) continue;
+    const def = objDef(obj);
+    if (def.yields) {
+      add(def.yields);
+      addItems(state, def.yields);
+    }
+    state.grid.setObject(t.x, t.y, OBJ.NONE);
+  }
+
+  return gained;
+}
+
 export function addTask(state, task) {
-  // One task per tile per type, so drag-painting over the same tile twice or
-  // double-tapping doesn't queue duplicate work.
-  if (findTaskAt(state, task.x, task.y, task.type)) return null;
+  // Work aimed at an animal is identified by the animal, not the tile: the
+  // task follows it around (see followAnimals), so two taps a moment apart
+  // would otherwise queue the same milking twice from two different spots.
+  if (task.animalId != null) {
+    if (state.tasks.some((t) => t.type === task.type && t.animalId === task.animalId)) return null;
+  } else if (findTaskAt(state, task.x, task.y, task.type)) {
+    // One task per tile per type, so drag-painting over the same tile twice or
+    // double-tapping doesn't queue duplicate work.
+    return null;
+  }
 
   const full = {
     id: state.nextTaskId++,
@@ -230,6 +306,8 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
     case 'till':
       // Only bare, unplanted, unobstructed ground can be ploughed.
       if (obj !== OBJ.NONE || crop) return null;
+      // ...and not the ground a queued build is standing on.
+      if (isReserved(state, x, y)) return null;
       if (isTilled(ground)) return null;
       if (ground !== GROUND.GRASS && ground !== GROUND.DIRT) return null;
       return { type: 'till', x, y, work: WORK.till, detail: 'soil' };

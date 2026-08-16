@@ -20,6 +20,7 @@ import { GROUND, OBJ } from '../world/tiledefs.js';
 import { PLOT, plotCoords } from '../world/land.js';
 import { cropAt } from './crops.js';
 import { addItem } from './inventory.js';
+import { isReserved } from './build.js';
 
 /**
  * Four kinds, each in four colours — the sheet is one row of sixteen, grouped
@@ -105,6 +106,7 @@ export function canSprout(state, x, y) {
   if (grid.getGround(x, y) !== GROUND.GRASS) return false;
   if (grid.getObject(x, y) !== OBJ.NONE) return false;
   if (cropAt(state, x, y)) return false;
+  if (isReserved(state, x, y)) return false;      // a queued build owns it
   if (state.farmer.x === x && state.farmer.y === y) return false;
   return !(state.animals || []).some((a) => a.x === x && a.y === y);
 }

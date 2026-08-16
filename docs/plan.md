@@ -145,6 +145,77 @@ their eggs go on the ground, so there's nothing to bank.
 The v3 -> v4 migration converts `ready` to `stock`, because a cow standing there
 ready had earned its milk and shouldn't quietly lose it on an update.
 
+**The tick clock, in three parts** — all of it previously untested, which is
+exactly where the bugs were:
+
+- `runCatchup` reports `skipped`, and `discardSkipped` writes that time off the
+  farm's clock. Without it the cap didn't cap: `lastTickTime` only advanced by
+  the ticks that ran, so a month away replayed seven days, then seven more next
+  load, and so on. Four catch-ups to arrive where one belongs.
+- A hidden tab runs nothing, so the simulation falls behind wall-clock and used
+  to *stay* behind for the session — `pump` runs at most `maxTicksPerFrame` and
+  then resyncs its own clock, writing off the rest. `wireWakeUp` replays the gap
+  on `visibilitychange` and calls `loop.resync()` so pump doesn't redo it.
+- `nextFrame` is a timer, not `requestAnimationFrame`. rAF never fires in a
+  hidden tab, so a PWA restored in the background sat at "Catching up…" forever
+  waiting for a frame that only arrives if someone looks at it. The timer is
+  throttled there but completes — and it's why the chunked path can be tested
+  in Node at all.
+
+`pump` also runs bursts over `quietBurst` ticks with events suspended and calls
+`onQuietCatchup` afterwards, because a sleeping laptop otherwise wakes to a wall
+of simultaneous toasts. The hook exists so the loop doesn't need to know which
+events refresh which bit of UI.
+
+**The service worker serves from its own cache**, not `caches.match()`. The bare
+form searches every cache including the previous version's, which still exists
+between install and activate — a stale module served from it would be written
+into the new cache and pinned there for good.
+
+**The precache guard checks referenced assets, not every file on disk.** An
+unused sheet in `assets/` shouldn't be forced into the shell, where it costs
+every player a download for something nothing loads. I confirmed the guard fails
+when an asset is removed from the shell.
+
+**A save that parses is not necessarily a farm.** `loadSave` checks
+`isPlayableFarm` (a map and a farmer) after migrating, and keeps anything that
+fails at `SAVE_KEY.corrupt` before starting fresh. A write cut short by a full
+disk leaves valid JSON with nothing in it; that used to reach boot, die on
+`state.farmer.x`, and leave the game unopenable until someone cleared
+localStorage by hand. `validateSave` shares the same check.
+
+**Work aimed at an animal follows the animal.** A `collect` task carries an
+`animalId` and `followAnimals` refreshes its x/y every tick before the farmer
+moves; a task whose animal was sold is dropped. Two consequences that had to be
+handled with it: `addTask` dedupes animal work by id rather than by tile (the
+task moves, so the one-per-tile check can't see a second tap from a new spot),
+and an animal being tended holds still, or the farmer trails after it.
+
+**Tests run one at a time.** They used to run as declared, with async ones left
+to finish in the background — so an async test's `await` handed control to the
+*next* tests while its event listeners were still registered, and a later test
+firing `task:done` was counted by an earlier test's listener. The failure then
+surfaced in the innocent test. This bit while adding the milking tests and cost
+real time to diagnose; sequential costs nothing measurable.
+
+**A queued build reserves its ground, not just its materials.** `reservedTiles`
+sits next to `pendingMaterials` in `build.js` and exists for the same reason:
+the check has to account for what's already queued or two orders both pass.
+Spawners (`canSprout` in both weeds and mushrooms), `canPlaceAt` and the till
+branch of `taskForTile` all consult it. Clearing deliberately still works — a
+rock on the site is a thing to remove, not a conflict.
+
+`clearBuildSite` in `tasks.js` handles the one case reservation can't prevent, a
+hen laying on the site. It lives in tasks.js rather than build.js on purpose:
+build.js must not import mushrooms.js, because mushrooms.js imports build.js for
+`isReserved` and the cycle would be real. tasks.js already imported both.
+
+Two ordering traps, both tested: the material check runs *before* the site is
+cleared, so a build that can't be paid for doesn't cost an egg on its way to
+failing; and `forage()` banks the mushroom itself, so `clearBuildSite` records
+it for the report but must not bank it again. The first version double-counted
+and a test caught it.
+
 **Water is the only blocking *ground*.** The check sits in `Grid.isWalkable`
 beside the ownership one, for the same reason: the farmer, the animals and the
 pathfinder all funnel through that method, so they can't disagree about where
@@ -191,14 +262,28 @@ row to the image would otherwise draw nothing, and no other test would catch it
 banking migration test used the relative form and quietly stopped exercising the
 migration it was named after the moment a version was added after it.
 
-**The dirt road's autotiling is composited, not chosen.** `dirtPieceAt` picks
-the nine-slice tile (edges and convex corners); `dirtCornersAt` returns the
-concave corners, each drawn clipped to its own quarter of the tile. The reason
-is the crossroads case: every diagonal is grass, and the sheet's inner-corner
-tiles are solid earth with a single wedge, so picking one tile leaves three
-corners wrong and drawing two paints over the first. Both are exported and
-tested without a canvas — a nine-slice is easy to get subtly wrong and the
-result is a farm full of hard square edges, which is hard to eyeball.
+**Queued ground is previewed, for every ground buildable.**
+`pendingGroundTiles` returns tile -> ground id for anything queued, and
+`drawGround` paints the real ground then the planned ground over it at 45%.
+Both go through the same `paintGround`, so the preview can't drift from the
+real thing. The planned tiles are also fed into the autotile predicates, which
+is the point: a shape has the outline it's going to have from the moment it's
+ordered rather than re-deciding its edges after every tile.
+
+**Autotiling picks a piece per quarter-tile, not per tile.**
+`autotileQuadrants` returns four keys; `blitAutotile` draws four 8x8 source
+sub-rects (no clipping, no canvas state changes). Dirt and water share it.
+
+This replaced a nine-slice that could not express **grass on three sides** —
+a one-tile-wide arm, a dead end, a half-dug pond — where it fell back to a
+straight edge and left two sides of the tile as bare fill against grass. It
+also couldn't draw a crossroads: four diagonals needing a wedge, one tile able
+to supply one. Per-quarter handles every arrangement from the same 13 pieces,
+and the whole thing is smaller than what it replaced.
+
+Tested without a canvas by asserting the four keys — a nine-slice is easy to
+get subtly wrong and the result is a farm full of hard square edges, which is
+exactly what nobody spots by looking.
 
 The town sheet's tiles were catalogued by **sampling the PNG's pixels**, not by
 eye: for each candidate tile, which edges and corners are green. That's how the
@@ -351,7 +436,7 @@ at all while the farmer is on it, which reads as swung open.
   with a grass wedge in one corner (TL, TR, BR, BL in that order). Confirmed by sampling
   the PNG's pixels, not by eye. They complete the nine-slice at `(0,1)`–`(2,3)`.
 
-219 headless tests pass via `npm test`.
+253 headless tests pass via `npm test`.
 
 ## 0. Ground rules
 

@@ -64,9 +64,7 @@ export function loadSave() {
   try {
     data = JSON.parse(raw);
   } catch (err) {
-    console.error('save is corrupt, keeping a backup and starting fresh', err);
-    try { localStorage.setItem(SAVE_KEY + '.corrupt', raw); } catch { /* full disk */ }
-    return null;
+    return giveUp(raw, 'save is corrupt', err);
   }
 
   // A migration rewrites a farm that may be months old, on a schema the code
@@ -74,7 +72,33 @@ export function loadSave() {
   // migration is recoverable rather than final.
   backupBeforeMigration(raw, data.version);
 
-  return migrate(data);
+  const migrated = migrate(data);
+
+  // Parsing is not the same as being a farm. A write cut short by a full disk
+  // or a killed tab can leave something that parses perfectly and has nothing
+  // in it — and that used to sail through to boot and die on state.farmer.x,
+  // with no backup and no fresh start. The game was then dead until someone
+  // cleared localStorage by hand, which is not a thing to ask of a player.
+  if (!isPlayableFarm(migrated)) {
+    return giveUp(raw, 'save is missing its farm');
+  }
+  return migrated;
+}
+
+/**
+ * Keeps the unreadable save aside and starts fresh. The copy is what makes
+ * this recoverable: it can be pasted back in from the settings panel once
+ * whatever went wrong is fixed.
+ */
+function giveUp(raw, why, err) {
+  console.error(`${why}; keeping a copy and starting fresh`, err || '');
+  try { localStorage.setItem(SAVE_KEY + '.corrupt', raw); } catch { /* full disk */ }
+  return null;
+}
+
+/** The bare minimum for deserialize() to produce something playable. */
+export function isPlayableFarm(data) {
+  return !!(data && data.map && data.farmer);
 }
 
 /** Where the copy of a save from before version N's migration is kept. */
@@ -183,7 +207,8 @@ export function validateSave(text) {
   }
   // A structurally valid save always has a map and a farmer; without this a
   // stray JSON object would sail through migrate() and crash on load instead.
-  if (!migrated.map || !migrated.farmer) {
+  // loadSave applies the same test — see isPlayableFarm.
+  if (!isPlayableFarm(migrated)) {
     return { ok: false, reason: "that save is missing its farm" };
   }
   return { ok: true, data: migrated };

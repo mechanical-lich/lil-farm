@@ -4,6 +4,12 @@
 // queued, so you can't order ten fences with wood for two) but only spent when
 // the farmer actually finishes the job. That way cancelling a build never costs
 // the player anything, which matches how planting handles seeds.
+//
+// The ground a queued build stands on is reserved the same way, and for the
+// same reason. A barn takes two minutes to raise; if a mushroom could sprout
+// or a second build could be queued inside its footprint in the meantime, the
+// only ways out are to cancel the barn or to pave over whatever arrived. Both
+// are worse than simply not letting anything take the site in the first place.
 
 import { OBJ, GROUND, isTilled, isWater } from '../world/tiledefs.js';
 import { countItem, removeItem, itemName } from './inventory.js';
@@ -101,7 +107,12 @@ export function canPlaceAt(state, kind, x, y) {
   const def = buildDef(kind);
   if (!def) return false;
 
+  const reserved = reservedTiles(state);
   for (const t of footprint(kind, x, y)) {
+    // Another build is already claiming this ground. Without this, two
+    // overlapping orders both pass and the second quietly pays for a structure
+    // that overwrites the first.
+    if (reserved.has(`${t.x},${t.y}`)) return false;
     if (!state.grid.inBounds(t.x, t.y)) return false;
     // A barn may not straddle the boundary onto land you don't own.
     if (!state.grid.isOwned(t.x, t.y)) return false;
@@ -124,6 +135,59 @@ export function canPlaceAt(state, kind, x, y) {
 function occupied(state, x, y) {
   if (state.farmer.x === x && state.farmer.y === y) return true;
   return (state.animals || []).some((a) => a.x === x && a.y === y);
+}
+
+/**
+ * Every tile a queued build is standing on.
+ *
+ * The footprint is already outlined on the map while the task waits, so a
+ * reserved tile is one the player can see is spoken for.
+ *
+ * @returns {Set<string>} "x,y" keys
+ */
+export function reservedTiles(state) {
+  const out = new Set();
+  for (const task of state.tasks || []) {
+    if (task.type !== 'build') continue;
+    for (const t of footprint(task.buildKind, task.x, task.y)) out.add(`${t.x},${t.y}`);
+  }
+  return out;
+}
+
+/**
+ * The ground each queued build is going to lay, keyed by tile.
+ *
+ * The renderer draws these faintly and counts them in when working out edges
+ * and corners, so a pond or a path looks like the shape it's going to be from
+ * the moment it's ordered. Without it the shape grows a fresh set of wrong
+ * edges after every single tile the farmer finishes — and a half-dug pond in
+ * particular reads as a bite taken out of it.
+ *
+ * @returns {Map<string, number>} "x,y" -> GROUND id
+ */
+export function pendingGroundTiles(state) {
+  const out = new Map();
+  for (const task of state.tasks || []) {
+    if (task.type !== 'build') continue;
+    const def = buildDef(task.buildKind);
+    if (!def || def.ground == null) continue;
+    for (const t of footprint(task.buildKind, task.x, task.y)) out.set(`${t.x},${t.y}`, def.ground);
+  }
+  return out;
+}
+
+/** Just the water ones, which is what the pond autotiler needs. */
+export function pendingWaterTiles(state) {
+  const out = new Set();
+  for (const [key, ground] of pendingGroundTiles(state)) {
+    if (isWater(ground)) out.add(key);
+  }
+  return out;
+}
+
+/** Is this tile promised to a build that hasn't happened yet? */
+export function isReserved(state, x, y) {
+  return reservedTiles(state).has(`${x},${y}`);
 }
 
 /** Total materials already promised to queued build tasks. */
@@ -165,14 +229,26 @@ export function costLabel(kind) {
  * farmer when a build task completes.
  * @returns {boolean} false if the materials vanished while the task was queued.
  */
+/**
+ * Are the materials there right now? Split out so the farmer can find out
+ * *before* clearing the site — no sense pulling up an egg for a barn that
+ * turns out to be unaffordable.
+ */
+export function canCompleteBuild(state, task) {
+  const def = buildDef(task.buildKind);
+  if (!def) return false;
+  for (const [mat, n] of Object.entries(def.cost)) {
+    if (countItem(state, mat) < n) return false;
+  }
+  return true;
+}
+
 export function completeBuild(state, task) {
   const def = buildDef(task.buildKind);
   if (!def) return false;
 
   // Check everything before spending anything, so a half-paid build is impossible.
-  for (const [mat, n] of Object.entries(def.cost)) {
-    if (countItem(state, mat) < n) return false;
-  }
+  if (!canCompleteBuild(state, task)) return false;
   for (const [mat, n] of Object.entries(def.cost)) removeItem(state, mat, n);
 
   placeStructure(state, task.buildKind, task.x, task.y);

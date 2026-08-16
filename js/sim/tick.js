@@ -8,6 +8,7 @@
 
 import { TICK_MS } from '../config.js';
 import { updateFarmer } from './farmer.js';
+import { followAnimals } from './tasks.js';
 import { updateCrops } from './crops.js';
 import { updateAnimals } from './animals.js';
 import { updateWeeds } from './weeds.js';
@@ -18,6 +19,9 @@ export function tick(state) {
   state.tickCount++;
   state.lastTickTime += TICK_MS;
 
+  // Before the farmer moves, so work aimed at an animal is pointing at where
+  // that animal actually is this tick.
+  followAnimals(state);
   updateFarmer(state);
   updateCrops(state);
   updateAnimals(state);
