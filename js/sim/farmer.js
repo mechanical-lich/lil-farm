@@ -17,6 +17,7 @@ import { plantCrop, waterTile, harvestCrop, seedIdFor } from './crops.js';
 import { completeBuild, demolish, canCompleteBuild } from './build.js';
 import { fillWaterTrough, fillFeedTrough, collectFrom } from './animals.js';
 import { forage } from './mushrooms.js';
+import { takeFromHand } from './farmhand.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 
 const WANDER_CHANCE = 0.08;   // per idle tick
@@ -215,6 +216,15 @@ function applyTaskResult(state, task) {
       // Which mushroom it was is looked up at the moment it's picked, not when
       // the task was queued — that's the only place that knows.
       gained = forage(state, task.x, task.y);
+      break;
+    }
+
+    case 'gather': {
+      const hand = (state.hands || []).find((h) => h.id === task.handId);
+      if (hand) {
+        gained = takeFromHand(hand);
+        addItems(state, gained);
+      }
       break;
     }
 

@@ -25,6 +25,8 @@ export function newGame(seed = (Date.now() ^ 0x5f3759df) >>> 0) {
     farmer: { x: spawn.x, y: spawn.y, dir: 'down', facing: 'right', taskId: null, path: [], trail: [], work: 0 },
     animals: [],
     nextAnimalId: 1,
+    hands: [],          // hired farmhands; see sim/farmhand.js
+    nextHandId: 1,
     crops: {},
     mushrooms: {},   // tile key -> mushroom id; see sim/mushrooms.js
     journal: {},     // mushroom id -> how many you have ever picked
@@ -65,6 +67,8 @@ export function serialize(state) {
     farmer: state.farmer,
     animals: state.animals,
     nextAnimalId: state.nextAnimalId,
+    hands: state.hands,
+    nextHandId: state.nextHandId,
     crops: state.crops,
     mushrooms: state.mushrooms,
     journal: state.journal,
@@ -106,6 +110,8 @@ export function deserialize(data) {
     farmer: data.farmer,
     animals: data.animals || [],
     nextAnimalId: data.nextAnimalId || 1,
+    hands: data.hands || [],
+    nextHandId: data.nextHandId || 1,
     crops: data.crops || {},
     mushrooms: data.mushrooms || {},
     journal: data.journal || {},

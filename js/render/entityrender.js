@@ -10,6 +10,7 @@ import { blit } from './tilerender.js';
 import {
   animalDef, isNeglected, isThirsty, currentEmote, isReady, variantOf,
 } from '../sim/animals.js';
+import { carriedTotal, isFull } from '../sim/farmhand.js';
 
 /**
  * Everything that moves, bucketed by the tile row it should sort into.
@@ -58,11 +59,36 @@ export function entitiesByRow(state, alpha) {
     add(pos.y, (ctx, sheets) => drawAnimal(ctx, sheets, state, a, pos));
   }
 
+  for (const h of state.hands || []) {
+    const pos = { x: lerp(h.px ?? h.x, h.x, alpha), y: lerp(h.py ?? h.y, h.y, alpha) };
+    add(pos.y, (ctx, sheets) => drawHand(ctx, sheets, state, h, pos));
+  }
+
   const f = state.farmer;
   const fp = alongTrail(f, alpha);
   add(fp.y, (ctx, sheets) => drawFarmerAt(ctx, sheets, state, fp, alpha));
 
   return rows;
+}
+
+/**
+ * The hired help: the same character without the hat, which is the sheet's own
+ * way of saying "one of these is the boss".
+ */
+function drawHand(ctx, sheets, state, hand, pos) {
+  const x = pos.x * TILE;
+  const y = pos.y * TILE;
+  const working = hand.work > 0;
+  const bob = working && Math.floor(state.tickCount) % 2 === 0 ? -1 : 0;
+
+  blit(ctx, sheets, SPRITES.farmer, Math.round(x), Math.round(y) - 2 + bob, hand.facing === 'left');
+
+  // Carrying something worth taking off them: the same badge a ready animal
+  // wears, since it means the same thing — there is something here for you.
+  if (carriedTotal(hand) > 0) {
+    const full = isFull(hand);
+    drawBadge(ctx, x + TILE - 6, y - 3, full ? '#ffe680' : '#cbb27a', '#8a6a10');
+  }
 }
 
 function drawFarmerAt(ctx, sheets, state, pos, alpha) {
@@ -141,6 +167,11 @@ function drawAnimal(ctx, sheets, state, a, pos) {
     drawBadge(ctx, x + TILE - 6, y - 2,
       isThirsty(a) ? '#4aa3e0' : '#d9a441', 'rgba(0,0,0,0.45)');
   }
+}
+
+/** One farmhand sprite at a tile, used for the placement ghost. */
+export function drawHandSprite(ctx, sheets, at) {
+  blit(ctx, sheets, SPRITES.farmer, at.x * TILE, at.y * TILE - 2);
 }
 
 /** One animal sprite at a tile, used for the placement ghost. */

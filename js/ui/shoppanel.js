@@ -6,7 +6,7 @@
 import { on, emit } from '../engine/events.js';
 import {
   buyList, sellList, buy, sell, sellAll, ticksUntilRotation,
-  animalList, canBuyAnimal,
+  animalList, canBuyAnimal, handRow, canHireHand,
 } from '../sim/shop.js';
 import { animalCapacity } from '../sim/build.js';
 import {
@@ -15,7 +15,9 @@ import {
 } from '../world/land.js';
 import { countItem } from '../sim/inventory.js';
 
-export function initShopPanel(state, { onMessage, onPlaceAnimal, onLandBought } = {}) {
+export function initShopPanel(state, {
+  onMessage, onPlaceAnimal, onPlaceHand, onLandBought,
+} = {}) {
   const panel = document.getElementById('shop-panel');
   const list = document.getElementById('shop-list');
   const tabs = document.getElementById('shop-tabs');
@@ -86,6 +88,16 @@ export function initShopPanel(state, { onMessage, onPlaceAnimal, onLandBought } 
       onMessage?.(`Land bought for $${res.price}`);
       onLandBought?.(px, py);
       render();
+      return;
+    }
+
+    // Hiring works exactly like buying an animal: the shop steps aside and the
+    // player says where they should start.
+    if (act === 'hand') {
+      const allowed = canHireHand(state);
+      if (!allowed.ok) { onMessage?.(allowed.reason, 'warn'); return; }
+      setOpen(false);
+      onPlaceHand?.();
       return;
     }
 
@@ -182,6 +194,18 @@ export function initShopPanel(state, { onMessage, onPlaceAnimal, onLandBought } 
         </span>
         <span class="shop-price">$${row.price}</span>
         <button data-act="animal" data-id="${row.type}" ${row.affordable ? '' : 'disabled'}>Buy</button>
+      </li>`);
+
+    // Help, rather than livestock — but it walks around your farm and you
+    // choose where it goes, so this is where it belongs.
+    const hand = handRow(state);
+    rows.push(`
+      <li>
+        <span class="shop-name">${esc(hand.name)}
+          <em>${esc(hand.note)}${hand.owned ? ` · have ${hand.owned}/${hand.capacity}` : ''}</em>
+        </span>
+        <span class="shop-price">$${hand.price}</span>
+        <button data-act="hand" ${hand.affordable ? '' : 'disabled'}>Hire</button>
       </li>`);
     return rows.join('');
   }

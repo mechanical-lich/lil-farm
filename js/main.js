@@ -12,11 +12,11 @@ import { addTask, taskForTile, taskLabel, queueTillRow } from './sim/tasks.js';
 import { itemName, addItem } from './sim/inventory.js';
 import { canAfford, buildDef, canPlaceAt, isReserved } from './sim/build.js';
 import { drawBuilding } from './render/tilerender.js';
-import { drawAnimalSprite } from './render/entityrender.js';
+import { drawAnimalSprite, drawHandSprite } from './render/entityrender.js';
 import {
   animalDef, animalAt, petAnimal, isReady, animalVariantCount,
 } from './sim/animals.js';
-import { buyAnimal, canPlaceAnimal } from './sim/shop.js';
+import { buyAnimal, canPlaceAnimal, hireHand } from './sim/shop.js';
 import { PLOT, plotBounds } from './world/land.js';
 import { attachInput } from './ui/input.js';
 import { initToolbar, TOOLS } from './ui/toolbar.js';
@@ -79,6 +79,11 @@ async function boot() {
     onLandBought: (px, py) => {
       const b = plotBounds(px, py);
       camera.centerOnTile(b.x0 + PLOT / 2, b.y0 + PLOT / 2);
+    },
+    onPlaceHand: () => {
+      beginPlacement(handPlacement(state), state.farmer.x, state.farmer.y);
+      camera.centerOnTile(state.farmer.x, state.farmer.y);
+      toast('Tap where your farmhand should start');
     },
     onPlaceAnimal: (type) => {
       // Start the ghost on the farmer, so something is visible immediately and
@@ -343,6 +348,22 @@ function animalPlacement(state, type) {
       const res = buyAnimal(state, type, x, y);
       return res.ok
         ? { ok: true, message: `${def.name} bought for $${res.spent}` }
+        : { ok: false, reason: res.reason };
+    },
+  };
+}
+
+/** Siting a new farmhand. Same flow as livestock: nothing is paid until you say. */
+function handPlacement(state) {
+  return {
+    w: 1, h: 1,
+    confirmLabel: '✓ Start them here',
+    validate: (x, y) => canPlaceAnimal(state, x, y),
+    draw: (ctx, sheets, at) => drawHandSprite(ctx, sheets, at),
+    confirm: (x, y) => {
+      const res = hireHand(state, x, y);
+      return res.ok
+        ? { ok: true, message: `Farmhand hired for $${res.spent}` }
         : { ok: false, reason: res.reason };
     },
   };

@@ -14,6 +14,7 @@ import {
 } from './build.js';
 import { animalDef, TROUGH_CAPACITY, isReady } from './animals.js';
 import { mushroomAt, forage } from './mushrooms.js';
+import { handAt, carriedTotal } from './farmhand.js';
 
 /** Work is measured in ticks (1 tick = 1 second). */
 export const TASK_TYPES = {
@@ -25,6 +26,7 @@ export const TASK_TYPES = {
   forage: { label: 'Pick', verb: 'Picking' },
   fill: { label: 'Fill', verb: 'Filling' },
   collect: { label: 'Collect', verb: 'Collecting' },
+  gather: { label: 'Take', verb: 'Taking' },
   till: { label: 'Till', verb: 'Tilling' },
   plant: { label: 'Plant', verb: 'Planting' },
   water: { label: 'Water', verb: 'Watering' },
@@ -42,6 +44,7 @@ export const WORK = {
   untill: 5,
   fill: 8,
   collect: 6,
+  gather: 5,
 };
 
 /** A task the player cannot see the point of is a bug; keep labels concrete. */
@@ -51,26 +54,31 @@ export function taskLabel(task) {
 }
 
 /**
- * Keeps animal-targeted work pointed at the animal.
+ * Keeps work that is aimed at somebody pointed at where they actually are.
  *
- * A cow is milked where it is, not where it was standing when you tapped it.
- * The task carries an animalId and its x/y is refreshed each tick, so the
- * farmer walks to wherever the cow has wandered instead of solemnly milking a
- * patch of empty grass ten tiles away.
+ * A cow is milked where it is, not where it was standing when you tapped it,
+ * and the same goes for taking a satchel off a farmhand. The task carries an
+ * id and its x/y is refreshed each tick, so the farmer walks to wherever they
+ * have got to instead of solemnly milking a patch of empty grass.
  *
- * A task whose animal has gone — sold — is dropped rather than left pointing
- * at nothing.
+ * A task whose subject has gone — an animal sold — is dropped rather than left
+ * pointing at nothing.
  */
-export function followAnimals(state) {
+export function followTargets(state) {
   for (const task of state.tasks) {
-    if (task.animalId == null) continue;
-    const animal = (state.animals || []).find((a) => a.id === task.animalId);
-    if (!animal) {
+    const subject = task.animalId != null
+      ? (state.animals || []).find((a) => a.id === task.animalId)
+      : task.handId != null
+        ? (state.hands || []).find((h) => h.id === task.handId)
+        : null;
+    if (subject === null) continue;               // not aimed at anybody
+
+    if (!subject) {
       cancelTask(state, task.id);
       continue;
     }
-    task.x = animal.x;
-    task.y = animal.y;
+    task.x = subject.x;
+    task.y = subject.y;
   }
 }
 
@@ -116,11 +124,13 @@ export function clearBuildSite(state, task) {
 }
 
 export function addTask(state, task) {
-  // Work aimed at an animal is identified by the animal, not the tile: the
-  // task follows it around (see followAnimals), so two taps a moment apart
-  // would otherwise queue the same milking twice from two different spots.
-  if (task.animalId != null) {
-    if (state.tasks.some((t) => t.type === task.type && t.animalId === task.animalId)) return null;
+  // Work aimed at somebody is identified by them, not by the tile: the task
+  // follows them around (see followTargets), so two taps a moment apart would
+  // otherwise queue the same milking twice from two different spots.
+  if (task.animalId != null || task.handId != null) {
+    const same = (t) => t.type === task.type
+      && t.animalId === task.animalId && t.handId === task.handId;
+    if (state.tasks.some(same)) return null;
   } else if (findTaskAt(state, task.x, task.y, task.type)) {
     // One task per tile per type, so drag-painting over the same tile twice or
     // double-tapping doesn't queue duplicate work.
@@ -351,6 +361,15 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
     default: {
       // Tap-anywhere convenience: the most useful thing this tile needs.
       // Animals and troughs come first — they're what you tap them for.
+      // A farmhand with a full satchel is the most useful thing on the tile.
+      const hand = handAt(state, x, y);
+      if (hand && carriedTotal(hand) > 0) {
+        return {
+          type: 'gather', x, y, work: WORK.gather,
+          detail: 'from the farmhand', handId: hand.id,
+        };
+      }
+
       const ready = state.animals?.find((a) => isReady(a) && a.x === x && a.y === y);
       if (ready) {
         return {

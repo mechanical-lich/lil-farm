@@ -14,6 +14,7 @@
 import { ANIMAL_VARIANTS } from '../config.js';
 import { findPath, besideBox } from '../world/pathfind.js';
 import { isWater } from '../world/tiledefs.js';
+import { handTargeting } from './farmhand.js';
 import { OBJ } from '../world/tiledefs.js';
 import { addItem, countItem, removeItem, ITEMS } from './inventory.js';
 import { CROPS } from './crops.js';
@@ -286,18 +287,34 @@ export function isNeglected(a) { return isHungry(a) || isThirsty(a); }
 
 /** Collects milk or eggs. Resets the animal to start producing again. */
 /**
- * Takes everything the animal has banked, in one go. Collecting one unit at a
- * time would turn a full cow into four separate taps, which is exactly the
- * fiddliness that picking eggs up off the ground already has.
+ * Takes what the animal has banked, without deciding where it goes.
+ *
+ * Split out so a farmhand can take only as much as it can carry and leave the
+ * rest on the animal, rather than the surplus evaporating into full pockets.
+ *
+ * @param {number} [max] how many units to take at most
+ * @returns {{id: string, qty: number}|null}
+ */
+export function takeFromAnimal(state, animal, max = Infinity) {
+  if (!animal || !isReady(animal)) return null;
+  const qty = Math.min(animal.stock, max);
+  if (qty <= 0) return null;
+
+  animal.stock -= qty;
+  return { id: animalDef(animal.type).produces, qty };
+}
+
+/**
+ * Takes everything the animal has banked, in one go, straight into the bag.
+ * Collecting one unit at a time would turn a full cow into four separate taps,
+ * which is exactly the fiddliness that picking eggs off the ground already has.
  */
 export function collectFrom(state, animal) {
-  if (!animal || !isReady(animal)) return null;
-  const def = animalDef(animal.type);
-  const qty = animal.stock;
+  const taken = takeFromAnimal(state, animal);
+  if (!taken) return null;
 
-  addItem(state, def.produces, qty);
-  animal.stock = 0;
-  return { [def.produces]: qty };
+  addItem(state, taken.id, taken.qty);
+  return { [taken.id]: taken.qty };
 }
 
 // --- troughs ------------------------------------------------------------
@@ -515,8 +532,12 @@ function drinkOrEat(state, a, trough, kind) {
   emitUnlessSuspended('world:changed', { x: trough.x, y: trough.y });
 }
 
-/** Is this the animal the farmer is currently working on, or heading for? */
+/**
+ * Is anyone on their way to tend this animal — the farmer, or a farmhand?
+ * Either way it stands still and waits, rather than being chased around.
+ */
 function beingTended(state, a) {
+  if (handTargeting(state, a.id)) return true;
   if (state.farmer.taskId === null) return false;
   const task = state.tasks.find((t) => t.id === state.farmer.taskId);
   return !!task && task.animalId === a.id;

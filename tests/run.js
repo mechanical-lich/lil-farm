@@ -25,7 +25,7 @@ import {
 } from '../js/sim/mushrooms.js';
 import {
   addTask, cancelTask, prioritizeTask, taskForTile, tillRow, queueTillRow, clearBuildSite,
-  followAnimals,
+  followTargets,
 } from '../js/sim/tasks.js';
 import {
   CROPS, SOIL_DRY_TICKS, plantCrop, waterTile, harvestCrop,
@@ -34,8 +34,12 @@ import {
 import {
   ROTATION_TICKS, STAPLE_SEEDS, ROTATING_COUNT, ROTATING_TIERS, stockedSeedCrops, buyList,
   buy, sell, sellAll, buyAnimal, canBuyAnimal, canPlaceAnimal, MATERIALS,
+  hireHand, canHireHand, handRow,
 } from '../js/sim/shop.js';
 import { ITEMS, countItem } from '../js/sim/inventory.js';
+import {
+  HAND_PRICE, HAND_CAPACITY, carriedTotal, isFull, handCount, handCapacity,
+} from '../js/sim/farmhand.js';
 import {
   ANIMALS, TROUGH_CAPACITY, FEED_COST, FOOD_DURATION, WATER_DURATION, SEEK_THRESHOLD,
   makeAnimal, collectFrom, isNeglected, fillWaterTrough, fillFeedTrough, pickFeed, animalDef,
@@ -2139,6 +2143,174 @@ test('wool takes longer than milk and is worth more when it comes', () => {
   assert(!isReady(sheep.animal), 'the sheep is still growing its fleece');
 });
 
+// --- the farmhand -------------------------------------------------------
+
+/** A cleared farm with a barn, some stocked animals, and one hand hired. */
+function farmWithHand(seed = 9900) {
+  const s = farmWithMaterials(seed);
+  s.money = 99999;
+  completeBuild(s, { buildKind: 'barn', x: s.farmer.x - 1, y: s.farmer.y - 5 });
+  const hand = hireHand(s, s.farmer.x, s.farmer.y + 1).hand;
+  return { s, hand };
+}
+
+test('a farmhand needs a barn to bring things to, and one per barn', () => {
+  const s = farmWithMaterials(9901);
+  s.money = 99999;
+  assert(!canHireHand(s).ok, 'no barn, no farmhand');
+
+  completeBuild(s, { buildKind: 'barn', x: s.farmer.x - 1, y: s.farmer.y - 5 });
+  assert(canHireHand(s).ok, 'a barn is somewhere to bring things');
+  assert(hireHand(s, s.farmer.x, s.farmer.y + 1).ok, 'hired');
+  assert(!canHireHand(s).ok, 'and that barn is spoken for');
+
+  completeBuild(s, { buildKind: 'barn', x: s.farmer.x + 6, y: s.farmer.y - 5 });
+  assert(canHireHand(s).ok, 'a second barn, a second pair of hands');
+});
+
+test('hiring costs money, and costs nothing if it fails', () => {
+  const s = farmWithMaterials(9902);
+  completeBuild(s, { buildKind: 'barn', x: s.farmer.x - 1, y: s.farmer.y - 5 });
+  s.money = HAND_PRICE - 1;
+
+  const broke = hireHand(s, s.farmer.x, s.farmer.y + 1);
+  assert(!broke.ok, 'refused');
+  assertEqual(s.money, HAND_PRICE - 1, 'and not charged');
+  assertEqual(handCount(s), 0, 'and nobody turned up');
+
+  s.money = HAND_PRICE;
+  assert(hireHand(s, s.farmer.x, s.farmer.y + 1).ok, 'hired at exactly the price');
+  assertEqual(s.money, 0, 'paid in full');
+});
+
+test('a farmhand milks, shears and picks up eggs on its own', () => {
+  const { s, hand } = farmWithHand(9903);
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 3, s.farmer.y);
+  const sheep = makeAnimal(s, 'sheep', s.farmer.x + 5, s.farmer.y);
+  cow.stock = 2;
+  sheep.stock = 1;
+  s.grid.setObject(s.farmer.x + 4, s.farmer.y + 3, OBJ.EGG);
+
+  for (let i = 0; i < 600; i++) tick(s);
+
+  assertEqual(hand.carrying.milk, 2, 'the cow was milked');
+  assertEqual(hand.carrying.wool, 1, 'the sheep was sheared');
+  assertEqual(hand.carrying.egg, 1, 'and the egg picked up');
+  assertEqual(s.grid.getObject(s.farmer.x + 4, s.farmer.y + 3), OBJ.NONE, 'off the ground');
+  assertEqual(countItem(s, 'milk'), 0, 'none of it is in your bag yet — they are holding it');
+});
+
+test('a farmhand carries only so much, and never destroys the surplus', () => {
+  // The trap: a cow with four milk and a hand with room for one. The other
+  // three have to stay on the cow, not vanish into full pockets.
+  const { s, hand } = farmWithHand(9904);
+  hand.carrying = { egg: HAND_CAPACITY - 1 };
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 2, s.farmer.y);
+  cow.stock = 4;
+
+  for (let i = 0; i < 600; i++) tick(s);
+
+  assertEqual(carriedTotal(hand), HAND_CAPACITY, 'filled to the brim, no further');
+  assertEqual(hand.carrying.milk, 1, 'took the one it could carry');
+  assertEqual(cow.stock, 3, 'and left the rest on the cow');
+});
+
+test('a full farmhand goes to the barn and waits there', () => {
+  const { s, hand } = farmWithHand(9905);
+  hand.carrying = { egg: HAND_CAPACITY };
+  hand.x = s.farmer.x + 10;
+  hand.y = s.farmer.y + 8;
+  const cow = makeAnimal(s, 'cow', hand.x + 1, hand.y);
+  cow.stock = 4;
+
+  for (let i = 0; i < 400; i++) tick(s);
+
+  const barn = s.buildings[0];
+  assert(besideBox(barn.x, barn.y, 3, 2, hand.x, hand.y),
+    `it should be waiting at the barn, not at ${hand.x},${hand.y}`);
+  assertEqual(cow.stock, 4, 'and it walked past the cow rather than working with full hands');
+});
+
+test('the farmer takes what the farmhand is holding', () => {
+  const { s, hand } = farmWithHand(9906);
+  hand.carrying = { egg: 12, milk: 5, wool: 2 };
+
+  const spec = taskForTile(s, hand.x, hand.y, 'auto');
+  assertEqual(spec.type, 'gather', 'tapping them offers to take it');
+  addTask(s, spec);
+  assertEqual(addTask(s, taskForTile(s, hand.x, hand.y, 'auto')), null, 'and only once');
+
+  let n = 0;
+  while (s.tasks.length && n < 2000) { tick(s); n++; }
+
+  assertEqual(countItem(s, 'egg'), 12, 'the eggs are yours now');
+  assertEqual(countItem(s, 'milk'), 5, 'and the milk');
+  assertEqual(countItem(s, 'wool'), 2, 'and the wool');
+  assertEqual(carriedTotal(hand), 0, 'and their hands are empty again');
+});
+
+test('an empty farmhand is not worth walking over to', () => {
+  const { s, hand } = farmWithHand(9907);
+  assertEqual(carriedTotal(hand), 0, 'carrying nothing');
+  const spec = taskForTile(s, hand.x, hand.y, 'auto');
+  assert(!spec || spec.type !== 'gather', 'nothing to take');
+});
+
+test('work aimed at a farmhand follows them as they walk', () => {
+  const { s, hand } = farmWithHand(9908);
+  hand.carrying = { egg: 3 };
+  const task = addTask(s, taskForTile(s, hand.x, hand.y, 'auto'));
+
+  hand.x += 5;
+  hand.y += 4;
+  followTargets(s);
+
+  assertEqual(task.x, hand.x, 'the task went with them');
+  assertEqual(task.y, hand.y, 'on both axes');
+});
+
+test('an animal stands still for the farmhand too', () => {
+  // Otherwise the hand trails after a wandering cow the same way the farmer
+  // used to.
+  const { s, hand } = farmWithHand(9909);
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 6, s.farmer.y + 4);
+  cow.stock = 1;
+
+  // Let the hand pick its target, then watch the cow.
+  for (let i = 0; i < 30; i++) tick(s);
+  const held = { x: cow.x, y: cow.y };
+  for (let i = 0; i < 40 && cow.stock > 0; i++) tick(s);
+
+  assertEqual({ x: cow.x, y: cow.y }, held, 'it waited to be milked');
+});
+
+test('farmhands survive a save round trip, cargo and all', () => {
+  const { s, hand } = farmWithHand(9910);
+  hand.carrying = { egg: 4, milk: 1 };
+  hand.facing = 'left';
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual(back.hands.length, 1, 'still hired');
+  assertEqual(back.hands[0].carrying, { egg: 4, milk: 1 }, 'still holding what they held');
+  assertEqual(back.hands[0].id, hand.id, 'and still the same person');
+});
+
+test('a farmhand gathers while you are away, and it shows up on your return', () => {
+  const { s, hand } = farmWithHand(9911);
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 4, s.farmer.y + 2);
+  cow.food = 1e9;
+  cow.water = 1e9;
+
+  suspend();
+  startTally();
+  for (let i = 0; i < 4 * 60 * 60; i++) tick(s);
+  const tally = stopTally();
+  resume();
+
+  assert(carriedTotal(hand) > 0, 'they worked while nobody was watching');
+  assert((tally.counts['hand:gathered'] || 0) > 0, 'and it was counted for the summary');
+});
+
 // --- ducks --------------------------------------------------------------
 
 test('a duck swims and everything else does not', () => {
@@ -2480,7 +2652,7 @@ test('milking happens at the cow, not where it was when you tapped it', () => {
   // The cow wanders off before the farmer gets there.
   animal.x += 6;
   animal.y += 3;
-  followAnimals(s);
+  followTargets(s);
 
   assertEqual(task.x, animal.x, 'the task went with it');
   assertEqual(task.y, animal.y, 'on both axes');
@@ -2526,7 +2698,7 @@ test('tapping a ready animal twice queues one job, not two', () => {
 
   assert(addTask(s, taskForTile(s, animal.x, animal.y, 'auto')), 'first tap queues it');
   animal.x += 3;
-  followAnimals(s);
+  followTargets(s);
   assertEqual(addTask(s, taskForTile(s, animal.x, animal.y, 'auto')), null,
     'the second tap is refused, wherever it lands');
   assertEqual(s.tasks.length, 1, 'one milking, not two');
@@ -2538,7 +2710,7 @@ test('work aimed at a sold animal is dropped, not left pointing at nothing', () 
   addTask(s, taskForTile(s, animal.x, animal.y, 'auto'));
 
   s.animals = [];                                   // sold at the shop
-  followAnimals(s);
+  followTargets(s);
   assertEqual(s.tasks.length, 0, 'the milking went with it');
 });
 

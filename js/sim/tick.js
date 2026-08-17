@@ -8,9 +8,10 @@
 
 import { TICK_MS } from '../config.js';
 import { updateFarmer } from './farmer.js';
-import { followAnimals } from './tasks.js';
+import { followTargets } from './tasks.js';
 import { updateCrops } from './crops.js';
 import { updateAnimals } from './animals.js';
+import { updateHands } from './farmhand.js';
 import { updateWeeds } from './weeds.js';
 import { updateMushrooms } from './mushrooms.js';
 
@@ -21,10 +22,11 @@ export function tick(state) {
 
   // Before the farmer moves, so work aimed at an animal is pointing at where
   // that animal actually is this tick.
-  followAnimals(state);
+  followTargets(state);
   updateFarmer(state);
   updateCrops(state);
   updateAnimals(state);
+  updateHands(state);
   updateWeeds(state);
   updateMushrooms(state);
 }

@@ -232,6 +232,17 @@ Animals show a speech bubble now and again, from the Kenney emote sheet. What th
 
 Needs come first, because a thirsty animal telling you how happy it is would be useless: hungry *and* thirsty is an angry face, thirsty is droplets, hungry is a sad face, something to collect is a star. Only after all that does it say how it feels about you — a heart, music, a smile, or a bored "zzz" if it barely knows you. **The fonder an animal is, the more often it pipes up**, and a neglected one speaks up regardless.
 
+## The farmhand
+A hired NPC ($1,200 from the shop's Animals tab) who walks the farm **milking, shearing and picking up eggs** on their own.  Drawn as the same character without a hat, which is the sheet's own way of saying which one is the boss.
+
+They are deliberately **not a second farmer**.  They never clear, till, plant or build; they only gather what the animals have already produced.  A farm big enough to be worth having is a farm where tapping every hen individually stops being a pleasure — that's the problem they solve, and nothing else.
+
+- **What they gather goes into their own pockets**, not yours.  They carry **24 items**, and when they fill up they walk to the nearest barn and wait for you to come and take it off them.  Tap them and the farmer fetches it into your bag.
+- That's the point of the design: the help is a multiplier on your farm, not a replacement for visiting it.  You still have to turn up.
+- **They never destroy a surplus.**  A hand with room for one more and a cow holding four takes one and leaves three on the cow.
+- **One farmhand per barn** — somewhere to bring things to, and another reason to build.
+- An animal stands still for a farmhand exactly as it does for the farmer, rather than being chased around the field.
+
 ## Coming back
 The farm keeps running with the tab closed — and now also while the tab is merely *hidden*. Nothing runs in a backgrounded tab, so the simulation falls behind; it catches up quietly the moment you look at it again, rather than staying behind until the next reload. A real absence (ten minutes or more) still gets the welcome-back card; glancing at another tab doesn't.
 

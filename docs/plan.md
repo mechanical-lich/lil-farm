@@ -216,6 +216,25 @@ failing; and `forage()` banks the mushroom itself, so `clearBuildSite` records
 it for the report but must not bank it again. The first version double-counted
 and a test caught it.
 
+**The farmhand is a second mover, not a second farmer.** `sim/farmhand.js` runs
+its own tiny state machine (work timer -> full? -> target -> walk -> job) and
+touches nothing the farmer's task pipeline owns. It has no task queue: giving it
+one would have meant either sharing the player's queue, which would let hired
+help steal work the player asked for, or a second queue and a second UI.
+
+`takeFromAnimal(state, animal, max)` was split out of `collectFrom` so a hand
+can take only what it can carry. That was the one real correctness risk here —
+without a max, a hand with room for one and a cow holding four would have
+silently destroyed three.
+
+Two existing pieces generalised rather than being duplicated: `followAnimals`
+became `followTargets` (animalId *or* handId), and `beingTended` now counts a
+hand on its way, so animals hold still for either.
+
+Idle hands rescan for work only every `SCAN_INTERVAL` ticks. Same reasoning as
+the duck's water search: an unbounded per-tick scan is fine in play and ruinous
+across a seven-day catch-up.
+
 **The duck is what the `'swimmer'` seam was for.** `SWIMMERS` is now derived
 from the `swims` flag on the animal table rather than hand-listed, so adding
 another swimmer is a data change. Nothing else moved: gates still stop it,
@@ -449,7 +468,7 @@ at all while the farmer is on it, which reads as swung open.
   with a grass wedge in one corner (TL, TR, BR, BL in that order). Confirmed by sampling
   the PNG's pixels, not by eye. They complete the nine-slice at `(0,1)`–`(2,3)`.
 
-259 headless tests pass via `npm test`.
+270 headless tests pass via `npm test`.
 
 ## 0. Ground rules
 

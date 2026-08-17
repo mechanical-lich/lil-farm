@@ -12,6 +12,9 @@ import { CROPS, seedIdFor, isSeedId, cropFromSeedId } from './crops.js';
 import { ITEMS, addItem, removeItem, countItem, itemName } from './inventory.js';
 import { ANIMALS, animalDef, makeAnimal, SWIMMERS } from './animals.js';
 import { animalCapacity } from './build.js';
+import {
+  HAND_PRICE, HAND_CAPACITY, makeHand, handCount, handCapacity,
+} from './farmhand.js';
 
 /** How long one shop rotation lasts. Six hours: slower than a play session, so
  *  the selection feels like it changes between visits rather than under you. */
@@ -172,6 +175,43 @@ export function buyAnimal(state, type, x, y) {
 }
 
 /** Display rows for the livestock tab. */
+/**
+ * Hiring a farmhand. Reads like buying an animal on purpose — you pay, then you
+ * say where they should start — but it isn't livestock, so it gets its own
+ * row and its own capacity: one hand per barn.
+ */
+export function canHireHand(state) {
+  const capacity = handCapacity(state);
+  if (capacity === 0) return { ok: false, reason: 'build a barn first — they need somewhere to bring things' };
+  if (handCount(state) >= capacity) return { ok: false, reason: 'every barn already has a farmhand' };
+  if (state.money < HAND_PRICE) return { ok: false, reason: `a farmhand costs $${HAND_PRICE}` };
+  return { ok: true };
+}
+
+export function hireHand(state, x, y) {
+  const allowed = canHireHand(state);
+  if (!allowed.ok) return allowed;
+  if (!canPlaceAnimal(state, x, y)) return { ok: false, reason: "they can't stand there" };
+
+  state.money -= HAND_PRICE;
+  const hand = makeHand(state, x, y);
+  emitUnlessSuspended('money:changed', { delta: -HAND_PRICE });
+  emitUnlessSuspended('hand:hired', { id: hand.id });
+  return { ok: true, spent: HAND_PRICE, hand };
+}
+
+export function handRow(state) {
+  const capacity = handCapacity(state);
+  return {
+    name: 'Farmhand',
+    price: HAND_PRICE,
+    note: `milks, shears and picks up eggs · carries ${HAND_CAPACITY}`,
+    owned: handCount(state),
+    capacity,
+    affordable: canHireHand(state).ok,
+  };
+}
+
 export function animalList(state) {
   const capacity = animalCapacity(state);
   return Object.entries(ANIMALS).map(([type, def]) => ({
