@@ -98,8 +98,11 @@ function drawFarmerAt(ctx, sheets, state, pos, alpha) {
 
   const working = f.taskId !== null && f.work > 0;
   // A one-pixel bob while working reads as effort without needing animation
-  // frames, which this sheet doesn't have.
-  const bob = working && Math.floor(state.tickCount + alpha * 2) % 2 === 0 ? -1 : 0;
+  // frames, which this sheet doesn't have. Driven by the tick alone, not by
+  // alpha: a farmer standing still to chop produces no frames between ticks,
+  // so an alpha-driven bob would just stutter at whatever rate frames happened
+  // to be drawn.
+  const bob = working && state.tickCount % 2 === 0 ? -1 : 0;
 
   // The farmer sprite is a head-and-shoulders tile; nudge it up slightly so it
   // sits on the tile rather than dead-center in it.

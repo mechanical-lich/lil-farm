@@ -7,6 +7,17 @@ The main premise of the game is that you are managing a farm made of 16x16 sprit
 
 To simulate the "playing behind the scenes" I want to use a cookie or local storage to store when the last tick happened and the game state.  This autosave is going to be limited to every second to 10 seconds.  It'll depend on performance.   When the game first loads the save it'll check the last timestamp, and then tick the game to catchup to the current time.  
 
+## Drawing as little as possible
+This is an idle game: the simulation runs at 1Hz and the renderer interpolates between ticks.  Left to itself the browser will happily redraw at the display's refresh rate, which meant **~300 sprites sixty times a second — a hundred and twenty on a ProMotion phone — to show a world that changes once a second.**  That is what made the phone run hot.
+
+Three rules now:
+
+- **A frame is only drawn if it would look different.**  Something has to have changed (the tick, the camera, the thing being placed) or something has to be mid-move between two tiles.  An idle farm draws about once a second.
+- **Never more than 30 frames a second**, even when everything is moving.  The logic runs at 1Hz; thirty frames of interpolation is far more than enough for a walking farmer.
+- **The backing store is capped at 2x.**  The art is 16px pixel art drawn with smoothing off, so beyond 2x the extra pixels buy nothing visible and cost fill rate everywhere.
+
+Measured on an idle farm: **287 sprite draws a second, down from about 18,000.**  Busy, with animals wandering and the farmer working a queue: about 5,400 a second.
+
 ## Art
 Two Kenney tilesheets (CC0), both 16x16 tiles and sharing a palette so they mix freely:
 

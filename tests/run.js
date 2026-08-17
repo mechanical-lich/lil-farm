@@ -64,6 +64,7 @@ import {
   migrate, Autosaver, exportSave, validateSave, loadSave, listBackups, backupKey,
 } from '../js/engine/save.js';
 import { runCatchup, GameLoop, discardSkipped } from '../js/engine/loop.js';
+import { anythingMoving } from '../js/render/renderer.js';
 import {
   on, suspend, resume, startTally, stopTally, emitUnlessSuspended,
 } from '../js/engine/events.js';
@@ -3698,6 +3699,45 @@ test('a migrated farm can buy the land next door', () => {
   assert(canBuyPlot(live, px, py + 1).ok, 'the cell to the south is for sale');
   assert(!canBuyPlot(live, px + 1, py + 1).ok, 'the corner still needs a neighbour first');
   assert(buyPlot(live, px, py + 1).ok, 'and the purchase goes through');
+});
+
+// --- drawing only when there is something to draw -----------------------
+
+test('a still farm is recognised as still', () => {
+  // The whole saving depends on this: if it were wrong in this direction the
+  // game would draw 300 sprites sixty times a second to show nothing new.
+  const s = newGame(9950);
+  s.farmer.trail = [{ x: s.farmer.x, y: s.farmer.y }];
+  assert(!anythingMoving(s), 'nobody is going anywhere');
+});
+
+test('anything mid-move is spotted, or the game looks frozen', () => {
+  // A false negative here is far worse than a false positive: it would stop
+  // the frame that shows something actually moving.
+  const walking = newGame(9951);
+  walking.farmer.trail = [{ x: 10, y: 10 }, { x: 11, y: 10 }];
+  assert(anythingMoving(walking), 'the farmer walks several tiles a tick');
+
+  const withCow = newGame(9952);
+  withCow.farmer.trail = [{ x: withCow.farmer.x, y: withCow.farmer.y }];
+  withCow.animals = [{ id: 1, type: 'cow', x: 5, y: 5, px: 4, py: 5 }];
+  assert(anythingMoving(withCow), 'an animal between two tiles counts');
+
+  withCow.animals[0].px = 5;
+  assert(!anythingMoving(withCow), 'and stops counting once it has arrived');
+
+  const withHand = newGame(9953);
+  withHand.farmer.trail = [{ x: withHand.farmer.x, y: withHand.farmer.y }];
+  withHand.hands = [{ id: 1, x: 8, y: 8, px: 8, py: 7 }];
+  assert(anythingMoving(withHand), 'a farmhand on the move counts too');
+});
+
+test('a farm with no animals or hands at all is still handled', () => {
+  const s = newGame(9954);
+  s.farmer.trail = [{ x: s.farmer.x, y: s.farmer.y }];
+  delete s.animals;
+  delete s.hands;
+  assertEqual(anythingMoving(s), false, 'missing lists must not throw');
 });
 
 // --- the tick clock -----------------------------------------------------

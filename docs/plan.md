@@ -216,6 +216,26 @@ failing; and `forage()` banks the mushroom itself, so `clearBuildSite` records
 it for the report but must not bank it again. The first version double-counted
 and a test caught it.
 
+**Rendering is skipped unless the frame would look different.** `drawIfNeeded`
+compares a small frame signature — tick, camera translation, placement ghost,
+till anchor — and draws only if it changed or something is mid-move. Measured
+on the phone-sized viewport: an idle farm went from ~18,000 sprite draws a
+second (60Hz; twice that on a 120Hz phone) to 287.
+
+Three details that are easy to get wrong and were:
+
+- The camera part of the signature keys on `Math.round(camera.x * zoom * dpr)`,
+  the exact device pixel `draw()` translates to. Keying on the raw camera
+  position drops frames during a slow drag that really does move the picture.
+- The frame gate is `1000 / MAX_FPS - 2`. Frame times are whole milliseconds,
+  so a 60Hz display offers frames at 0, 17, 33 and an exact 33.33ms gate
+  rejects the one at 33 — giving 20fps when 30 was asked for.
+- The farmer's working bob was driven by `alpha`. Standing still to chop
+  produces no frames between ticks, so it has to be driven by the tick.
+
+`anythingMoving` is exported and tested because a false negative there freezes
+the picture, which is much worse than the wasted frame a false positive costs.
+
 **The farmhand is a second mover, not a second farmer.** `sim/farmhand.js` runs
 its own tiny state machine (work timer -> full? -> target -> walk -> job) and
 touches nothing the farmer's task pipeline owns. It has no task queue: giving it
@@ -468,7 +488,7 @@ at all while the farmer is on it, which reads as swung open.
   with a grass wedge in one corner (TL, TR, BR, BL in that order). Confirmed by sampling
   the PNG's pixels, not by eye. They complete the nine-slice at `(0,1)`–`(2,3)`.
 
-270 headless tests pass via `npm test`.
+273 headless tests pass via `npm test`.
 
 ## 0. Ground rules
 

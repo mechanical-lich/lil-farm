@@ -86,6 +86,24 @@ export const GEN = {
   clearingRadius: 4,   // tiles around the farmer spawn kept clear
 };
 
+// --- Rendering ----------------------------------------------------------
+//
+// The simulation runs at 1Hz and the renderer interpolates between ticks, so
+// there is nothing to gain from drawing at the display's refresh rate. Left
+// uncapped this drew ~300 sprites 60 times a second — 120 on a ProMotion
+// phone — to show a world that changes once a second, which is what made the
+// device run hot. 30 is more than enough to keep a walking farmer smooth.
+export const MAX_FPS = 30;
+
+/**
+ * Ceiling on the backing-store scale.
+ *
+ * The art is 16px pixel art drawn with smoothing off, so beyond 2x the extra
+ * pixels buy nothing you can see — but they cost fill rate everywhere. At 3x
+ * on a 393x852 phone that's 2.7 million pixels a frame instead of 1.2.
+ */
+export const MAX_DPR = 2;
+
 // --- Camera -------------------------------------------------------------
 // Lowered when the world became nine cells: at 2 you can see about a tenth of
 // one cell, which makes crossing the valley a lot of dragging.

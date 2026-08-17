@@ -126,10 +126,18 @@ async function boot() {
       autosaver.markDirty(Date.now());
     },
     (alpha) => {
-      renderer.draw(state, alpha, { ...tillSelection, pending: placement.pending });
-      hud.renderStatus();
-      autosaver.maybeSave(Date.now());
-      updateDebug(state, catchup, isNew);
+      const now = Date.now();
+      // Everything below the save is only worth doing on a frame that actually
+      // drew — the HUD and the debug line are DOM writes, and the point of
+      // skipping the frame is not to touch anything.
+      const drew = renderer.drawIfNeeded(
+        state, alpha, { ...tillSelection, pending: placement.pending }, now,
+      );
+      autosaver.maybeSave(now);
+      if (drew) {
+        hud.renderStatus();
+        updateDebug(state, catchup, isNew);
+      }
     },
     // A burst run with events suspended leaves the HUD showing whatever it
     // showed before; a full redraw puts the money and the bag back in step.
