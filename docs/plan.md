@@ -236,6 +236,30 @@ Three details that are easy to get wrong and were:
 `anythingMoving` is exported and tested because a false negative there freezes
 the picture, which is much worse than the wasted frame a false positive costs.
 
+**Farmhands claim their jobs, pass through each other, and rest in front of the
+barn.** All three came out of one bug report, and the middle one was much the
+worst:
+
+- Without claims every hand picks the *nearest* job, which is the same job.
+- Treating another hand as impassable **livelocked the crew**: a hand parked by
+  a barn sat on the only route, the hand behind cleared its path, re-planned the
+  identical route, and was blocked again — for ever. Measured on a real save it
+  spent 96% of its life re-planning a walk it never took. Bodies now only stop
+  a hand choosing somewhere to *stand*, never whether to move. A `STUCK_LIMIT`
+  drops any job held without moving for 30 ticks, as insurance against the next
+  one of these.
+- The obvious resting spot — the row above the footprint, first when scanning
+  top to bottom — is exactly where the roof is drawn, so hands waited there
+  invisible. They prefer the front, then the sides, and only the eaves last.
+
+Animals are searched with no distance limit (a short list, so it costs nothing);
+only the egg sweep is bounded, and at 14 tiles it left a third of a real farm
+unserviced, so it is 30 now.
+
+Measured on the reported save, one hour with the hands emptied: **120 items
+collected instead of 54**, eggs on the ground falling 40 -> 32 rather than
+climbing to 82.
+
 **The farmhand is a second mover, not a second farmer.** `sim/farmhand.js` runs
 its own tiny state machine (work timer -> full? -> target -> walk -> job) and
 touches nothing the farmer's task pipeline owns. It has no task queue: giving it
@@ -488,7 +512,7 @@ at all while the farmer is on it, which reads as swung open.
   with a grass wedge in one corner (TL, TR, BR, BL in that order). Confirmed by sampling
   the PNG's pixels, not by eye. They complete the nine-slice at `(0,1)`–`(2,3)`.
 
-273 headless tests pass via `npm test`.
+280 headless tests pass via `npm test`.
 
 ## 0. Ground rules
 

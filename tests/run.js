@@ -2216,22 +2216,6 @@ test('a farmhand carries only so much, and never destroys the surplus', () => {
   assertEqual(cow.stock, 3, 'and left the rest on the cow');
 });
 
-test('a full farmhand goes to the barn and waits there', () => {
-  const { s, hand } = farmWithHand(9905);
-  hand.carrying = { egg: HAND_CAPACITY };
-  hand.x = s.farmer.x + 10;
-  hand.y = s.farmer.y + 8;
-  const cow = makeAnimal(s, 'cow', hand.x + 1, hand.y);
-  cow.stock = 4;
-
-  for (let i = 0; i < 400; i++) tick(s);
-
-  const barn = s.buildings[0];
-  assert(besideBox(barn.x, barn.y, 3, 2, hand.x, hand.y),
-    `it should be waiting at the barn, not at ${hand.x},${hand.y}`);
-  assertEqual(cow.stock, 4, 'and it walked past the cow rather than working with full hands');
-});
-
 test('the farmer takes what the farmhand is holding', () => {
   const { s, hand } = farmWithHand(9906);
   hand.carrying = { egg: 12, milk: 5, wool: 2 };
@@ -2283,6 +2267,170 @@ test('an animal stands still for the farmhand too', () => {
   for (let i = 0; i < 40 && cow.stock > 0; i++) tick(s);
 
   assertEqual({ x: cow.x, y: cow.y }, held, 'it waited to be milked');
+});
+
+/** A farm with three barns and three hands, for the crowd behaviours. */
+function farmWithCrew(seed = 9920) {
+  const s = farmWithMaterials(seed);
+  s.money = 999999;
+  const fx = s.farmer.x;
+  const fy = s.farmer.y;
+  completeBuild(s, { buildKind: 'barn', x: fx - 1, y: fy - 6 });
+  completeBuild(s, { buildKind: 'barn', x: fx + 5, y: fy - 6 });
+  completeBuild(s, { buildKind: 'barn', x: fx - 8, y: fy - 6 });
+  const hands = [0, 1, 2].map((i) => hireHand(s, fx + i, fy + 1).hand);
+  return { s, hands };
+}
+
+test('two farmhands never claim the same job', () => {
+  // They all pick the nearest job, and left to themselves that is the *same*
+  // job: three converge on one cow, one milks it, two arrive to find it done.
+  const { s, hands } = farmWithCrew(9920);
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 6, s.farmer.y + 5);
+  cow.stock = 4;
+  cow.food = 1e9;
+  cow.water = 1e9;
+
+  for (let i = 0; i < 60; i++) {
+    tick(s);
+    const claims = hands.map((h) => h.target && h.target.kind + (h.target.id ?? '')).filter(Boolean);
+    assertEqual(new Set(claims).size, claims.length, `two hands chased the same job: ${claims}`);
+  }
+});
+
+test('farmhands do not settle on top of each other', () => {
+  // Passing through each other for a tick is fine and barely visible. What is
+  // not fine is a crew that comes to rest in a single stack, which is what the
+  // player actually sees.
+  const { s, hands } = farmWithCrew(9921);
+  for (const [dx, dy] of [[6, 5], [9, 2], [3, 7]]) {
+    const cow = makeAnimal(s, 'cow', s.farmer.x + dx, s.farmer.y + dy);
+    cow.stock = 2;
+    cow.food = 1e9;
+    cow.water = 1e9;
+  }
+
+  let overlapTicks = 0;
+  for (let i = 0; i < 400; i++) {
+    tick(s);
+    const tiles = hands.map((h) => `${h.x},${h.y}`);
+    if (new Set(tiles).size !== tiles.length) overlapTicks++;
+  }
+
+  const settled = hands.map((h) => `${h.x},${h.y}`);
+  assertEqual(new Set(settled).size, settled.length, `they came to rest stacked: ${settled}`);
+  assert(overlapTicks < 40, `overlapping on ${overlapTicks} of 400 ticks is more than passing`);
+});
+
+test('a farmhand is not stopped by one standing in its way', () => {
+  // The livelock: a hand parked by the barn sat on the only route to a job,
+  // the hand behind it cleared its path, re-planned the same route, and was
+  // blocked again — for ever. It spent 96% of its life re-planning a walk it
+  // never took, and the farm silently stopped being serviced.
+  const { s, hands } = farmWithCrew(9926);
+  const [walker, blocker, spare] = hands;
+
+  walker.x = s.farmer.x;
+  walker.y = s.farmer.y + 6;
+  blocker.x = s.farmer.x;
+  blocker.y = s.farmer.y + 5;
+  blocker.carrying = { egg: HAND_CAPACITY };          // full, so it stays put
+  spare.x = s.farmer.x - 10;
+  spare.y = s.farmer.y - 10;
+
+  const cow = makeAnimal(s, 'cow', s.farmer.x, s.farmer.y + 1);
+  cow.stock = 2;
+  cow.food = 1e9;
+  cow.water = 1e9;
+
+  for (let i = 0; i < 400; i++) tick(s);
+  assertEqual(cow.stock, 0, 'it got past and did the job');
+});
+
+test('a farmhand that cannot make progress gives up and looks elsewhere', () => {
+  // Insurance against the next livelock, whatever causes it: a job held
+  // without moving for long enough is dropped rather than held for a week.
+  const { s, hand } = farmWithHand(9927);
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 6, s.farmer.y);
+  cow.stock = 1;
+  cow.food = 1e9;
+  cow.water = 1e9;
+
+  for (let i = 0; i < 12; i++) tick(s);
+  assert(hand.target, 'it has taken the job on');
+
+  // Wall it in completely, so the job becomes unreachable mid-walk.
+  for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+    s.grid.setObject(hand.x + dx, hand.y + dy, OBJ.FENCE);
+  }
+  for (let i = 0; i < 150; i++) tick(s);
+  assertEqual(hand.target, null, 'it let the job go rather than holding it for ever');
+});
+
+test('idle farmhands wait by a barn rather than wherever they stopped', () => {
+  // They used to simply halt where the last job left them, which looked less
+  // like hired help on a break than like someone loitering in a hedge.
+  const { s, hands } = farmWithCrew(9922);
+  for (const hand of hands) { hand.x = s.farmer.x + 9; hand.y = s.farmer.y + 9; }
+
+  for (let i = 0; i < 300; i++) tick(s);
+
+  for (const hand of hands) {
+    const barn = s.buildings.find((b) => besideBox(b.x, b.y, 3, 2, hand.x, hand.y));
+    assert(barn, `a hand is loitering at ${hand.x},${hand.y}`);
+    // Not tucked under the roof, which is drawn three rows above the
+    // footprint — waiting there hides them behind the barn entirely.
+    assert(hand.y >= barn.y, `a hand is waiting under the eaves at ${hand.x},${hand.y}`);
+  }
+  const tiles = hands.map((h) => `${h.x},${h.y}`);
+  assertEqual(new Set(tiles).size, 3, 'and each has its own spot');
+});
+
+test('a crew shares the work out instead of following each other around', () => {
+  const { s, hands } = farmWithCrew(9923);
+  for (const [dx, dy] of [[6, 5], [9, 2], [3, 7]]) {
+    const cow = makeAnimal(s, 'cow', s.farmer.x + dx, s.farmer.y + dy);
+    cow.stock = 2;
+    cow.food = 1e9;
+    cow.water = 1e9;
+  }
+
+  for (let i = 0; i < 200; i++) tick(s);
+
+  assertEqual(s.animals.every((a) => a.stock === 0), true, 'every cow was milked');
+  for (const hand of hands) {
+    assert(carriedTotal(hand) > 0, 'every hand did some of it');
+  }
+});
+
+test('a full farmhand still goes home when there is work about', () => {
+  // One hand, so nobody else can do the job and muddy the point.
+  const { s, hand } = farmWithHand(9924);
+  hand.carrying = { egg: HAND_CAPACITY };
+  hand.x = s.farmer.x + 9;
+  hand.y = s.farmer.y + 9;
+  const cow = makeAnimal(s, 'cow', hand.x + 1, hand.y);
+  cow.stock = 4;
+
+  for (let i = 0; i < 300; i++) tick(s);
+
+  assert(s.buildings.some((b) => besideBox(b.x, b.y, 3, 2, hand.x, hand.y)),
+    'it went to a barn');
+  assertEqual(cow.stock, 4, 'and walked past the cow rather than working with full hands');
+});
+
+test('a farmhand crosses the farm for work rather than only what is underfoot', () => {
+  // A real farm is wider than any sensible sight radius. Animals are a short
+  // list, so there is no reason to cap how far a hand will walk for one — and
+  // capping it left a third of a real farm never serviced.
+  const { s, hand } = farmWithHand(9925);
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 18, s.farmer.y + 12);
+  cow.stock = 2;
+  cow.food = 1e9;
+  cow.water = 1e9;
+
+  for (let i = 0; i < 900; i++) tick(s);
+  assertEqual(cow.stock, 0, 'it walked the whole way and milked her');
 });
 
 test('farmhands survive a save round trip, cargo and all', () => {

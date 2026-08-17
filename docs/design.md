@@ -252,6 +252,9 @@ They are deliberately **not a second farmer**.  They never clear, till, plant or
 - That's the point of the design: the help is a multiplier on your farm, not a replacement for visiting it.  You still have to turn up.
 - **They never destroy a surplus.**  A hand with room for one more and a cow holding four takes one and leaves three on the cow.
 - **One farmhand per barn** — somewhere to bring things to, and another reason to build.
+- **A crew divides the work.**  A job belongs to whoever claimed it first, so three hands don't all converge on one cow and two arrive to find it done.
+- They wait **in front of** their barn, each on its own tile.  Not under the eaves: a barn's roof is drawn three rows above its footprint, so a hand waiting there is hidden behind it entirely.
+- They walk **through** each other rather than round — a moment's overlap in passing is invisible, and refusing to pass meant a hand parked by the barn could block the only route to a job for ever.
 - An animal stands still for a farmhand exactly as it does for the farmer, rather than being chased around the field.
 
 ## Coming back

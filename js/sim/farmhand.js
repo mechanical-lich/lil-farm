@@ -31,8 +31,15 @@ export const HAND_CAPACITY = 24;
 /** Ticks spent on one job — the same effort the farmer spends collecting. */
 export const HAND_WORK = 6;
 
-/** How far they will look for something to do. */
-const SEARCH_RADIUS = 14;
+/**
+ * How far they will look for a dropped egg.
+ *
+ * Generous, because it turned out not to be: at 14 tiles a hand waiting by its
+ * barn couldn't see a third of a real farm, so eggs piled up at the far end
+ * while the crew stood around. Animals aren't limited at all — they're a short
+ * list, so checking every one of them costs nothing.
+ */
+const EGG_RADIUS = 30;
 
 /**
  * How often an idle hand looks for work.
@@ -42,6 +49,9 @@ const SEARCH_RADIUS = 14;
  * it without scanning again, so this only costs anything while they're idle.
  */
 const SCAN_INTERVAL = 20;
+
+/** Ticks a hand may hold a job without getting any closer before giving up. */
+const STUCK_LIMIT = 30;
 
 export function makeHand(state, x, y) {
   const hand = {
@@ -109,42 +119,55 @@ function stepHand(state, hand) {
   if (hand.work > 0) {
     hand.work--;
     if (hand.work === 0) finishJob(state, hand);
+    hand.stuckFor = 0;
     return;
   }
 
-  // Full: take it to a barn and wait there for someone to collect it.
-  if (isFull(hand)) {
-    if (!walkTo(state, hand, restingPlace(state, hand))) hand.path = [];
-    else step(state, hand);
-    return;
+  // Belt and braces: whatever the reason, a hand that has held a job without
+  // moving for this long has misunderstood something. Drop it and look again,
+  // rather than standing there for the rest of the week.
+  hand.stuckFor = (hand.x === hand.wasAt?.x && hand.y === hand.wasAt?.y)
+    ? (hand.stuckFor || 0) + 1
+    : 0;
+  hand.wasAt = { x: hand.x, y: hand.y };
+  if (hand.target && hand.stuckFor > STUCK_LIMIT) {
+    hand.target = null;
+    hand.path = [];
+    hand.scannedAt = null;
+    hand.stuckFor = 0;
   }
 
   if (hand.target && !stillWorthDoing(state, hand.target, hand)) hand.target = null;
 
   if (!hand.target) {
-    if (hand.scannedAt != null && state.tickCount - hand.scannedAt < SCAN_INTERVAL) return;
-    hand.target = findWork(state, hand);
-    hand.scannedAt = state.tickCount;
-    if (!hand.target) return;
-    hand.path = [];
+    const rested = hand.scannedAt != null && state.tickCount - hand.scannedAt < SCAN_INTERVAL;
+    if (!rested) {
+      hand.target = findWork(state, hand);
+      hand.scannedAt = state.tickCount;
+      if (hand.target) { hand.path = []; hand.restSpot = null; }
+    }
   }
 
-  // In position? Start the job. Otherwise walk.
-  if (inReach(hand, hand.target)) {
-    hand.work = HAND_WORK;
+  if (hand.target) {
+    if (inReach(hand, hand.target)) { hand.work = HAND_WORK; return; }
+    if (hand.path.length === 0 && !walkTo(state, hand, hand.target)) {
+      hand.target = null;                 // can't get there; look for something else
+      return;
+    }
+    step(state, hand);
     return;
   }
-  if (hand.path.length === 0 && !walkTo(state, hand, hand.target)) {
-    hand.target = null;                 // can't get there; look for something else
-    return;
-  }
-  step(state, hand);
+
+  // Nothing to do, or nowhere to put it: wait by a barn.
+  rest(state, hand);
 }
 
 /** An egg is picked up from its own tile; an animal is worked on from beside. */
 function inReach(hand, target) {
-  if (target.kind === 'egg') return hand.x === target.x && hand.y === target.y;
-  return Math.abs(hand.x - target.x) + Math.abs(hand.y - target.y) <= 1;
+  if (target.kind === 'animal') {
+    return Math.abs(hand.x - target.x) + Math.abs(hand.y - target.y) <= 1;
+  }
+  return hand.x === target.x && hand.y === target.y;
 }
 
 function stillWorthDoing(state, target, hand) {
@@ -163,6 +186,10 @@ function stillWorthDoing(state, target, hand) {
 function finishJob(state, hand) {
   const target = hand.target;
   hand.target = null;
+  // Look again straight away rather than waiting out the scan interval: a hand
+  // that has just finished is standing in the middle of the work, and pausing
+  // there means starting the walk home only to turn round again.
+  hand.scannedAt = null;
   if (!target) return;
 
   if (target.kind === 'egg') {
@@ -192,23 +219,61 @@ function give(hand, items) {
 }
 
 /**
- * The nearest job worth doing.
+ * Is another hand already on its way to this?
+ *
+ * Without this every hand picks the nearest job, which is the *same* job:
+ * three of them converge on one cow, one milks it and the other two arrive to
+ * find it done. A job belongs to whoever claimed it first.
+ */
+function claimedByAnother(state, hand, kind, id, x, y) {
+  return (state.hands || []).some((other) => {
+    if (other === hand || !other.target || other.target.kind !== kind) return false;
+    return kind === 'animal'
+      ? other.target.id === id
+      : other.target.x === x && other.target.y === y;
+  });
+}
+
+/**
+ * Is another hand physically standing here right now?
+ *
+ * Used to choose somewhere to *stop*, never to decide whether to move. Two
+ * hands sharing a tile for a moment in passing is barely visible; refusing to
+ * walk through each other is not, because the one in the way is often standing
+ * still by a barn and will never move — which livelocked the whole crew.
+ */
+function standingHere(state, hand, x, y) {
+  return (state.hands || []).some((other) => other !== hand && other.x === x && other.y === y);
+}
+
+/** Has another hand called this tile as its waiting spot? */
+function spotClaimed(state, hand, x, y) {
+  return (state.hands || []).some((other) => other !== hand
+    && other.restSpot && other.restSpot.x === x && other.restSpot.y === y);
+}
+
+/**
+ * The nearest job worth doing that nobody else has claimed.
  *
  * Animals first, then eggs: an animal that's full has stopped producing, so
  * emptying it is worth more than tidying up something already on the ground.
  */
 function findWork(state, hand) {
+  if (handRoom(hand) <= 0) return null;          // full: nothing is worth doing
+
   let best = null;
   for (const animal of state.animals || []) {
     if (!isReady(animal)) continue;
+    if (claimedByAnother(state, hand, 'animal', animal.id)) continue;
     const d = Math.abs(animal.x - hand.x) + Math.abs(animal.y - hand.y);
-    if (d > SEARCH_RADIUS) continue;
-    if (!best || d < best.d) best = { d, target: { kind: 'animal', id: animal.id, x: animal.x, y: animal.y } };
+    if (!best || d < best.d) {
+      best = { d, target: { kind: 'animal', id: animal.id, x: animal.x, y: animal.y } };
+    }
   }
   if (best) return best.target;
 
   // Eggs, searched outward so the first one found is the closest.
-  for (let r = 1; r <= SEARCH_RADIUS; r++) {
+  for (let r = 1; r <= EGG_RADIUS; r++) {
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
@@ -216,6 +281,7 @@ function findWork(state, hand) {
         const y = hand.y + dy;
         if (state.grid.getObject(x, y) !== OBJ.EGG) continue;
         if (!state.grid.isWalkable(x, y, 'farmer')) continue;
+        if (claimedByAnother(state, hand, 'egg', null, x, y)) continue;
         return { kind: 'egg', x, y };
       }
     }
@@ -223,44 +289,104 @@ function findWork(state, hand) {
   return null;
 }
 
-/** Where a full hand waits: beside the nearest barn, or where they stand. */
-function restingPlace(state, hand) {
-  const barns = (state.buildings || []).filter((b) => b.type === 'barn');
-  if (barns.length === 0) return { kind: 'rest', x: hand.x, y: hand.y };
+/**
+ * Waiting by the barn between jobs.
+ *
+ * They used to simply stop wherever the last job left them, which looked less
+ * like hired help taking a break than like someone loitering in a hedge. Each
+ * one claims its own spot around the barn, so a crew of them lines up instead
+ * of piling onto a single tile.
+ */
+function rest(state, hand) {
+  // Sharing a tile with someone is reason enough to move, arrived or not.
+  if (standingHere(state, hand, hand.x, hand.y)) hand.restSpot = null;
+  if (hand.restSpot && spotClaimed(state, hand, hand.restSpot.x, hand.restSpot.y)) {
+    hand.restSpot = null;
+  }
+  if (!hand.restSpot) {
+    hand.restSpot = pickRestSpot(state, hand);
+    hand.path = [];
+  }
 
-  let best = barns[0];
+  const spot = hand.restSpot;
+  if (!spot) return;                             // no barn, or nowhere free
+  if (hand.x === spot.x && hand.y === spot.y) { hand.path = []; return; }
+
+  if (hand.path.length === 0
+      && !walkTo(state, hand, { kind: 'spot', x: spot.x, y: spot.y })) {
+    hand.restSpot = null;
+    return;
+  }
+  step(state, hand);
+}
+
+/**
+ * A free tile against the nearest barn.
+ *
+ * Order matters, and not for tidiness: a barn's roof is drawn three rows above
+ * its footprint, so the row directly *above* it — the obvious first choice
+ * when scanning top to bottom — puts the hand behind the roof where nobody can
+ * see them. They looked like they were hiding. In front of the barn first,
+ * then the sides, and only under the eaves if there is nowhere else.
+ */
+function pickRestSpot(state, hand) {
+  const barns = (state.buildings || []).filter((b) => b.type === 'barn');
+  if (barns.length === 0) return null;
+
+  let barn = barns[0];
   let bestD = Infinity;
   for (const b of barns) {
     const d = Math.abs(b.x - hand.x) + Math.abs(b.y - hand.y);
-    if (d < bestD) { bestD = d; best = b; }
+    if (d < bestD) { bestD = d; barn = b; }
   }
-  const size = buildDef('barn').size;
-  return {
-    kind: 'rest', x: best.x, y: best.y, w: size[0], h: size[1],
-    arrived: besideBox(best.x, best.y, size[0], size[1], hand.x, hand.y),
-  };
+
+  const [w, h] = buildDef('barn').size;
+  const inFront = [];
+  const sides = [];
+  const behind = [];
+  for (let y = barn.y - 1; y <= barn.y + h; y++) {
+    for (let x = barn.x - 1; x <= barn.x + w; x++) {
+      if (!besideBox(barn.x, barn.y, w, h, x, y)) continue;
+      if (y >= barn.y + h) inFront.push({ x, y });
+      else if (y < barn.y) behind.push({ x, y });
+      else sides.push({ x, y });
+    }
+  }
+
+  for (const spot of [...inFront, ...sides, ...behind]) {
+    if (!state.grid.isWalkable(spot.x, spot.y, 'farmer')) continue;
+    if (spotClaimed(state, hand, spot.x, spot.y)) continue;
+    if (standingHere(state, hand, spot.x, spot.y)) continue;
+    return spot;
+  }
+  return null;
 }
 
 function walkTo(state, hand, target) {
   if (!target) return false;
-  if (target.kind === 'rest' && target.arrived) return true;
-
   const path = findPath(state.grid, { x: hand.x, y: hand.y }, { x: target.x, y: target.y }, {
     actor: 'farmer',
-    adjacent: target.kind !== 'egg',
-    w: target.w || 1,
-    h: target.h || 1,
+    adjacent: target.kind === 'animal',
   });
   if (!path) return false;
   hand.path = path;
   return true;
 }
 
-/** One tile a tick — deliberately slower than the farmer, who has a job to do. */
+/**
+ * One tile a tick — deliberately slower than the farmer, who has a job to do.
+ *
+ * Two hands never share a tile: rather than walking through each other they
+ * wait and re-plan, which is what stops a crew stacking into one sprite.
+ */
 function step(state, hand) {
-  const next = hand.path.shift();
+  const next = hand.path[0];
   if (!next) return;
-  if (!state.grid.isWalkable(next.x, next.y, 'farmer')) { hand.path = []; return; }
+  if (!state.grid.isWalkable(next.x, next.y, 'farmer')) {
+    hand.path = [];        // the world changed under the route; re-plan
+    return;
+  }
+  hand.path.shift();
   if (next.x !== hand.x) hand.facing = next.x > hand.x ? 'right' : 'left';
   hand.x = next.x;
   hand.y = next.y;
