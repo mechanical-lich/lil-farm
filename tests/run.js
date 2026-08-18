@@ -29,14 +29,14 @@ import {
 } from '../js/sim/tasks.js';
 import {
   CROPS, SOIL_DRY_TICKS, plantCrop, waterTile, harvestCrop,
-  cropAt, isRipe, isStalled, spoilRemaining, SPOIL_TICKS, updateCrops,
+  cropAt, isRipe, isStalled, spoilRemaining, SPOIL_TICKS, updateCrops, seedIdFor,
 } from '../js/sim/crops.js';
 import {
-  ROTATION_TICKS, STAPLE_SEEDS, ROTATING_COUNT, ROTATING_TIERS, stockedSeedCrops, buyList,
+  ROTATION_TICKS, STAPLE_SEEDS, ROTATING_COUNT, ROTATING_TIERS, stockedSeedCrops, buyList, sellList,
   buy, sell, sellAll, buyAnimal, canBuyAnimal, canPlaceAnimal, MATERIALS,
-  hireHand, canHireHand, handRow,
+  hireHand, canHireHand, handRow, sellGroups, groupValue,
 } from '../js/sim/shop.js';
-import { ITEMS, countItem } from '../js/sim/inventory.js';
+import { ITEMS, ITEM_GROUPS, itemGroup, countItem } from '../js/sim/inventory.js';
 import {
   HAND_PRICE, HAND_CAPACITY, carriedTotal, isFull, handCount, handCapacity,
 } from '../js/sim/farmhand.js';
@@ -2144,6 +2144,68 @@ test('wool takes longer than milk and is worth more when it comes', () => {
 
   assert(isReady(cow.animal), 'the cow is ready first');
   assert(!isReady(sheep.animal), 'the sheep is still growing its fleece');
+});
+
+// --- the sell list, grouped ---------------------------------------------
+
+test('everything sellable belongs to a known group', () => {
+  // A new item added without a group would silently land in Materials, which
+  // is the sort of thing nobody notices until a cow's milk turns up there.
+  const known = new Set(ITEM_GROUPS.map((g) => g.id));
+  for (const [id, def] of Object.entries(ITEMS)) {
+    if (!def.sell) continue;
+    assert(def.group, `${id} has no group`);
+    assert(known.has(def.group), `${id} is in an unknown group: ${def.group}`);
+  }
+  // Seeds are generated per crop rather than listed, so they're recognised by
+  // shape. If that ever stops working they'd scatter through Materials.
+  for (const crop of Object.keys(CROPS)) {
+    assertEqual(itemGroup(seedIdFor(crop)), 'seed', `${crop} seeds`);
+  }
+});
+
+test('the sell list comes back under headings, in a fixed order', () => {
+  const s = farmWithMaterials(9980);
+  s.inventory = {
+    carrot: 4, wool: 2, mushroom_morel: 1, wood: 10, carrot_seed: 3,
+  };
+
+  const groups = sellGroups(s);
+  assertEqual(groups.map((g) => g.id), ['crop', 'produce', 'foraged', 'material', 'seed'],
+    'the order is the one declared, not whatever the bag happens to hold');
+  assertEqual(groups.map((g) => g.rows.length), [1, 1, 1, 1, 1], 'one of each');
+});
+
+test('a group vanishes once the last of it is sold', () => {
+  const s = farmWithMaterials(9981);
+  s.inventory = { carrot: 4, wool: 2 };
+  assertEqual(sellGroups(s).map((g) => g.id), ['crop', 'produce'], 'both present');
+
+  sellAll(s, 'wool');
+  assertEqual(sellGroups(s).map((g) => g.id), ['crop'], 'and the empty heading goes with it');
+
+  sellAll(s, 'carrot');
+  assertEqual(sellGroups(s), [], 'an empty bag has no headings at all');
+});
+
+test('a heading is worth what the whole group is worth', () => {
+  const s = farmWithMaterials(9982);
+  s.inventory = { carrot: 3, cabbage: 2 };            // 3x10 + 2x40
+
+  const [crops] = sellGroups(s);
+  assertEqual(groupValue(crops), 3 * ITEMS.carrot.sell + 2 * ITEMS.cabbage.sell,
+    'the number beside the heading is the money in that group');
+});
+
+test('grouping does not change what is sellable', () => {
+  // The flat list is still the source of truth; grouping only arranges it.
+  const s = farmWithMaterials(9983);
+  s.inventory = {
+    carrot: 4, wool: 2, mushroom_bolete: 3, stone: 7, wheat_seed: 2, feed: 1,
+  };
+  const flat = sellList(s).map((r) => r.id).sort();
+  const grouped = sellGroups(s).flatMap((g) => g.rows.map((r) => r.id)).sort();
+  assertEqual(grouped, flat, 'every row appears exactly once, under exactly one heading');
 });
 
 // --- decorations --------------------------------------------------------

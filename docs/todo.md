@@ -1,2 +1,1 @@
 - Fun animations.  Farmer bounces as he walks, trees wiggle as they are chopped, etc.
-- Organize sell menu by item type. Group crops, products, seeds, etc together.  

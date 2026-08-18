@@ -9,7 +9,9 @@
 import { makeRng } from '../engine/rng.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 import { CROPS, seedIdFor, isSeedId, cropFromSeedId } from './crops.js';
-import { ITEMS, addItem, removeItem, countItem, itemName } from './inventory.js';
+import {
+  ITEMS, ITEM_GROUPS, addItem, removeItem, countItem, itemName, itemGroup,
+} from './inventory.js';
 import { ANIMALS, animalDef, makeAnimal, SWIMMERS } from './animals.js';
 import { animalCapacity } from './build.js';
 import {
@@ -116,8 +118,29 @@ export function buyList(state) {
 export function sellList(state) {
   return Object.entries(state.inventory)
     .filter(([id, qty]) => qty > 0 && sellPrice(id) > 0)
-    .map(([id, qty]) => ({ id, name: itemName(id), qty, price: sellPrice(id) }))
+    .map(([id, qty]) => ({
+      id, name: itemName(id), qty, price: sellPrice(id), group: itemGroup(id),
+    }))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * The same list under headings, empty groups dropped.
+ *
+ * Sorted by group first and by name within it, so the order is stable as the
+ * bag fills and empties — a row never jumps to a different place in the list
+ * just because you sold the thing above it.
+ */
+export function sellGroups(state) {
+  const rows = sellList(state);
+  return ITEM_GROUPS
+    .map((group) => ({ ...group, rows: rows.filter((r) => r.group === group.id) }))
+    .filter((group) => group.rows.length > 0);
+}
+
+/** What the whole group would fetch, for the heading. */
+export function groupValue(group) {
+  return group.rows.reduce((sum, r) => sum + r.price * r.qty, 0);
 }
 
 function growLabel(ticks) {

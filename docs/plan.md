@@ -249,6 +249,19 @@ outlives its gesture would tick for the rest of the session.
 claimed job, `px`/`py`. Leaving any of it makes the thing slide back across the
 map from where it was picked up, or walk on to a target it can no longer reach.
 
+**Items carry their own `group`,** rather than the sell list working it out
+from crop/animal/mushroom tables — which would mean `inventory.js` importing
+the three modules that already import it. Seeds are the exception and are
+matched by their `_seed` shape, since their ids are generated per crop. A test
+asserts every sellable item has a known group, because a missing one silently
+falls into Materials and nobody notices until milk turns up there.
+
+**Panel lists keep their scroll position, but only the live one.** The shop
+re-renders once a second while open, and the first version restored the
+*remembered* position on every render — which yanked the list back to the top a
+second after any scroll. Now a render keeps wherever the list is; only opening
+the panel or switching tabs restores a saved position.
+
 **Placement specs can carry an `after` hook**, run once a confirm succeeds.
 Decorations use it to reopen the shop, which is the difference between two taps
 per bush and five. It deliberately does not fire on cancel or on a refused
@@ -541,7 +554,7 @@ at all while the farmer is on it, which reads as swung open.
   with a grass wedge in one corner (TL, TR, BR, BL in that order). Confirmed by sampling
   the PNG's pixels, not by eye. They complete the nine-slice at `(0,1)`–`(2,3)`.
 
-289 headless tests pass via `npm test`.
+294 headless tests pass via `npm test`.
 
 ## 0. Ground rules
 

@@ -265,6 +265,21 @@ body {
   color: #10240c;
 }
 
+/* A heading inside a list. Not a row: no hover, no controls, and it carries
+   what the whole group is worth so the useful number is next to the label. */
+.panel li.sell-head {
+  justify-content: space-between;
+  padding: 10px 4px 4px;
+  border-bottom: 2px solid var(--panel-edge);
+  font-size: 13px;
+  font-weight: 700;
+  color: #7a604a;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.panel li.sell-head b { color: var(--ink); }
+
 /* --- the mushroom journal ---------------------------------------------- */
 
 .panel li.journal {

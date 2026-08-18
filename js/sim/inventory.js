@@ -4,29 +4,56 @@ import { emitUnlessSuspended } from '../engine/events.js';
 
 // Sell prices are tuned against CROPS.seedCost and growTicks — see the balance
 // note in crops.js. Changing one without the other will break the curve.
+/**
+ * How the sell list is broken up, in the order the headings appear.
+ *
+ * The list started as four things in alphabetical order and is now twenty-odd,
+ * which is long enough that "where is the milk" became a real question. The
+ * grouping is by where a thing *came from*, because that's how a player thinks
+ * about their own bag — what I grew, what the animals gave me, what I found.
+ */
+export const ITEM_GROUPS = [
+  { id: 'crop', name: 'Crops' },
+  { id: 'produce', name: 'From the animals' },
+  { id: 'foraged', name: 'Foraged' },
+  { id: 'material', name: 'Materials' },
+  { id: 'seed', name: 'Seeds' },
+];
+
 export const ITEMS = {
-  wood: { name: 'Wood', sell: 4 },
-  stone: { name: 'Stone', sell: 3 },
-  fiber: { name: 'Fiber', sell: 2 },
+  wood: { name: 'Wood', sell: 4, group: 'material' },
+  stone: { name: 'Stone', sell: 3, group: 'material' },
+  fiber: { name: 'Fiber', sell: 2, group: 'material' },
   // Bought animal feed. Sells for far less than it costs, so stocking up is a
   // convenience rather than a way to store value.
-  feed: { name: 'Feed', sell: 5 },
-  carrot: { name: 'Carrot', sell: 10 },
-  wheat: { name: 'Wheat', sell: 12 },
-  corn: { name: 'Corn', sell: 16 },
-  tomato: { name: 'Tomato', sell: 20 },
-  cabbage: { name: 'Cabbage', sell: 40 },
-  eggplant: { name: 'Eggplant', sell: 45 },
-  egg: { name: 'Egg', sell: 25 },
-  milk: { name: 'Milk', sell: 60 },
-  wool: { name: 'Wool', sell: 100 },
+  feed: { name: 'Feed', sell: 5, group: 'material' },
+  carrot: { name: 'Carrot', sell: 10, group: 'crop' },
+  wheat: { name: 'Wheat', sell: 12, group: 'crop' },
+  corn: { name: 'Corn', sell: 16, group: 'crop' },
+  tomato: { name: 'Tomato', sell: 20, group: 'crop' },
+  cabbage: { name: 'Cabbage', sell: 40, group: 'crop' },
+  eggplant: { name: 'Eggplant', sell: 45, group: 'crop' },
+  egg: { name: 'Egg', sell: 25, group: 'produce' },
+  milk: { name: 'Milk', sell: 60, group: 'produce' },
+  wool: { name: 'Wool', sell: 100, group: 'produce' },
   // Foraged. Four kinds rather than sixteen: the journal remembers every
   // colour, the bag only needs to know what it's worth.
-  mushroom_button: { name: 'Button mushrooms', sell: 12 },
-  mushroom_toadstool: { name: 'Toadstools', sell: 28 },
-  mushroom_bolete: { name: 'Boletes', sell: 65 },
-  mushroom_morel: { name: 'Morels', sell: 150 },
+  mushroom_button: { name: 'Button mushrooms', sell: 12, group: 'foraged' },
+  mushroom_toadstool: { name: 'Toadstools', sell: 28, group: 'foraged' },
+  mushroom_bolete: { name: 'Boletes', sell: 65, group: 'foraged' },
+  mushroom_morel: { name: 'Morels', sell: 150, group: 'foraged' },
 };
+
+/**
+ * Which heading an item belongs under.
+ *
+ * Seeds are the odd ones out: their ids are generated per crop rather than
+ * listed above, so they're recognised by shape instead of by lookup.
+ */
+export function itemGroup(id) {
+  if (id.endsWith('_seed')) return 'seed';
+  return ITEMS[id]?.group || 'material';
+}
 
 export function itemName(id) {
   if (ITEMS[id]) return ITEMS[id].name;

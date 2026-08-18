@@ -91,6 +91,7 @@ There is a shop where you can sell items in your inventory and buy new items suc
 - Buy, animals and sell are tabs of one panel, styled as tabs sitting on a shared baseline with the selected one filled green, matching how the tool buttons show selection.  Quantities are coarse (1 / 5 / all) rather than a stepper, because tapping "+" ten times on a phone is miserable.
 - The seed selection **rotates every 6 hours**.  Carrot and wheat are always stocked so the player can never be stranded with nothing to plant; two of the slower crops rotate alongside them.
 - The rotation is derived from the game clock rather than stored, so coming back after days away shows the right stock with no bookkeeping to replay.
+- **The sell list is grouped under headings** — crops, what the animals gave you, foraged, materials, seeds — with what each group is worth beside its name.  It started as four things in alphabetical order and is now twenty-odd, which is long enough that "where's the milk?" became a real question.  The grouping is by **where a thing came from**, because that's how you think about your own bag.  A heading disappears with the last of its contents.
 - Seeds resell at half price — enough to undo a misbuy, never a money loop.
 - **Balance shape:** short crops pay better per minute, long crops pay far better per planting.  A 4-minute carrot is great while you're watching and wastes eleven hours while you're not, so the slow crops have to be the obvious choice for an overnight field.
 

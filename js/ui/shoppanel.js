@@ -5,7 +5,7 @@
 
 import { on, emit } from '../engine/events.js';
 import {
-  buyList, sellList, buy, sell, sellAll, ticksUntilRotation,
+  buyList, sellList, sellGroups, groupValue, buy, sell, sellAll, ticksUntilRotation,
   animalList, canBuyAnimal, handRow, canHireHand,
 } from '../sim/shop.js';
 import { animalCapacity } from '../sim/build.js';
@@ -31,6 +31,11 @@ export function initShopPanel(state, {
   // without this a player who scrolls to the bottom of a long list and buys
   // something is dumped back at the top of it.
   const scrolledTo = {};
+  // Set when the *remembered* position should win — opening the panel, or
+  // switching tabs. Every other render keeps wherever the list is now, because
+  // the panel re-renders once a second and forcing a saved value on those
+  // would yank the list out from under a finger mid-scroll.
+  let restoreScroll = false;
   // Which land cell is armed for a second tap. A cell costs thousands, so it
   // doesn't go through on a stray thumb.
   let armedCell = null;
@@ -44,6 +49,7 @@ export function initShopPanel(state, {
       // The panels are full-width sheets stacked at the same edge, so only one
       // may be up at a time or they hide each other.
       emit('panel:open', 'shop');
+      restoreScroll = true;
       render();
     } else {
       emit('panel:close', 'shop');
@@ -61,6 +67,7 @@ export function initShopPanel(state, {
     if (!btn) return;
     scrolledTo[tab] = list.scrollTop;      // keep this one's place for later
     tab = btn.dataset.tab;
+    restoreScroll = true;
     render();
   });
 
@@ -148,12 +155,14 @@ export function initShopPanel(state, {
       btn.classList.toggle('on', btn.dataset.tab === tab);
     }
 
+    const here = list.scrollTop;
     list.innerHTML = tab === 'buy' ? renderBuy()
       : tab === 'animals' ? renderAnimals()
         : tab === 'decor' ? renderDecor()
           : tab === 'land' ? renderLand()
             : renderSell();
-    list.scrollTop = scrolledTo[tab] || 0;
+    list.scrollTop = restoreScroll ? (scrolledTo[tab] || 0) : here;
+    restoreScroll = false;
 
     if (tab === 'buy') {
       note.textContent = `New seeds in ${formatDuration(ticksUntilRotation(state))} · $${state.money}`;
@@ -260,17 +269,23 @@ export function initShopPanel(state, {
   }
 
   function renderSell() {
-    const rows = sellList(state);
-    if (rows.length === 0) {
+    const groups = sellGroups(state);
+    if (groups.length === 0) {
       return '<li class="empty">Nothing to sell yet. Go harvest something!</li>';
     }
-    return rows.map((row) => `
-      <li>
-        <span class="shop-name">${esc(row.name)}<em>have ${row.qty}</em></span>
-        <span class="shop-price">$${row.price} ea</span>
-        <button data-act="sell" data-id="${row.id}" data-qty="1">1</button>
-        <button data-act="sell" data-id="${row.id}" data-qty="all">All</button>
-      </li>`).join('');
+
+    return groups.map((group) => `
+      <li class="sell-head">
+        <span>${esc(group.name)}</span>
+        <b>$${groupValue(group)}</b>
+      </li>
+      ${group.rows.map((row) => `
+        <li>
+          <span class="shop-name">${esc(row.name)}<em>have ${row.qty}</em></span>
+          <span class="shop-price">$${row.price} ea</span>
+          <button data-act="sell" data-id="${row.id}" data-qty="1">1</button>
+          <button data-act="sell" data-id="${row.id}" data-qty="all">All</button>
+        </li>`).join('')}`).join('');
   }
 
   // Money and stock both change from outside the panel (harvests landing, the
