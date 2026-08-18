@@ -4,6 +4,7 @@ import { COLORS, MAX_FPS, MAX_DPR } from '../config.js';
 import { drawGround, drawCrops, drawObjects, drawUnowned } from './tilerender.js';
 import {
   entitiesByRow, drawTaskMarkers, drawTillAnchor, drawPlacementGhost, drawEmotes,
+  drawCarriedGhost,
 } from './entityrender.js';
 
 export class Renderer {
@@ -27,7 +28,10 @@ export class Renderer {
     // a string: this is compared on every animation frame, and building a
     // string 120 times a second to throw it away is exactly the sort of litter
     // this whole change exists to avoid.
-    this.last = { tick: -1, cx: 0, cy: 0, zoom: 0, gx: -1, gy: -1, gok: 0, ax: -1, ay: -1 };
+    this.last = {
+      tick: -1, cx: 0, cy: 0, zoom: 0, gx: -1, gy: -1, gok: 0,
+      cx2: -1, cy2: -1, cok: 0, ax: -1, ay: -1,
+    };
     this.forceNext = true;
     this.resize();
   }
@@ -107,6 +111,7 @@ export class Renderer {
     drawEmotes(ctx, this.sheets, state, view, alpha);
     if (overlay?.tillAnchor) drawTillAnchor(ctx, overlay.tillAnchor, state.tickCount);
     if (overlay?.pending) drawPlacementGhost(ctx, this.sheets, overlay.pending);
+    if (overlay?.carried) drawCarriedGhost(ctx, this.sheets, state, overlay.carried);
 
     ctx.restore();
   }
@@ -146,6 +151,9 @@ function frameKey(state, camera, overlay, dpr) {
     gx: ghost ? ghost.x : -1,
     gy: ghost ? ghost.y : -1,
     gok: ghost && ghost.valid ? 1 : 0,
+    cx2: overlay?.carried ? overlay.carried.x : -1,
+    cy2: overlay?.carried ? overlay.carried.y : -1,
+    cok: overlay?.carried && overlay.carried.valid ? 1 : 0,
     ax: anchor ? anchor.x : -1,
     ay: anchor ? anchor.y : -1,
   };
@@ -154,5 +162,6 @@ function frameKey(state, camera, overlay, dpr) {
 function sameFrame(a, b) {
   return a.tick === b.tick && a.cx === b.cx && a.cy === b.cy && a.zoom === b.zoom
     && a.gx === b.gx && a.gy === b.gy && a.gok === b.gok
+    && a.cx2 === b.cx2 && a.cy2 === b.cy2 && a.cok === b.cok
     && a.ax === b.ax && a.ay === b.ay;
 }

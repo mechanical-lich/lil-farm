@@ -14,9 +14,10 @@ import {
   plotsAcross, plotsDown, plotIndex,
 } from '../world/land.js';
 import { countItem } from '../sim/inventory.js';
+import { decorList } from '../sim/decor.js';
 
 export function initShopPanel(state, {
-  onMessage, onPlaceAnimal, onPlaceHand, onLandBought,
+  onMessage, onPlaceAnimal, onPlaceHand, onPlaceDecor, onLandBought,
 } = {}) {
   const panel = document.getElementById('shop-panel');
   const list = document.getElementById('shop-list');
@@ -26,12 +27,17 @@ export function initShopPanel(state, {
 
   let tab = 'buy';
   let open = false;
+  // Where each list was left. Re-rendering replaces the markup wholesale, so
+  // without this a player who scrolls to the bottom of a long list and buys
+  // something is dumped back at the top of it.
+  const scrolledTo = {};
   // Which land cell is armed for a second tap. A cell costs thousands, so it
   // doesn't go through on a stray thumb.
   let armedCell = null;
 
   const setOpen = (v) => {
     if (open === v) return;
+    if (!v) scrolledTo[tab] = list.scrollTop;
     open = v;
     panel.classList.toggle('open', open);
     if (open) {
@@ -53,6 +59,7 @@ export function initShopPanel(state, {
   tabs.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-tab]');
     if (!btn) return;
+    scrolledTo[tab] = list.scrollTop;      // keep this one's place for later
     tab = btn.dataset.tab;
     render();
   });
@@ -101,6 +108,17 @@ export function initShopPanel(state, {
       return;
     }
 
+    // Decorations are sited like everything else you buy and put down — but
+    // they're bought a handful at a time to arrange a corner of the farm, so
+    // the shop comes back afterwards exactly as it was left rather than making
+    // the player find the Decor tab again for every single bush.
+    if (act === 'decor') {
+      scrolledTo[tab] = list.scrollTop;
+      setOpen(false);
+      onPlaceDecor?.(id, () => setOpen(true));
+      return;
+    }
+
     if (act === 'animal') {
       const allowed = canBuyAnimal(state, id);
       if (!allowed.ok) { onMessage?.(allowed.reason, 'warn'); return; }
@@ -132,8 +150,10 @@ export function initShopPanel(state, {
 
     list.innerHTML = tab === 'buy' ? renderBuy()
       : tab === 'animals' ? renderAnimals()
-        : tab === 'land' ? renderLand()
-          : renderSell();
+        : tab === 'decor' ? renderDecor()
+          : tab === 'land' ? renderLand()
+            : renderSell();
+    list.scrollTop = scrolledTo[tab] || 0;
 
     if (tab === 'buy') {
       note.textContent = `New seeds in ${formatDuration(ticksUntilRotation(state))} · $${state.money}`;
@@ -142,11 +162,22 @@ export function initShopPanel(state, {
       note.textContent = cap === 0
         ? 'Build a barn to keep animals · $' + state.money
         : `Space for ${state.animals.length}/${cap} animals · $${state.money}`;
+    } else if (tab === 'decor') {
+      note.textContent = `Just for the look of the place · $${state.money}`;
     } else if (tab === 'land') {
       note.textContent = `You own ${ownedCount(state)} of ${totalPlots(state)} plots · $${state.money}`;
     } else {
       note.textContent = `$${state.money}`;
     }
+  }
+
+  function renderDecor() {
+    return decorList(state).map((row) => `
+      <li>
+        <span class="shop-name">${esc(row.name)}<em>${esc(row.note)}</em></span>
+        <span class="shop-price">$${row.price}</span>
+        <button data-act="decor" data-id="${row.kind}" ${row.affordable ? '' : 'disabled'}>Place</button>
+      </li>`).join('');
   }
 
   /**

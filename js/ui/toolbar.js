@@ -14,6 +14,9 @@ import { on } from '../engine/events.js';
 
 export const TOOLS = [
   { id: 'auto', label: '👆 Tap', hint: 'Do whatever the tile needs' },
+  // Next to Tap because they're the two that act on what's already there,
+  // rather than on the ground: tap it, or pick it up and move it.
+  { id: 'move', label: '✊ Move', hint: 'Drag your animals and people where you want them' },
   { id: 'clear', label: '🪓 Clear', hint: 'Chop, clear, and take down what you built' },
   { id: 'till', label: '🚜 Till', hint: 'Tap both ends of a row to plough it' },
   { id: 'plant', label: '🌱 Plant', hint: 'Sow the selected seed' },

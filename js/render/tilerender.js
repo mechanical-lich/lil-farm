@@ -451,6 +451,15 @@ function fencePiece(state, x, y) {
   return TOWN.fenceHMid;
 }
 
+/**
+ * One object drawn at a tile, for the placement ghost. Goes through the same
+ * code the world does, so what you're shown is what you'll get — including the
+ * tall sprites that overhang the tile above.
+ */
+export function drawObjectSprite(ctx, sheets, state, objId, at) {
+  drawObject(ctx, sheets, state, objId, at.x, at.y);
+}
+
 function drawObject(ctx, sheets, state, objId, x, y) {
   const px = x * TILE;
   const py = y * TILE;

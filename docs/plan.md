@@ -236,6 +236,35 @@ Three details that are easy to get wrong and were:
 `anythingMoving` is exported and tested because a false negative there freezes
 the picture, which is much worse than the wasted frame a false positive costs.
 
+**The move tool is a drag, not a placement.** `attachInput` grows
+`onGrab`/`onCarry`/`onDrop`: pressing asks whether there is something to pick
+up, and only takes over the gesture if there is — bare ground still pans, so
+the tool can never strand the view. Edge scrolling runs on a `setInterval`
+rather than off pointermove, because a finger held at the edge generates no
+events and that is precisely when the view must keep moving. The interval
+*stops itself* if the drag ends without a matching pointerup; a timer that
+outlives its gesture would tick for the rest of the session.
+
+`sim/moving.js` clears everything in flight when something lands — path, trail,
+claimed job, `px`/`py`. Leaving any of it makes the thing slide back across the
+map from where it was picked up, or walk on to a target it can no longer reach.
+
+**Placement specs can carry an `after` hook**, run once a confirm succeeds.
+Decorations use it to reopen the shop, which is the difference between two taps
+per bush and five. It deliberately does not fire on cancel or on a refused
+spot: in both of those the player is still working on the map, and throwing a
+panel over it would be fighting them.
+
+The shop also remembers `scrollTop` per tab. Re-rendering replaces the list
+markup wholesale, so without it anyone who scrolls a long list and buys
+something is dumped back at the top.
+
+**Decorations reuse the world's own objects.** A bought tree is `OBJ.TREE`, so
+it draws, blocks and chops exactly like a generated one with no new code. The
+only rule that needed inventing is that **price must exceed salvage value** —
+`salvageValue()` prices the clear yield, and a test asserts every decoration
+beats it, or buy-chop-sell is free money.
+
 **Farmhands claim their jobs, pass through each other, and rest in front of the
 barn.** All three came out of one bug report, and the middle one was much the
 worst:
@@ -512,7 +541,7 @@ at all while the farmer is on it, which reads as swung open.
   with a grass wedge in one corner (TL, TR, BR, BL in that order). Confirmed by sampling
   the PNG's pixels, not by eye. They complete the nine-slice at `(0,1)`–`(2,3)`.
 
-280 headless tests pass via `npm test`.
+289 headless tests pass via `npm test`.
 
 ## 0. Ground rules
 

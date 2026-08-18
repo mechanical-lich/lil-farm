@@ -53,6 +53,21 @@ Cleared land doesn't stay clear. Weeds sprout again on open grass you own, slowl
 
 The same shape — slow, capped, seeded scatter over open grass — is what the mushrooms will want later.
 
+## Moving things about
+The **Move** tool sits next to Tap, since they're the two that act on what's already there rather than on the ground. It turns press-and-drag into picking something up. Press on the farmer, a farmhand or an animal, drag, and let go where you want it. Bare ground still pans the view, so the tool never traps you.
+
+- A **ghost of the thing itself** follows your finger, tinted green or red for whether letting go there would work — the same language siting a barn uses. The real thing doesn't budge until you release.
+- **Drag near an edge and the view follows**, so you can move something further than you can see. It scrolls on a timer rather than on finger movement, because a finger held still at the edge is exactly when you most want it to keep going.
+- Whatever it was doing is forgotten when it lands: a half-walked route, a job a farmhand had claimed, the farmer's current task. Keeping any of it would have the thing slide back across the map or carry on to somewhere it can no longer reach.
+- The usual rules still apply — a cow can't be dropped in the pond, nothing can be put on land you don't own. **A duck can**, because a duck swims.
+
+## Decorations
+A **Decor** tab in the shop: trees, dead trees, bushes, rocks, stumps and wild grass. They do nothing at all, which is the point — a farm you've spent a month on should be somewhere you can arrange to your own taste, not only somewhere efficient.
+
+**The shop comes back after each one**, on the Decor tab and scrolled exactly where you left it, so laying a row of bushes is two taps each rather than five. It only returns when something was actually placed — cancelling, or a refused spot, leaves you on the map to try again.
+
+They are exactly the objects worldgen scatters, so a bought tree draws the same, chops the same and leaves the same wood behind. **Every one costs more than clearing it gives back**, or a decoration would be a money press: buy a tree, chop it, sell the wood, repeat.
+
 ## Foraging and the mushroom journal
 Crops are something you make happen and animals are something you look after.  Mushrooms are the third thing — something you **find**.  Nothing is planted and nothing is tended: they come up on open grass across the land you own, and you pick them when you spot them.
 

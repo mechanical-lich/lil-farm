@@ -40,6 +40,8 @@ import { ITEMS, countItem } from '../js/sim/inventory.js';
 import {
   HAND_PRICE, HAND_CAPACITY, carriedTotal, isFull, handCount, handCapacity,
 } from '../js/sim/farmhand.js';
+import { DECOR, decorList, salvageValue, canPlaceDecor, placeDecor } from '../js/sim/decor.js';
+import { movableAt, canMoveTo, moveTo } from '../js/sim/moving.js';
 import {
   ANIMALS, TROUGH_CAPACITY, FEED_COST, FOOD_DURATION, WATER_DURATION, SEEK_THRESHOLD,
   makeAnimal, collectFrom, isNeglected, fillWaterTrough, fillFeedTrough, pickFeed, animalDef,
@@ -2142,6 +2144,129 @@ test('wool takes longer than milk and is worth more when it comes', () => {
 
   assert(isReady(cow.animal), 'the cow is ready first');
   assert(!isReady(sheep.animal), 'the sheep is still growing its fleece');
+});
+
+// --- decorations --------------------------------------------------------
+
+test('a decoration always costs more than clearing it gives back', () => {
+  // Otherwise it's a money press: buy a tree, chop it, sell the wood, repeat.
+  for (const kind of Object.keys(DECOR)) {
+    const back = salvageValue(kind);
+    assert(DECOR[kind].price > back,
+      `${kind} costs $${DECOR[kind].price} and gives back $${back}`);
+  }
+});
+
+test('buying a decoration puts it on the map and takes the money', () => {
+  const s = farmWithMaterials(9960);
+  s.money = 1000;
+  const x = s.farmer.x + 4;
+  const y = s.farmer.y + 4;
+
+  const res = placeDecor(s, 'tree', x, y);
+  assert(res.ok, 'placed');
+  assertEqual(s.money, 1000 - DECOR.tree.price, 'and paid for');
+  assertEqual(s.grid.getObject(x, y), OBJ.TREE, 'a real tree, same as any other');
+
+  // ...which means the clear tool already knows what to do with it.
+  assertEqual(taskForTile(s, x, y, 'clear').type, 'chop', 'and it chops like one');
+});
+
+test('a decoration is refused where it would be in the way', () => {
+  const s = farmWithMaterials(9961);
+  s.money = 1000;
+  const x = s.farmer.x + 4;
+  const y = s.farmer.y + 4;
+
+  s.grid.setObject(x, y, OBJ.ROCK);
+  assert(!canPlaceDecor(s, x, y), 'not on top of something else');
+
+  s.grid.setObject(x, y, OBJ.NONE);
+  assert(canPlaceDecor(s, x, y), 'but open ground is fine');
+
+  // The helper hands over the whole valley, so take a corner back first.
+  s.grid.owned.delete(plotIndex(0, 0, s.grid.w));
+  assert(!canPlaceDecor(s, 2, 2), 'and never on land you do not own');
+});
+
+test('a decoration you cannot afford costs nothing', () => {
+  const s = farmWithMaterials(9962);
+  s.money = 5;
+  const res = placeDecor(s, 'tree', s.farmer.x + 4, s.farmer.y + 4);
+  assert(!res.ok, 'refused');
+  assertEqual(s.money, 5, 'and not charged');
+  assertEqual(s.grid.getObject(s.farmer.x + 4, s.farmer.y + 4), OBJ.NONE, 'and nothing placed');
+});
+
+// --- picking things up and putting them down ----------------------------
+
+test('the move tool finds whatever is standing on a tile', () => {
+  const { s, hand } = farmWithHand(9970);
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 3, s.farmer.y);
+
+  assertEqual(movableAt(s, cow.x, cow.y).kind, 'animal', 'a cow');
+  assertEqual(movableAt(s, hand.x, hand.y).kind, 'hand', 'a farmhand');
+  assertEqual(movableAt(s, s.farmer.x, s.farmer.y).kind, 'farmer', 'the farmer himself');
+  assertEqual(movableAt(s, s.farmer.x + 9, s.farmer.y + 9), null, 'and nothing on bare grass');
+});
+
+test('moving something puts it down and forgets what it was doing', () => {
+  // Anything left over would have it slide back across the map from where it
+  // was picked up, or carry on to a job it can no longer sensibly reach.
+  const { s, hand } = farmWithHand(9971);
+  // Far enough that it is still walking to the job when we interrupt it.
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 12, s.farmer.y + 6);
+  cow.stock = 1;
+  for (let i = 0; i < 4; i++) tick(s);
+  assert(hand.target, 'the hand has taken a job on');
+  assert(hand.path.length > 0, 'and is on its way');
+
+  const to = { x: s.farmer.x - 6, y: s.farmer.y + 6 };
+  assert(moveTo(s, movableAt(s, hand.x, hand.y), to.x, to.y).ok, 'moved');
+
+  assertEqual({ x: hand.x, y: hand.y }, to, 'it is where it was put');
+  assertEqual({ x: hand.px, y: hand.py }, to, 'and does not slide back from where it was');
+  assertEqual(hand.target, null, 'the job it was walking to is dropped');
+  assertEqual(hand.path.length, 0, 'along with the route');
+});
+
+test('moving the farmer cancels what he was in the middle of', () => {
+  const s = farmWithMaterials(9972);
+  s.grid.setObject(s.farmer.x + 3, s.farmer.y, OBJ.ROCK);
+  addTask(s, taskForTile(s, s.farmer.x + 3, s.farmer.y, 'clear'));
+  for (let i = 0; i < 5; i++) tick(s);
+
+  const to = { x: s.farmer.x - 8, y: s.farmer.y - 4 };
+  moveTo(s, movableAt(s, s.farmer.x, s.farmer.y), to.x, to.y);
+
+  assertEqual({ x: s.farmer.x, y: s.farmer.y }, to, 'he is where he was put');
+  assertEqual(s.farmer.taskId, null, 'and has let go of the job');
+  assertEqual(s.farmer.trail, [{ x: to.x, y: to.y }], 'with no trail dragging him back');
+});
+
+test('things cannot be dropped where they could not stand', () => {
+  const { s } = farmWithHand(9973);
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 3, s.farmer.y);
+  const movable = movableAt(s, cow.x, cow.y);
+
+  const water = { x: s.farmer.x + 5, y: s.farmer.y + 5 };
+  s.grid.setGround(water.x, water.y, GROUND.WATER);
+  assert(!canMoveTo(s, movable, water.x, water.y), 'a cow cannot be put in the pond');
+  assert(!moveTo(s, movable, water.x, water.y).ok, 'so the move is refused');
+  assertEqual({ x: cow.x, y: cow.y }, { x: s.farmer.x + 3, y: s.farmer.y }, 'it has not budged');
+
+  s.grid.owned.delete(plotIndex(0, 0, s.grid.w));
+  assert(!canMoveTo(s, movable, 2, 2), 'nor onto land you do not own');
+});
+
+test('a duck can be put in the pond, because a duck swims', () => {
+  const { s } = farmWithHand(9974);
+  const duck = makeAnimal(s, 'duck', s.farmer.x + 3, s.farmer.y);
+  const water = { x: s.farmer.x + 5, y: s.farmer.y + 5 };
+  s.grid.setGround(water.x, water.y, GROUND.WATER);
+
+  assert(moveTo(s, movableAt(s, duck.x, duck.y), water.x, water.y).ok, 'in it goes');
+  assertEqual({ x: duck.x, y: duck.y }, water, 'and there it is');
 });
 
 // --- the farmhand -------------------------------------------------------

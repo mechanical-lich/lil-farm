@@ -172,6 +172,34 @@ function drawAnimal(ctx, sheets, state, a, pos) {
   }
 }
 
+/**
+ * What the player is carrying with the move tool, shown where it would land.
+ *
+ * The same sprite as the thing itself, half faded, over a tinted square that
+ * says whether letting go here would work — the same green-and-red language
+ * siting a barn already uses.
+ */
+export function drawCarriedGhost(ctx, sheets, state, carried) {
+  const { what, x, y, valid } = carried;
+  if (!what) return;
+
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  if (what.kind === 'animal') drawAnimalSprite(ctx, sheets, what.ref.type, { x, y }, variantOf(what.ref));
+  else if (what.kind === 'hand') drawHandSprite(ctx, sheets, { x, y });
+  else blit(ctx, sheets, SPRITES.farmerHat, x * TILE, y * TILE - 2);
+  ctx.restore();
+
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = valid ? '#5ec24f' : '#e5533d';
+  ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
+  ctx.globalAlpha = 1;
+
+  ctx.strokeStyle = valid ? '#bdf5b0' : '#ffb4a6';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x * TILE + 0.5, y * TILE + 0.5, TILE - 1, TILE - 1);
+}
+
 /** One farmhand sprite at a tile, used for the placement ghost. */
 export function drawHandSprite(ctx, sheets, at) {
   blit(ctx, sheets, SPRITES.farmer, at.x * TILE, at.y * TILE - 2);

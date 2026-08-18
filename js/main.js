@@ -13,6 +13,9 @@ import { itemName, addItem } from './sim/inventory.js';
 import { canAfford, buildDef, canPlaceAt, isReserved } from './sim/build.js';
 import { drawBuilding } from './render/tilerender.js';
 import { drawAnimalSprite, drawHandSprite } from './render/entityrender.js';
+import { drawObjectSprite } from './render/tilerender.js';
+import { DECOR, decorDef, canPlaceDecor, placeDecor } from './sim/decor.js';
+import { movableAt, canMoveTo, moveTo } from './sim/moving.js';
 import {
   animalDef, animalAt, petAnimal, isReady, animalVariantCount,
 } from './sim/animals.js';
@@ -80,6 +83,11 @@ async function boot() {
       const b = plotBounds(px, py);
       camera.centerOnTile(b.x0 + PLOT / 2, b.y0 + PLOT / 2);
     },
+    onPlaceDecor: (kind, reopenShop) => {
+      beginPlacement(decorPlacement(state, kind, reopenShop), state.farmer.x, state.farmer.y);
+      camera.centerOnTile(state.farmer.x, state.farmer.y);
+      toast(`Tap where the ${decorDef(kind).name.toLowerCase()} should go`);
+    },
     onPlaceHand: () => {
       beginPlacement(handPlacement(state), state.farmer.x, state.farmer.y);
       camera.centerOnTile(state.farmer.x, state.farmer.y);
@@ -118,6 +126,31 @@ async function boot() {
     onTap: (x, y) => queueTileTask(state, toolbar, x, y, { announce: true }),
     onPaint: (x, y) => queueTileTask(state, toolbar, x, y, { announce: false }),
     isPaintMode: () => paintMode.isOn(),
+
+    // Carrying things about, with the move tool selected.
+    onGrab: (x, y) => {
+      if (toolbar.getTool() !== 'move' || openPanel || placement.pending) return false;
+      const found = movableAt(state, x, y);
+      if (!found) return false;
+      carried.what = found;
+      carried.x = x;
+      carried.y = y;
+      carried.valid = true;
+      return true;
+    },
+    onCarry: (x, y) => {
+      if (!carried.what) return;
+      carried.x = x;
+      carried.y = y;
+      carried.valid = canMoveTo(state, carried.what, x, y);
+    },
+    onDrop: (x, y) => {
+      const what = carried.what;
+      carried.what = null;
+      if (!what) return;
+      const res = moveTo(state, what, x, y);
+      toast(res.ok ? `Moved the ${what.name}` : res.reason, res.ok ? undefined : 'warn');
+    },
   });
 
   const loop = new GameLoop(
@@ -131,7 +164,9 @@ async function boot() {
       // drew — the HUD and the debug line are DOM writes, and the point of
       // skipping the frame is not to touch anything.
       const drew = renderer.drawIfNeeded(
-        state, alpha, { ...tillSelection, pending: placement.pending }, now,
+        state, alpha,
+        { ...tillSelection, pending: placement.pending, carried: carried.what ? carried : null },
+        now,
       );
       autosaver.maybeSave(now);
       if (drew) {
@@ -263,6 +298,12 @@ function handleTillTap(state, x, y) {
 const placement = { pending: null };
 
 /**
+ * What the player currently has hold of with the move tool: the thing itself,
+ * and where it would land if they let go now.
+ */
+const carried = { what: null, x: 0, y: 0, valid: false };
+
+/**
  * Which sliding panel is up, if any. Tracked here so a tap on the map can
  * dismiss it instead of acting on the tile underneath.
  */
@@ -271,6 +312,7 @@ let openPanel = null;
 function wirePanelTracking() {
   events.on('panel:open', (name) => {
     openPanel = name;
+    carried.what = null;
     // Opening a panel abandons any half-finished siting or row selection, so
     // nothing is left armed behind it.
     tillSelection.tillAnchor = null;
@@ -361,6 +403,26 @@ function animalPlacement(state, type) {
   };
 }
 
+/** Siting a decoration. Nothing is charged until it's put down. */
+function decorPlacement(state, kind, onPlaced) {
+  const def = decorDef(kind);
+  return {
+    w: 1, h: 1,
+    // Straight back to the shop, on the same tab and at the same scroll
+    // position, so a row of bushes is six taps rather than thirty.
+    after: onPlaced,
+    confirmLabel: `✓ Put the ${def.name.toLowerCase()} here ($${def.price})`,
+    validate: (x, y) => canPlaceDecor(state, x, y),
+    draw: (ctx, sheets, at) => drawObjectSprite(ctx, sheets, state, def.obj, at),
+    confirm: (x, y) => {
+      const res = placeDecor(state, kind, x, y);
+      return res.ok
+        ? { ok: true, message: `${def.name} placed for $${res.spent}` }
+        : { ok: false, reason: res.reason };
+    },
+  };
+}
+
 /** Siting a new farmhand. Same flow as livestock: nothing is paid until you say. */
 function handPlacement(state) {
   return {
@@ -387,6 +449,7 @@ function wirePlacementButtons() {
     if (!res.ok) { toast(res.reason, 'warn'); return; }
     toast(res.message);
     clearPlacement();
+    p.after?.();
   });
 }
 
