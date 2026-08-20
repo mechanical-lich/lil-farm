@@ -209,12 +209,34 @@ body {
 /* Placement confirmation, for structures too big to drop blind. */
 #confirm-bar {
   display: none;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
 }
 
 #confirm-bar.open { display: flex; }
 
-#confirm-bar button { flex: 1; }
+#confirm-row {
+  display: flex;
+  gap: 8px;
+}
+
+#confirm-row button { flex: 1; }
+
+/* What the thing being sited will cost and do, above the buttons: a barn is
+   sized by the player now, so the price is not knowable until they have drawn
+   it out. */
+#place-hint:empty { display: none; }
+
+#place-hint {
+  align-self: center;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(24, 38, 20, 0.82);
+  color: #eaf6e4;
+  font-size: 13px;
+}
+
+#place-hint.warn { background: rgba(120, 34, 22, 0.88); }
 
 #confirm-place {
   background: var(--accent);

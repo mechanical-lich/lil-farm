@@ -222,14 +222,17 @@ function drawBadge(ctx, x, y, fill, edge) {
 /**
  * Ghost preview while siting a large structure: the building drawn faintly
  * where it would go, with its footprint tinted green or red. Without this a
- * 3x2 barn is dropped blind and costs 50 wood to get wrong.
+ * barn is dropped blind, and the big ones cost hundreds of wood to get wrong.
+ *
+ * The size is passed through to the drawing rather than baked into it, because
+ * a barn's ghost changes shape as the player drags out its second corner.
  */
 export function drawPlacementGhost(ctx, sheets, pending) {
   const { x, y, w, h, valid } = pending;
 
   ctx.save();
   ctx.globalAlpha = 0.55;
-  if (pending.draw) pending.draw(ctx, sheets, { x, y });
+  if (pending.draw) pending.draw(ctx, sheets, { x, y, w, h });
   ctx.restore();
 
   ctx.globalAlpha = 0.35;

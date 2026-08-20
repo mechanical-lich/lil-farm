@@ -48,6 +48,24 @@ const migrations = {
     data.version = 5;
     return data;
   },
+
+  // Barns are sized by the player now, so a building carries its own footprint
+  // instead of every one of them being whatever the recipe said. Existing barns
+  // were all 3x2 and stay exactly that — the same ground, the same four animals
+  // — but the record has to say so, because the recipe no longer speaks for it.
+  //
+  // Queued builds are stamped too. One caught mid-flight would otherwise finish
+  // as a barn with no size at all.
+  5: (data) => {
+    for (const b of data.buildings || []) {
+      if (!(b.w > 0)) { b.w = 3; b.h = 2; }
+    }
+    for (const t of data.tasks || []) {
+      if (t.type === 'build' && t.buildKind === 'barn' && !(t.w > 0)) { t.w = 3; t.h = 2; }
+    }
+    data.version = 6;
+    return data;
+  },
 };
 
 export function loadSave() {

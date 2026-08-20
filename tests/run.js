@@ -7,7 +7,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { makeRng, hash2d } from '../js/engine/rng.js';
 import { Grid } from '../js/world/grid.js';
-import { GROUND, OBJ, isTilled, isWater } from '../js/world/tiledefs.js';
+import { GROUND, OBJ, isTilled, isWater, objDef } from '../js/world/tiledefs.js';
 import { generateWorld, startingBarnAnchor } from '../js/world/worldgen.js';
 import { findPath, besideBox, insideBox } from '../js/world/pathfind.js';
 import {
@@ -54,8 +54,12 @@ import {
   completeBuild, demolish, structureAt, buildingAt, animalCapacity, BARN_CAPACITY,
   placeStructure, buildDef, kindForGround, isReserved, canCompleteBuild,
   pendingWaterTiles, pendingGroundTiles, footprint as buildFootprint,
+  barnCost, barnWork, barnCapacity, snapBarn, reservedTiles, refundFor, sizeOf,
+  costLabel, placementProblem, reconcileBuildings,
 } from '../js/sim/build.js';
 import { TOWN, WATER, RIVER } from '../js/render/sprites.js';
+import { barnGrid } from '../js/render/tilerender.js';
+import { decodePng } from '../tools/png.mjs';
 import {
   riverPieceAt, autotileQuadrants, isWaterAt, isDirtAt as isDirt,
 } from '../js/render/tilerender.js';
@@ -757,7 +761,12 @@ test('tillDir survives a save and reload', () => {
 /** A farm with a clear plot and one tilled tile next to the farmer. */
 function farmWithBed(seed = 1000) {
   const s = newGame(seed);
+  // The barn's record goes with its tiles. Wiping the objects alone leaves a
+  // barn nothing collides with — which loading now notices and repairs, so a
+  // save/reload comparison would differ for reasons that have nothing to do
+  // with crops.
   s.grid.objects.fill(OBJ.NONE);
+  s.buildings = [];
   const x = s.farmer.x + 1;
   const y = s.farmer.y;
   s.grid.setGround(x, y, GROUND.TILLED);
@@ -1242,15 +1251,93 @@ test('besideBox accepts every tile touching a footprint and no others', () => {
   assertEqual(touching, 10, 'three above, three below, two each side');
 });
 
-test('a barn needs its whole footprint free', () => {
+test('a barn may be sited over scenery, but not over anything deliberate', () => {
+  // A farm is scattered with trees, rocks and weeds. Requiring a bare
+  // rectangle made the biggest barn impossible to place anywhere on a new
+  // farm — measured at nought sites in 576 — so the farmer clears the site as
+  // part of the job instead. Things the player put there still refuse.
   const s = farmWithMaterials(701);
   assert(canPlaceAt(s, 'barn', 5, 5), 'open ground is fine');
 
-  s.grid.setObject(7, 6, OBJ.ROCK);   // bottom-right of the footprint
-  assert(!canPlaceAt(s, 'barn', 5, 5), 'one rock anywhere in the footprint blocks it');
+  for (const obj of [OBJ.ROCK, OBJ.TREE, OBJ.WEED, OBJ.BUSH]) {
+    s.grid.setObject(7, 6, obj);
+    assert(canPlaceAt(s, 'barn', 5, 5), `the farmer can clear a ${objDef(obj).name} first`);
+  }
+
+  s.grid.setObject(7, 6, OBJ.FENCE);
+  assert(!canPlaceAt(s, 'barn', 5, 5), 'but not a fence the player built');
+  assertEqual(placementProblem(s, 'barn', 5, 5), 'there is a fence in the way', 'and says so');
 
   s.grid.setObject(7, 6, OBJ.NONE);
   assert(!canPlaceAt(s, 'barn', s.grid.w - 2, 5), 'and it must not hang off the map');
+});
+
+test('a stale building mark does not refuse an empty field', () => {
+  // Reported from play: "it says there's a building in the way but there's
+  // not". The grid's BUILDING marks are an index over state.buildings, and an
+  // index can go stale — a mark with no record behind it was refusing ground
+  // the player could see was bare. The record is the source of truth.
+  const s = farmWithMaterials(4245);
+  placeStructure(s, 'barn', 10, 10, [3, 2]);
+  s.buildings = [];                                  // the record goes, marks stay
+
+  assertEqual(placementProblem(s, 'barn', 10, 10, [3, 2]), null,
+    'ground with nothing standing on it takes a barn');
+
+  const fixed = reconcileBuildings(s);
+  assertEqual(fixed.cleared, 6, 'and the marks are swept up');
+  assertEqual(fixed.restored, 0, 'with nothing to put back');
+  assertEqual(s.grid.getObject(10, 10), OBJ.NONE, 'the tile is clear afterwards');
+});
+
+test('a building missing its marks gets them back', () => {
+  // The other direction, which is worse: a barn nothing collides with is a
+  // barn animals walk through.
+  const s = farmWithMaterials(4246);
+  placeStructure(s, 'barn', 10, 10, [5, 3]);
+  for (let x = 10; x < 15; x++) s.grid.setObject(x, 11, OBJ.NONE);
+
+  const fixed = reconcileBuildings(s);
+  assertEqual(fixed.restored, 5, 'the missing row is stamped back');
+  assertEqual(fixed.cleared, 0, 'and nothing else is disturbed');
+  assertEqual(s.grid.getObject(12, 11), OBJ.BUILDING, 'the wall is solid again');
+});
+
+test('a farm repairs its building marks when it loads', () => {
+  const s = farmWithMaterials(4247);
+  placeStructure(s, 'barn', 10, 10, [3, 2]);
+  const saved = JSON.parse(JSON.stringify(serialize(s)));
+  saved.buildings = [];                              // however it happened
+
+  const loaded = deserialize(saved);
+  assertEqual(loaded.grid.getObject(10, 10), OBJ.NONE, 'the farm comes back consistent');
+});
+
+test('a refused barn says which rule it broke', () => {
+  // This is the whole reason placementProblem exists. Every rejection used to
+  // read "something is in the way", so a rectangle that had merely crossed the
+  // edge of the player's land sent them hunting for scenery that was not
+  // there. Reported from real play, and the screenshots showed the boundary.
+  // newGameRaw, not newGame: the helpers here hand over the whole valley, and
+  // the boundary of the player's one plot is the whole point of this test.
+  const s = newGameRaw(4244);
+  s.inventory = { wood: 500, stone: 500 };
+
+  let edge = null;
+  for (let x = s.farmer.x; x < s.grid.w && !edge; x++) {
+    if (!s.grid.isOwned(x, s.farmer.y)) edge = { x: x - 1, y: s.farmer.y };
+  }
+  assert(edge, 'the farm has an edge to run off');
+  assertEqual(placementProblem(s, 'barn', edge.x, edge.y, [3, 2]), "you don't own all that land",
+    'the edge of the farm is named, not blamed on clutter');
+
+  const clear = { x: s.farmer.x + 4, y: s.farmer.y };
+  for (const t of footprint('barn', clear.x, clear.y, [3, 2])) s.grid.setObject(t.x, t.y, OBJ.NONE);
+  assertEqual(placementProblem(s, 'barn', clear.x, clear.y, [3, 2]), null, 'good ground passes');
+
+  addTask(s, taskForTile(s, clear.x, clear.y, 'build', { buildKind: 'barn', size: [3, 2] }));
+  assertEqual(placementProblem(s, 'barn', clear.x, clear.y, [3, 2]), 'something else is queued there',
+    'and a queued barn holds its ground');
 });
 
 test('the building record is the source of truth, found from any of its tiles', () => {
@@ -1270,6 +1357,97 @@ test('the building record is the source of truth, found from any of its tiles', 
     }
   }
   assertEqual(buildingAt(s, 8, 5), null, 'a tile just outside belongs to nothing');
+});
+
+// --- barns the player sizes ---------------------------------------------
+
+test('the smallest barn costs exactly what a barn has always cost', () => {
+  // The balance is settled and well liked; making barns sizable is not a
+  // licence to reprice the one everybody already has.
+  assertEqual(barnCost(3, 2), { wood: 50, stone: 20 }, 'unchanged');
+  assertEqual(barnWork(3, 2), 120, 'and takes as long as it always did');
+  assertEqual(barnCapacity(3, 2), 4, 'and holds four');
+});
+
+test('a bigger barn costs more, but less per tile', () => {
+  const small = barnCost(3, 2), big = barnCost(9, 4);
+  assert(big.wood > small.wood, 'more wood outright');
+  assert(big.wood / 36 < small.wood / 6, 'but cheaper by the tile');
+  assertEqual(barnCapacity(9, 4), 24, 'and holds six times as many animals');
+});
+
+test('a barn quotes the price of the size actually drawn', () => {
+  // The recipe's own cost is the smallest barn's. Everything that shows a
+  // price has to ask for the size, or the player is told 50 wood and charged
+  // three hundred.
+  assertEqual(costLabel('barn'), '50 wood, 20 stone', 'the recipe quotes the smallest');
+  assertEqual(costLabel('barn', [9, 5]), '206 wood, 98 stone', 'a big one quotes its own');
+  assertEqual(costLabel('fence'), costLabel('fence', [1, 1]), 'fixed things are unaffected');
+  assert(BUILDABLES.barn.sizable, 'and the barn is flagged as the one that varies');
+});
+
+test('a dragged rectangle snaps to a barn that can be built', () => {
+  // Always downward: the barn fits inside what was drawn rather than spilling
+  // past it, so the rectangle is a promise about the ground being spent.
+  assertEqual(snapBarn(10, 10, 12, 11), { x: 10, y: 10, w: 3, h: 2 }, 'exact fit');
+  assertEqual(snapBarn(10, 10, 13, 11), { x: 10, y: 10, w: 3, h: 2 }, 'even width rounds down');
+  assertEqual(snapBarn(12, 11, 10, 10), { x: 10, y: 10, w: 3, h: 2 }, 'dragged backwards');
+  assertEqual(snapBarn(0, 0, 40, 40), { x: 0, y: 0, w: 9, h: 5 }, 'clamped to the maximum');
+  assertEqual(snapBarn(5, 5, 6, 6), null, 'too small to be a barn');
+  assertEqual(snapBarn(5, 5, 9, 5), null, 'wide enough but only one row deep');
+});
+
+test('a sized barn keeps its size through building, saving and demolishing', () => {
+  const s = farmWithMaterials(4242);
+  const at = { x: s.farmer.x + 4, y: s.farmer.y };
+
+  const task = addTask(s, taskForTile(s, at.x, at.y, 'build', {
+    buildKind: 'barn', size: [7, 3],
+  }));
+  assertEqual([task.w, task.h], [7, 3], 'the task carries the footprint');
+  assertEqual(reservedTiles(s).size, 21, 'and reserves all of it');
+  assertEqual(task.work, barnWork(7, 3), 'and takes as long as its size says');
+
+  for (let i = 0; i < 900; i++) tick(s);
+  assertEqual(s.buildings.length, 1, 'the barn got built');
+  const barn = s.buildings[0];
+  assertEqual([barn.w, barn.h], [7, 3], 'the building remembers what was built');
+  assertEqual(animalCapacity(s), barnCapacity(7, 3), 'capacity follows the size');
+
+  const reloaded = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual([reloaded.buildings[0].w, reloaded.buildings[0].h], [7, 3], 'and survives a save');
+
+  // Every tile of it answers as the same building, not just the anchor.
+  assertEqual(buildingAt(s, barn.x + 6, barn.y + 2).id, barn.id, 'the far corner belongs to it');
+  const found = structureAt(s, barn.x + 4, barn.y + 1);
+  assertEqual([found.x, found.y], [barn.x, barn.y], 'and reports the anchor');
+
+  const { ok, refund } = demolish(s, barn.x + 4, barn.y + 1);
+  assert(ok, 'it comes down');
+  assertEqual(refund, refundFor('barn', [7, 3]), 'refunded at its own size, not the recipe’s');
+  assert(refund.wood > 25, 'which is more than a small barn would give back');
+  assertEqual(buildingAt(s, barn.x, barn.y), null, 'and the whole footprint is clear');
+});
+
+test('an old save gets its barns stamped with the size they always had', () => {
+  const old = { version: 5, buildings: [{ id: 1, type: 'barn', x: 10, y: 10 }],
+    tasks: [{ type: 'build', buildKind: 'barn', x: 20, y: 20 }] };
+  const out = migrate(old);
+  assertEqual(out.version, SAVE_VERSION, 'brought up to date');
+  assertEqual([out.buildings[0].w, out.buildings[0].h], [3, 2], 'the barn is 3x2, as it was');
+  assertEqual([out.tasks[0].w, out.tasks[0].h], [3, 2], 'and so is one caught mid-build');
+});
+
+test('hands are hired against the animals housed, not the barn count', () => {
+  const s = farmWithMaterials(4243);
+  assertEqual(handCapacity(s), 0, 'nowhere to house anything, nobody to hire');
+
+  placeStructure(s, 'barn', 5, 5, [3, 2]);
+  assertEqual(handCapacity(s), 1, 'a 3x2 barn allows one hand, as it always did');
+
+  placeStructure(s, 'barn', 5, 12, [9, 4]);
+  assertEqual(handCapacity(s), 1 + Math.floor(barnCapacity(9, 4) / 4),
+    'a big barn brings the hands to work it');
 });
 
 test('barns set animal capacity, and only finished ones count', () => {
@@ -2891,6 +3069,62 @@ function pngSize(path) {
   const buf = readFileSync(path);
   return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
 }
+
+test('every barn edge tile actually carries its edge', () => {
+  // The sheet is generated (tools/make-barn-sheet.mjs), and a generated asset
+  // fails quietly: an edge that never got stamped just leaves a roof with a
+  // gap in it, which nothing else here would notice. This caught exactly that
+  // — an edit removed the two lines that draw the near edge, and the roof went
+  // out with a bottom edge only under its ridge.
+  const sheet = decodePng('assets/barn.png');
+  const OUTLINE = [0x3f, 0x26, 0x31];
+
+  const rowIs = (col, row, y, colour) => {
+    for (let x = 0; x < TILE; x++) {
+      const i = ((row * TILE + y) * sheet.width + col * TILE + x) * 4;
+      // The ridge board runs to the edge rather than being cut by it.
+      const isBoard = sheet.rgba[i] === 0xdf && sheet.rgba[i + 1] === 0xa9;
+      if (isBoard) continue;
+      if (sheet.rgba[i] !== colour[0] || sheet.rgba[i + 1] !== colour[1]
+        || sheet.rgba[i + 2] !== colour[2]) return false;
+    }
+    return true;
+  };
+
+  for (const [name, col, row] of [['topD', 10, 0], ['topL', 11, 0], ['topRidge', 10, 1]]) {
+    assert(rowIs(col, row, 0, OUTLINE) && rowIs(col, row, 1, OUTLINE),
+      `${name} should be outlined along its top`);
+  }
+  for (const [name, col, row] of [['botD', 8, 1], ['botL', 9, 1], ['botRidge', 11, 1]]) {
+    assert(rowIs(col, row, 14, OUTLINE) && rowIs(col, row, 15, OUTLINE),
+      `${name} should be outlined along its bottom`);
+  }
+
+  // And the fills must have no edge at all, or a wide roof grows stripes.
+  for (const [name, col, row] of [['fillD', 8, 0], ['fillL', 9, 0]]) {
+    assert(!rowIs(col, row, 0, OUTLINE), `${name} should be plain roof, not an edge`);
+    assert(!rowIs(col, row, 15, OUTLINE), `${name} should be plain roof, not an edge`);
+  }
+});
+
+test('a barn is laid out to the same height however wide it gets', () => {
+  // The whole reason for this roof shape. A gable climbs a row for every tile
+  // of width, which is what buried the farm behind a big barn.
+  const small = barnGrid(3, 2);
+  assertEqual(small.above, 2, 'the smallest barn hangs two rows over its footprint');
+  assertEqual(small.wall.length, 2, 'and its wall is the footprint');
+
+  assertEqual(barnGrid(5, 3).above, 2, 'five wide, still two');
+  assertEqual(barnGrid(7, 3).above, 2, 'seven wide, still two');
+  assert(barnGrid(9, 5).above <= 3, 'nine wide grows by one row, not four');
+
+  // Every roof row is the full width of the barn, gaps included, and the wall
+  // sits exactly under it.
+  const big = barnGrid(9, 4);
+  for (const row of big.rows) assertEqual(row.length, 9, 'roof rows span the barn');
+  for (const row of big.wall) assertEqual(row.length, 9, 'so do wall rows');
+  assertEqual(big.wall.length, 4, 'wall is as deep as the footprint');
+});
 
 test('the animal sheet and the animal definitions agree', () => {
   // The sheet is art the game indexes into by row and column. If a row is

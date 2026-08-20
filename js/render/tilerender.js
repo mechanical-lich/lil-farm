@@ -6,7 +6,7 @@ import { TILE } from '../config.js';
 /** Half a tile: autotiling works a quarter of a tile at a time. */
 const HALF = TILE / 2;
 import { GROUND, OBJ, isTilled, isWater } from '../world/tiledefs.js';
-import { SPRITES, TOWN, WATER, RIVER, CAPSULES, srcRect, sheetFor } from './sprites.js';
+import { SPRITES, TOWN, WATER, RIVER, BARN, CAPSULES, srcRect, sheetFor } from './sprites.js';
 import { mushroomAt } from '../sim/mushrooms.js';
 import { pendingGroundTiles } from '../sim/build.js';
 import { hash2d } from '../engine/rng.js';
@@ -372,25 +372,131 @@ export function drawUnowned(ctx, state, view) {
   ctx.restore();
 }
 
-export function drawBuilding(ctx, sheets, building) {
-  const px = building.x * TILE;
-  const roofRows = SPRITES.barnRoofRows;
-  const bodyRows = SPRITES.barnBodyRows;
+/**
+ * Lays out a barn of any size as a grid of sprites, top-left first.
+ *
+ * Split out from the drawing so it can be checked without a canvas, and
+ * because the shape is the interesting part. Returns rows of sprite references
+ * (or null for a gap), and `above`: how many rows sit outside the footprint.
+ *
+ * The roof is a flat top with its corners cut at 45 degrees. Each step out
+ * drops one row, and the innermost step shares a row with the flat top, so the
+ * outline never breaks. Because the corner is the only thing that grows with
+ * width, the roof stays the same height however wide the barn is — a gable
+ * would climb a row per tile and hang five rows up over a nine-wide barn.
+ */
+export function barnGrid(w, h) {
+  const key = `${w}x${h}`;
+  const cached = BARN_GRIDS.get(key);
+  if (cached) return cached;
 
-  // The body's top row is the anchor; the roof stacks upward from there.
-  roofRows.forEach((row, i) => {
-    const y = (building.y - roofRows.length + i) * TILE;
-    for (let c = 0; c < 3; c++) blit(ctx, sheets, [SPRITES.barnRoofCol0 + c, row], px + c * TILE, y);
-  });
-  bodyRows.forEach((row, i) => {
-    const y = (building.y + i) * TILE;
-    for (let c = 0; c < 3; c++) blit(ctx, sheets, [SPRITES.barnBodyCol0 + c, row], px + c * TILE, y);
-  });
+  const grid = layOutBarn(w, h);
+  BARN_GRIDS.set(key, grid);
+  return grid;
+}
+
+/**
+ * Barns are drawn every frame they are on screen and there are only a handful
+ * of legal sizes, so the layout is worked out once and kept. This is the same
+ * frugality the rest of the renderer runs on — the phone this is played on ran
+ * hot once already.
+ */
+const BARN_GRIDS = new Map();
+
+function layOutBarn(w, h) {
+  const mid = (w - 1) / 2;
+  // Cut the corner more deeply on a wider barn, but always leave three tiles
+  // of flat top: any less and a narrow barn becomes a spike over its own ridge.
+  const cut = Math.max(1, Math.min(Math.floor((w - 3) / 2), Math.floor(w / 4)));
+  // Corner rows, then the near edge. Nothing else: the whole point of this
+  // shape is that the roof stays low, and every extra row of it is another row
+  // of farm hidden behind the barn. That was the complaint that started this.
+  const roofRows = cut + 1;
+
+  const rows = [];
+  for (let r = 0; r < roofRows; r++) rows.push(new Array(w).fill(null));
+
+  for (let col = 0; col < w; col++) {
+    const fromEdge = Math.min(col, w - 1 - col);
+    const outer = col === 0 || col === w - 1;
+    const opens = fromEdge < cut ? cut - 1 - fromEdge : 0;
+    for (let r = opens; r <= roofRows - 2; r++) {
+      if (r === opens) {
+        rows[r][col] = fromEdge < cut ? (col < mid ? BARN.slopeL : BARN.slopeR)
+          : col === mid ? BARN.topRidge : (col < mid ? BARN.topD : BARN.topL);
+      } else if (col === mid) {
+        rows[r][col] = BARN.ridge;
+      } else {
+        rows[r][col] = outer ? (col < mid ? BARN.planeL : BARN.planeR)
+          : (col < mid ? BARN.fillD : BARN.fillL);
+      }
+    }
+  }
+
+  // The roof's near edge runs straight across: there is no gable here to end,
+  // so nothing pokes down over the wall.
+  const last = roofRows - 1;
+  for (let col = 0; col < w; col++) {
+    rows[last][col] = col < mid ? BARN.botD : col > mid ? BARN.botL : BARN.botRidge;
+  }
+  rows[last][0] = BARN.edgeL;
+  rows[last][w - 1] = BARN.edgeR;
+
+  // Wall. Its top row shares the roof's last row: the eave corners flare out
+  // beside it, and the braced upper storey shows between them.
+  const wall = [];
+  wall.push(rowOf(w, BARN.braceL, BARN.braceM, BARN.braceR));
+  for (let i = 0; i < h - 2; i++) wall.push(rowOf(w, BARN.plankL, BARN.plankM, BARN.plankR));
+  if (h >= 2) wall.push(doorRow(w));
+  const body = wall.slice(-h);
+
+  // The eaves overhang the wall's top row rather than sitting above it.
+  body[0] = body[0].slice();
+  const eaves = new Array(w).fill(null);
+  eaves[0] = BARN.eaveL;
+  eaves[w - 1] = BARN.eaveR;
+
+  return { rows: rows.concat([eaves]), wall: body, above: roofRows };
+}
+
+const rowOf = (w, l, m, r) =>
+  Array.from({ length: w }, (_, i) => (i === 0 ? l : i === w - 1 ? r : m));
+
+/**
+ * The ground floor: doors set one tile in from each end, the ends themselves
+ * framed wall. Kenney's door tiles carry a frame on one side, which is why the
+ * doors used to sit at the corners — a barn wide enough to need two doors made
+ * that look like an accident rather than a choice.
+ */
+function doorRow(w) {
+  const wall = rowOf(w, BARN.wallL, BARN.wallM, BARN.wallR);
+  for (let i = 1; i < w - 1; i += 4) wall[i] = BARN.door;
+  return wall;
+}
+
+/**
+ * Draws a barn. `building` needs x, y and (for anything but the smallest) w, h.
+ *
+ * Only the wall stands on the ground; the roof hangs above it over tiles the
+ * farmer still walks through, the way a tree canopy does.
+ */
+export function drawBuilding(ctx, sheets, building) {
+  const [w, h] = building.w > 0 ? [building.w, building.h] : [3, 2];
+  const { rows, wall, above } = barnGrid(w, h);
+  const px = building.x * TILE;
+
+  rows.forEach((row, i) => row.forEach((sprite, j) => {
+    if (sprite) blit(ctx, sheets, sprite, px + j * TILE, (building.y - above + i) * TILE);
+  }));
+  wall.forEach((row, i) => row.forEach((sprite, j) => {
+    if (sprite) blit(ctx, sheets, sprite, px + j * TILE, (building.y + i) * TILE);
+  }));
 }
 
 function drawBuildingsEndingAt(ctx, sheets, state, y) {
   for (const b of state.buildings || []) {
-    if (b.y + 1 === y) drawBuilding(ctx, sheets, b);   // body is two rows tall
+    const h = b.h > 0 ? b.h : 2;
+    if (b.y + h - 1 === y) drawBuilding(ctx, sheets, b);   // sorts on its last row
   }
 }
 

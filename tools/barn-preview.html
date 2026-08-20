@@ -1,0 +1,122 @@
+<!-- Barn preview: open tools/barn-preview.html. Works straight from the disk
+     as well as through the dev server, so the paths here are relative — the
+     same rule atlas-viewer.html follows.
+     Builds barns from assets/barn.png at several sizes, with the footprint
+     outlined in red so you can see how much roof falls outside it. -->
+<meta charset=utf8><title>Barn preview</title>
+<body style="background:#84c669;margin:0;color:#123;font:13px monospace">
+<p id=err hidden style="padding:16px;background:#511;color:#fdd;font-size:15px"></p>
+<canvas id=c style="image-rendering:pixelated;width:100%"></canvas>
+<script>
+const T=16;
+const img=new Image();
+img.onerror=()=>{ const e=document.getElementById('err'); e.hidden=false;
+  e.textContent='Could not load ../assets/barn.png — run `node tools/make-barn-sheet.mjs` to generate it.'; };
+img.src='../assets/barn.png?v='+Date.now();
+const P={apex:[1,0], slopeL:[0,1], ridgeTop:[1,1], slopeR:[2,1],
+  planeL:[0,2], ridge:[1,2], planeR:[2,2], notchL:[0,3], notch:[1,3], notchR:[2,3],
+  eaveL:[0,4], eaveR:[2,4], fillD:[8,0], fillL:[9,0], botD:[8,1], botL:[9,1],
+  topD:[10,0], topL:[11,0], topRidge:[10,1], botRidge:[11,1],
+  braceL:[4,1], braceM:[5,1], braceR:[6,1], plankL:[4,2], plankM:[5,2], plankR:[6,2],
+  plank2L:[4,3], plank2M:[5,3], plank2R:[6,3], doorBig:[4,4], door:[5,4], window:[6,4]};
+const put=(x,s,dx,dy,S)=>{ if(s) x.drawImage(img,s[0]*T,s[1]*T,T,T,dx,dy,T*S,T*S); };
+
+// Roof shapes, all over the same wall pieces.
+//
+//   gable  peaks over the ridge, so it grows a row taller for every tile it
+//          grows wider. Handsome, but a wide one hangs a long way up the
+//          screen over ground the farmer still walks on.
+//   round  the reference barn's silhouette: a vertical side, a 45-degree cut
+//          across the corner, then a flat top — four folds, mirrored. Raising
+//          `chamfer` cuts the corner in more steps, which is what reads as the
+//          roof being rounded, and it stays the same height at any width.
+//
+// `round` is built entirely from tiles that already existed, plus the flat-top
+// edge. The 45-degree slopes step exactly one tile across per tile up, so a
+// chamfer of any depth is just the same tile placed again one row lower.
+function roofGrid(w,style,field,chamfer){
+  const k=(w-1)/2, mid=k;
+  // A chamfer needs somewhere to land: keep at least three tiles of flat top,
+  // or a narrow barn turns into a spike over its own ridge.
+  const c = style==='round' ? Math.max(1, Math.min(chamfer||1, Math.floor((w-3)/2))) : 0;
+  const H = style==='gable' ? 1+k+field+2 : c+field+2;
+  const rows=Array.from({length:H},()=>new Array(w).fill(null));
+  if(style==='gable') rows[0][mid]=P.apex;
+
+  for(let col=0;col<w;col++){
+    const d=Math.abs(col-mid), outer=col===0||col===w-1;
+    const fromEdge=Math.min(col,w-1-col);
+    let opens, topTile;
+    if(style==='gable'){
+      opens=Math.max(d,1);
+      topTile = d>0 ? (col<mid?P.slopeL:P.slopeR) : P.ridgeTop;
+    } else if(fromEdge < c){
+      // The cut corner: each step out drops one row, and the innermost step
+      // sits on the same row as the flat top so the outline never breaks.
+      opens = c - 1 - fromEdge;
+      topTile = col<mid?P.slopeL:P.slopeR;
+    } else {
+      opens = 0;                                   // the flat top
+      topTile = col===mid?P.topRidge : (col<mid?P.topD:P.topL);
+    }
+    for(let r=opens;r<=H-3;r++){
+      if(r===opens) rows[r][col]=topTile;
+      else if(col===mid) rows[r][col]= (style==='gable'&&r===1)?P.ridgeTop:P.ridge;
+      else rows[r][col]= outer?(col<mid?P.planeL:P.planeR):(col<mid?P.fillD:P.fillL);
+    }
+  }
+  // The bottom edge. A gable keeps the notch, whose V is the near gable end
+  // showing the wall behind it; a round roof has no gable to end, so
+  // it runs straight across the way the reference barn does.
+  const nr=H-2;
+  for(let col=0;col<w;col++) rows[nr][col]= col<mid?P.botD : col>mid?P.botL
+    : (style==='gable'?P.notch:P.botRidge);
+  rows[nr][0]=P.notchL; rows[nr][w-1]=P.notchR;
+  rows[H-1][0]=P.eaveL; rows[H-1][w-1]=P.eaveR;
+  return rows;
+}
+// Doors sit one tile in from each end; the ends are the framed edge tiles.
+function wallGrid(w,d){
+  const pick=(l,m,r,i)=> i===0?l : i===w-1?r : m;
+  const rows=[Array.from({length:w},(_,i)=>pick(P.braceL,P.braceM,P.braceR,i))];
+  for(let i=0;i<d-3;i++) rows.push(Array.from({length:w},(_,j)=>pick(P.plankL,P.plankM,P.plankR,j)));
+  if(d>=2) rows.push(Array.from({length:w},(_,i)=>pick(P.plank2L,P.plank2M,P.plank2R,i)));
+  const doors=[]; for(let b=0;b<Math.max(1,Math.round((w-2)/4));b++) doors.push(1+b*4);
+  rows.push(Array.from({length:w},(_,i)=>
+    doors.includes(i)?P.door : pick(P.plank2L,P.plank2M,P.plank2R,i)));
+  return rows.slice(-d);
+}
+/** Draws a barn whose footprint is w*d, with `above` rows of roof outside it. */
+function barn(x,ox,oy,w,d,style,field,S,chamfer){
+  const rr=roofGrid(w,style,field,chamfer), wr=wallGrid(w,d);
+  const above=rr.length-2;                           // wall starts at the notch row
+  const top=oy+above*T*S;
+  wr.forEach((row,i)=>row.forEach((s,j)=>put(x,s,ox+j*T*S,top+i*T*S,S)));
+  rr.forEach((row,i)=>row.forEach((s,j)=>put(x,s,ox+j*T*S,oy+i*T*S,S)));
+  x.strokeStyle='rgba(220,40,40,.85)'; x.lineWidth=2;
+  x.strokeRect(ox,top,w*T*S,d*T*S);                  // the footprint
+  return above;
+}
+const CASES=[
+  ['3x2 round',3,2,'round',1,1],['5x3 round',5,3,'round',1,1],
+  ['7x4 round',7,4,'round',1,2],['9x5 round',9,5,'round',1,2],
+  ['5x2 round, shallow',5,2,'round',0,1],['7x3 round, shallow',7,3,'round',0,2],
+  ['9x4 round, shallow',9,4,'round',0,2],['9x4 round, 3-step',9,4,'round',0,3],
+  ['3x2 gable (before)',3,2,'gable',0],['9x4 gable (before)',9,4,'gable',0],
+];
+img.decode().then(()=>{
+  const cv=document.getElementById('c'), x=cv.getContext('2d'), S=3;
+  const CW=12*T*S+40, RH=11*T*S+50, PER=4;
+  cv.width=CW*PER; cv.height=RH*Math.ceil(CASES.length/PER);
+  x.imageSmoothingEnabled=false; x.fillStyle='#84c669'; x.fillRect(0,0,cv.width,cv.height);
+  CASES.forEach((c,i)=>{
+    const ox=(i%PER)*CW+18, oy=Math.floor(i/PER)*RH+40;
+    x.fillStyle='#123'; x.font='bold 15px monospace';
+    const title = c[0];
+    x.fillText(title, ox, oy - 26);
+    const a = barn(x, ox, oy, c[1], c[2], c[3], c[4], S, c[5]);
+    x.fillStyle='#3a5a3a'; x.font='13px monospace';
+    x.fillText(`${a} row${a === 1 ? '' : 's'} of roof above the footprint`, ox, oy - 10);
+  });
+});
+</script></body>

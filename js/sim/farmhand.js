@@ -20,7 +20,7 @@ import { emitUnlessSuspended } from '../engine/events.js';
 import { OBJ, objDef } from '../world/tiledefs.js';
 import { findPath, besideBox } from '../world/pathfind.js';
 import { animalDef, isReady, takeFromAnimal } from './animals.js';
-import { buildDef } from './build.js';
+import { animalCapacity, sizeOf } from './build.js';
 
 /** What one farmhand costs to hire. */
 export const HAND_PRICE = 1200;
@@ -71,9 +71,16 @@ export function makeHand(state, x, y) {
 
 export function handCount(state) { return (state.hands || []).length; }
 
-/** One hand per barn. Somewhere to put them, and a reason to build another. */
+/**
+ * One hand to every four animals the farm can house.
+ *
+ * It used to be one per barn, which stopped making sense once a barn could be
+ * any size: a nine-wide barn would have had the same single hand as a shed.
+ * Tying it to capacity means a bigger barn brings the hands to work it, and a
+ * 3x2 still allows exactly one, as it always did.
+ */
 export function handCapacity(state) {
-  return (state.buildings || []).filter((b) => b.type === 'barn').length;
+  return Math.floor(animalCapacity(state) / 4);
 }
 
 export function carriedTotal(hand) {
@@ -340,7 +347,7 @@ function pickRestSpot(state, hand) {
     if (d < bestD) { bestD = d; barn = b; }
   }
 
-  const [w, h] = buildDef('barn').size;
+  const [w, h] = sizeOf(barn);
   const inFront = [];
   const sides = [];
   const behind = [];

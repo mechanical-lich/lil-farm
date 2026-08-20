@@ -10,7 +10,7 @@ import { OBJ, GROUND, objDef, isTilled, isWater } from '../world/tiledefs.js';
 import { cropAt, isRipe, isStalled, cropDef } from './crops.js';
 import {
   buildDef, canPlaceAt, structureAt, demolishWork, troughAnchorAt, isReserved,
-  footprint,
+  footprint, workOf, sizeOf,
 } from './build.js';
 import { animalDef, TROUGH_CAPACITY, isReady } from './animals.js';
 import { mushroomAt, forage } from './mushrooms.js';
@@ -85,12 +85,14 @@ export function followTargets(state) {
 /**
  * Clears whatever has turned up on a build site, keeping anything worth having.
  *
- * Reserving the footprint (see build.js) stops nearly everything from getting
- * in the way, but not a hen: she wanders where she likes and lays where she
- * stands. So the last thing before the walls go up is the farmer picking up
- * what's lying about — and because reservation already excluded everything the
- * player put there deliberately, this only ever finds things that arrived on
- * their own. Nothing is destroyed and the build is never cancelled.
+ * Two kinds of thing turn up here. A building may be sited over scenery in the
+ * first place — a farm is scattered with trees and weeds, and requiring a bare
+ * rectangle made a big barn impossible to place — so the trees on the site are
+ * expected, and the wood goes in the bag. The rest arrived on their own while
+ * the task waited: reservation keeps deliberate things out, but not a hen, who
+ * wanders where she likes and lays where she stands.
+ *
+ * Either way nothing is destroyed and the build is never cancelled.
  *
  * @returns {object} items gained, in the same shape the task pipeline reports
  */
@@ -100,7 +102,7 @@ export function clearBuildSite(state, task) {
     for (const [id, n] of Object.entries(items || {})) gained[id] = (gained[id] || 0) + n;
   };
 
-  for (const t of footprint(task.buildKind, task.x, task.y)) {
+  for (const t of footprint(task.buildKind, task.x, task.y, sizeOf(task))) {
     if (mushroomAt(state, t.x, t.y)) {
       // forage() clears the tile, banks the mushroom and writes the journal —
       // and, critically, removes the state.mushrooms entry. Paving over one
@@ -296,13 +298,14 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
     const found = structureAt(state, x, y);
     if (!found) return null;
     const def = buildDef(found.kind);
+    const size = found.w > 0 ? [found.w, found.h] : def.size;
     return {
       type: 'demolish',
       x: found.x,
       y: found.y,
-      work: demolishWork(found.kind),
+      work: demolishWork(found.kind, size),
       detail: def.name.toLowerCase(),
-      w: def.size[0], h: def.size[1],
+      w: size[0], h: size[1],
       // Solid structures are worked on from beside — and so is water, which
       // the farmer plainly cannot stand in to fill back in.
       adjacent: def.obj != null || isWater(def.ground),
@@ -338,12 +341,15 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
     case 'build': {
       const kind = opts.buildKind;
       const def = buildDef(kind);
-      if (!def || !canPlaceAt(state, kind, x, y)) return null;
+      // A barn is sized by the player, so the caller passes one in; everything
+      // else is whatever its recipe says.
+      const size = (opts && opts.size) || def?.size;
+      if (!def || !canPlaceAt(state, kind, x, y, size)) return null;
       return {
-        type: 'build', x, y, work: def.work, detail: def.name.toLowerCase(), buildKind: kind,
+        type: 'build', x, y, work: workOf(kind, size), detail: def.name.toLowerCase(), buildKind: kind,
         // Carrying the footprint on the task lets the UI outline the whole
         // structure without having to know anything about build recipes.
-        w: def.size[0], h: def.size[1],
+        w: size[0], h: size[1],
         // Structures are solid, so the farmer works on them from alongside.
         adjacent: true,
       };

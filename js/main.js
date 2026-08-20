@@ -10,7 +10,10 @@ import { newGame, serialize, deserialize } from './state.js';
 import { tick as simTick } from './sim/tick.js';
 import { addTask, taskForTile, taskLabel, queueTillRow } from './sim/tasks.js';
 import { itemName, addItem } from './sim/inventory.js';
-import { canAfford, buildDef, canPlaceAt, isReserved } from './sim/build.js';
+import {
+  canAfford, buildDef, canPlaceAt, isReserved,
+  snapBarn, BARN_LIMITS, barnCapacity, costLabel, placementProblem,
+} from './sim/build.js';
 import { drawBuilding } from './render/tilerender.js';
 import { drawAnimalSprite, drawHandSprite } from './render/entityrender.js';
 import { drawObjectSprite } from './render/tilerender.js';
@@ -329,20 +332,28 @@ function wirePanelTracking() {
  * queued build task) and a livestock purchase (an immediate transaction).
  */
 function beginPlacement(spec, x, y) {
-  // A spec may snap the tap to its own grid.
-  const at = spec.snap ? spec.snap(x, y) : { x, y };
-  placement.pending = { ...spec, ...at, valid: spec.validate(at.x, at.y) };
+  placement.pending = { ...spec, ...pointAt(spec, x, y) };
   renderConfirmBar();
 }
 
 function movePlacement(x, y) {
   const p = placement.pending;
   if (!p) return;
-  const at = p.snap ? p.snap(x, y) : { x, y };
-  p.x = at.x;
-  p.y = at.y;
-  p.valid = p.validate(at.x, at.y);
+  Object.assign(p, pointAt(p, x, y));
   renderConfirmBar();
+}
+
+/**
+ * Where a tap puts the thing being sited, and whether it may go there.
+ *
+ * Most specs answer straight away. A barn answers differently the second time
+ * it is asked, because the player is picking two corners rather than one spot,
+ * so `pick` owns both the geometry and the verdict.
+ */
+function pointAt(spec, x, y) {
+  if (spec.pick) return spec.pick(x, y);
+  const at = spec.snap ? spec.snap(x, y) : { x, y };
+  return { ...at, valid: spec.validate(at.x, at.y) };
 }
 
 function clearPlacement() {
@@ -353,27 +364,109 @@ function clearPlacement() {
 function renderConfirmBar() {
   const bar = document.getElementById('confirm-bar');
   const ok = document.getElementById('confirm-place');
+  const hint = document.getElementById('place-hint');
   const p = placement.pending;
   bar.classList.toggle('open', p !== null);
   if (p) {
     ok.disabled = !p.valid;
-    ok.textContent = p.confirmLabel || '✓ Place here';
+    ok.textContent = p.label || p.confirmLabel || '✓ Place here';
+    hint.textContent = p.hint || '';
+    hint.classList.toggle('warn', Boolean(p.hint) && !p.valid);
   }
 }
 
 /** Siting a structure: confirming queues a build task for the farmer. */
-function buildingPlacement(state, kind) {
+function buildingPlacement(state, kind, size) {
   const def = buildDef(kind);
+  const [w, h] = size || def.size;
   return {
-    w: def.size[0], h: def.size[1],
+    w, h,
     confirmLabel: `✓ Build ${def.name.toLowerCase()} here`,
-    validate: (x, y) => canPlaceAt(state, kind, x, y),
-    draw: (ctx, sheets, at) => drawBuilding(ctx, sheets, { ...at, type: kind }),
+    validate: (x, y) => canPlaceAt(state, kind, x, y, [w, h]),
+    draw: (ctx, sheets, at) => drawBuilding(ctx, sheets, { ...at, type: kind, w, h }),
     confirm: (x, y) => {
-      const spec = taskForTile(state, x, y, 'build', { buildKind: kind });
+      const spec = taskForTile(state, x, y, 'build', { buildKind: kind, size: [w, h] });
       if (!spec) return { ok: false, reason: "that won't fit there" };
       addTask(state, spec);
       return { ok: true, message: `Queued: ${def.name}` };
+    },
+  };
+}
+
+/**
+ * Siting a barn — the one structure whose size the player chooses.
+ *
+ * Two taps, not one: a corner, then the opposite corner. A single tap can only
+ * ever place a fixed stamp, and the whole point here is that the player decides
+ * how much of the farm the building takes.
+ *
+ * The rectangle is snapped *down* to something buildable, so what is drawn is
+ * never larger than what was asked for — the barn fits inside the ground you
+ * marked out rather than spilling past it. Everything the choice costs is on
+ * screen before it is confirmed, because at three hundred wood a wrong barn is
+ * an expensive thing to find out about afterwards.
+ */
+function barnPlacement(state, kind) {
+  const def = buildDef(kind);
+  let anchor = null;
+
+  return {
+    w: 1,
+    h: 1,
+    // The ghost draws itself at whatever size the two corners currently imply.
+    draw: (ctx, sheets, at) => {
+      if (at.w < BARN_LIMITS.minW || at.h < BARN_LIMITS.minH) return;
+      drawBuilding(ctx, sheets, { ...at, type: kind });
+    },
+    pick: (x, y) => {
+      if (!anchor) {
+        anchor = { x, y };
+        return {
+          x, y, w: 1, h: 1, valid: false,
+          label: '✓ Build barn', hint: 'Now tap the opposite corner',
+        };
+      }
+
+      const box = snapBarn(anchor.x, anchor.y, x, y);
+      if (!box) {
+        // Show the rectangle they actually drew, so it is obvious how short it
+        // falls rather than the ghost silently refusing to appear.
+        return {
+          x: Math.min(anchor.x, x), y: Math.min(anchor.y, y),
+          w: Math.abs(x - anchor.x) + 1, h: Math.abs(y - anchor.y) + 1,
+          valid: false, label: '✓ Build barn',
+          hint: `A barn is at least ${BARN_LIMITS.minW} by ${BARN_LIMITS.minH}`,
+        };
+      }
+
+      const size = [box.w, box.h];
+      const problem = placementProblem(state, kind, box.x, box.y, size);
+      const afford = canAfford(state, kind, size);
+      const label = `✓ Build ${box.w}×${box.h} barn`;
+      if (problem) {
+        // Say which rule was broken. "Something is in the way" covered running
+        // off the edge of the player's own land too, and sent them hunting for
+        // scenery that wasn't there.
+        return { ...box, valid: false, label, hint: problem[0].toUpperCase() + problem.slice(1) };
+      }
+      if (!afford.ok) {
+        return {
+          ...box, valid: false, label,
+          hint: `Needs ${costLabel(kind, size)} — not enough ${itemName(afford.missing).toLowerCase()}`,
+        };
+      }
+      return {
+        ...box, valid: true, label,
+        hint: `${costLabel(kind, size)} · houses ${barnCapacity(box.w, box.h)}`,
+      };
+    },
+    confirm: (x, y) => {
+      const p = placement.pending;
+      const size = [p.w, p.h];
+      const spec = taskForTile(state, x, y, 'build', { buildKind: kind, size });
+      if (!spec) return { ok: false, reason: "that won't fit there" };
+      addTask(state, spec);
+      return { ok: true, message: `Queued: ${p.w}×${p.h} ${def.name.toLowerCase()}` };
     },
   };
 }
@@ -489,7 +582,11 @@ function queueTileTask(state, toolbar, x, y, { announce }) {
     }
     // Buildings are sited with a preview; everything else drops on the tap.
     if (buildDef(kind).building) {
-      if (announce) beginPlacement(buildingPlacement(state, kind), x, y);
+      if (announce) {
+        beginPlacement(buildDef(kind).sizable
+          ? barnPlacement(state, kind)
+          : buildingPlacement(state, kind), x, y);
+      }
       return;
     }
   }

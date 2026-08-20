@@ -76,8 +76,11 @@ export function initToolbar(state, { onToolChange } = {}) {
       // Greyed out rather than hidden: the player should see what exists and
       // what it would cost, even when they can't afford it yet.
       const afford = canAfford(state, kind).ok;
+      // A barn is priced by its size, so the row can only quote the smallest
+      // one — saying "from" stops that reading as the whole story.
+      const price = def.sizable ? `from ${costLabel(kind)}` : costLabel(kind);
       return `<button class="${kind === buildKind ? 'on' : ''}${afford ? '' : ' short'}" ` +
-        `data-build="${kind}" title="${def.hint}">${def.name} <b>${costLabel(kind)}</b></button>`;
+        `data-build="${kind}" title="${def.hint}">${def.name} <b>${price}</b></button>`;
     }).join('');
   }
 

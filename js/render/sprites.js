@@ -6,6 +6,7 @@
 //   'shrooms' — assets/mushrooms.png           one row of 16 foraged mushrooms
 //   'animals' — assets/animals.png              a row per animal, a column per colour
 //   'battle'  — assets/battle_tilemap_packed.png  water: ponds and rivers
+//   'barn'    — assets/barn.png                  the barn, gathered and extended
 //
 // Both share the same palette (#84c669 grass, #eaa56c dirt), so tiles from the
 // two sheets sit next to each other seamlessly.
@@ -197,14 +198,6 @@ export const SPRITES = {
   // Gates are the hinged panels on row 10 (note the blue hinge pixels).
   gateClosed: [6, 10],
   gateClosedAlt: [7, 10],
-  // Barn. Drawn 3 wide and 5 tall from these rows, top to bottom: three roof
-  // rows taken from cols 9-11, then two body rows from cols 6-8. Only the two
-  // body rows sit on the ground; the roof overhangs upward like a tree canopy.
-  // Composition verified by rendering the alternatives side by side.
-  barnRoofRows: [7, 8, 9],
-  barnBodyRows: [9, 10],
-  barnRoofCol0: 9,
-  barnBodyCol0: 6,
 
   // Eggs a hen has dropped, waiting to be picked up.
   egg: [5, 10],
@@ -213,6 +206,34 @@ export const SPRITES = {
   // sheet, assets/animals.png, which carries a colour variation per column.
   farmer: [0, 9],
   farmerHat: [1, 9],
+};
+
+/**
+ * The barn, on its own sheet — see tools/make-barn-sheet.mjs, which builds it.
+ *
+ * It outgrew the shared sheet twice over: the pieces sat in two separate
+ * corners of it, and a barn the player sizes needs edges Kenney never drew,
+ * with nowhere left to put them (that sheet is 12x11 with no blank cell).
+ *
+ * The roof is a flat top with its corners cut away at 45 degrees. The slopes
+ * step exactly one tile across per tile up, so a corner of any depth is the
+ * same tile placed again a row lower — which is what lets the roof stay two
+ * rows tall however wide the barn gets. A gable would climb a row per tile of
+ * width and bury the farm behind it.
+ */
+export const BARN = {
+  slopeL: [0, 1, 'barn'], slopeR: [2, 1, 'barn'],
+  topD: [10, 0, 'barn'], topL: [11, 0, 'barn'], topRidge: [10, 1, 'barn'],
+  fillD: [8, 0, 'barn'], fillL: [9, 0, 'barn'], ridge: [1, 2, 'barn'],
+  planeL: [0, 2, 'barn'], planeR: [2, 2, 'barn'],
+  botD: [8, 1, 'barn'], botL: [9, 1, 'barn'], botRidge: [11, 1, 'barn'],
+  edgeL: [0, 3, 'barn'], edgeR: [2, 3, 'barn'],
+  eaveL: [0, 4, 'barn'], eaveR: [2, 4, 'barn'],
+
+  braceL: [4, 1, 'barn'], braceM: [5, 1, 'barn'], braceR: [6, 1, 'barn'],
+  plankL: [4, 2, 'barn'], plankM: [5, 2, 'barn'], plankR: [6, 2, 'barn'],
+  wallL: [4, 3, 'barn'], wallM: [5, 3, 'barn'], wallR: [6, 3, 'barn'],
+  door: [5, 4, 'barn'],
 };
 
 /**
@@ -300,16 +321,17 @@ function loadImage(src) {
  * Loads both tilesheets and prepares derived tiles.
  * @returns {Promise<{farm: HTMLImageElement, town: HTMLImageElement,
  *   emotes: HTMLImageElement, shrooms: HTMLImageElement,
- *   animals: HTMLImageElement, battle: HTMLImageElement}>}
+ *   animals: HTMLImageElement, battle: HTMLImageElement, barn: HTMLImageElement}>}
  */
 export async function loadSheets() {
-  const [farm, town, emotes, shrooms, animals, battle] = await Promise.all([
+  const [farm, town, emotes, shrooms, animals, battle, barn] = await Promise.all([
     loadImage('assets/tilemap_packed.png'),
     loadImage('assets/town_tilemap_packed.png'),
     loadImage('assets/emotes.png'),
     loadImage('assets/mushrooms.png'),
     loadImage('assets/animals.png'),
     loadImage('assets/battle_tilemap_packed.png'),
+    loadImage('assets/barn.png'),
   ]);
   buildCapsules(farm);
 
@@ -318,7 +340,7 @@ export async function loadSheets() {
   // whole job — there's no constant to remember to bump.
   setAnimalVariants(Math.round(animals.width / TILE));
 
-  return { farm, town, emotes, shrooms, animals, battle };
+  return { farm, town, emotes, shrooms, animals, battle, barn };
 }
 
 /** Resolves which sheet image a sprite reference belongs to. */

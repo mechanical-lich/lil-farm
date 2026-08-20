@@ -4,7 +4,7 @@
 import { SAVE_VERSION, MAP_W, MAP_H, START_MONEY, START_INVENTORY } from './config.js';
 import { Grid } from './world/grid.js';
 import { generateWorld, startingBarnAnchor } from './world/worldgen.js';
-import { placeStructure } from './sim/build.js';
+import { placeStructure, reconcileBuildings } from './sim/build.js';
 import { seedStartingMushrooms } from './sim/mushrooms.js';
 import { startingPlot } from './world/land.js';
 import { makeRng } from './engine/rng.js';
@@ -95,7 +95,7 @@ export function deserialize(data) {
   const rng = makeRng(data.seed >>> 0);
   rng.setState(data.rngState >>> 0);
 
-  return {
+  const state = {
     version: data.version,
     seed: data.seed,
     rng,
@@ -124,4 +124,13 @@ export function deserialize(data) {
     nextTaskId: data.nextTaskId || 1,
     inventory: data.inventory || {},
   };
+
+  // The grid's building marks are an index over state.buildings, and an index
+  // can go stale. Putting it right on load is cheap and stops a farm carrying a
+  // wrong answer around with it forever.
+  const fixed = reconcileBuildings(state);
+  if (fixed.cleared || fixed.restored) {
+    console.warn(`building marks repaired on load: ${fixed.cleared} stale, ${fixed.restored} missing`);
+  }
+  return state;
 }

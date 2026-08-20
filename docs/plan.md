@@ -216,6 +216,38 @@ failing; and `forage()` banks the mushroom itself, so `clearBuildSite` records
 it for the report but must not bank it again. The first version double-counted
 and a test caught it.
 
+**A barn carries its own footprint** (`w`/`h` on the building record and on the
+build task), because it is the one structure whose size the player chooses.
+Everything that used to read `def.size` now takes a size: `footprint`,
+`canPlaceAt`, `costOf`, `workOf`, `refundFor`, `demolishWork`. Save migration 6
+stamps 3x2 onto existing barns *and* onto any build task caught mid-flight —
+one of those would otherwise have completed as a barn with no size at all.
+
+`snapBarn` rounds a dragged rectangle **down** to something buildable, never up,
+so the rectangle is a promise about the ground being spent rather than a
+suggestion. `barnGrid` in `render/tilerender.js` turns a size into a grid of
+sprites and is memoised: there are only a handful of legal sizes and a barn is
+laid out on every frame it is visible.
+
+**The building records are the truth; the grid's BUILDING marks are an index.**
+That was already written down, and the code still trusted the index: a mark with
+no record behind it refused to let a barn be built on ground the player could
+see was bare ("it says there's a building in the way but there's not"). Two
+changes. `placementProblem` consults `buildingAt` before believing a mark, and
+`reconcileBuildings` runs on load to sweep stale marks and stamp back missing
+ones, logging what it repaired. The second direction matters more than the
+first: a barn with no marks is a barn animals walk through.
+
+A test helper was wiping the object grid while keeping the barn's record, which
+is exactly that second case — so the repair started failing a save/reload
+comparison the moment it was added. The helper was wrong, not the repair.
+
+The barn sheet is generated, and a generated asset fails *quietly* — a missing
+edge just leaves a gap in a roof. A test therefore reads the pixels back and
+asserts every edge tile carries its edge and every fill tile carries none. It
+earned its place immediately: an edit deleted the two lines that stamp the near
+edge, and the roof went out with a bottom edge only under its ridge.
+
 **Rendering is skipped unless the frame would look different.** `drawIfNeeded`
 compares a small frame signature — tick, camera translation, placement ghost,
 till anchor — and draws only if it changed or something is mid-move. Measured
