@@ -10,7 +10,7 @@ export const CATCHUP_CHUNK = 20000;     // ticks per chunk before yielding to th
 
 // --- Persistence --------------------------------------------------------
 export const SAVE_KEY = 'lilfarm.save.v1';
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;
 export const AUTOSAVE_MIN_MS = 1000;    // never write more often than this
 export const AUTOSAVE_MAX_MS = 10000;   // always write at least this often when dirty
 

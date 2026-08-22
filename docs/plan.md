@@ -229,6 +229,14 @@ suggestion. `barnGrid` in `render/tilerender.js` turns a size into a grid of
 sprites and is memoised: there are only a handful of legal sizes and a barn is
 laid out on every frame it is visible.
 
+**The market divides stock share by the *normal* share, not by today's demand.**
+Dividing by a drifting number cancels the drift out: every good the player was
+not already selling came out at an identical price, whatever the town happened
+to want, and the panel showed eight identical rows and no answer to the only
+question worth asking — which of these should I grow? Demand is applied
+separately as a tilt, so it can be seen. The panel is what caught this; the
+numbers alone looked fine.
+
 **The building records are the truth; the grid's BUILDING marks are an index.**
 That was already written down, and the code still trusted the index: a mark with
 no record behind it refused to let a barn be built on ground the player could

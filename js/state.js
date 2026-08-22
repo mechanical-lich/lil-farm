@@ -6,6 +6,7 @@ import { Grid } from './world/grid.js';
 import { generateWorld, startingBarnAnchor } from './world/worldgen.js';
 import { placeStructure, reconcileBuildings } from './sim/build.js';
 import { seedStartingMushrooms } from './sim/mushrooms.js';
+import { newMarket } from './sim/market.js';
 import { startingPlot } from './world/land.js';
 import { makeRng } from './engine/rng.js';
 
@@ -39,6 +40,7 @@ export function newGame(seed = (Date.now() ^ 0x5f3759df) >>> 0) {
     nextTaskId: 1,
     // See TESTING in config.js — a real farm starts with just a few seeds.
     inventory: { ...START_INVENTORY },
+    market: newMarket(),
   };
 
   // Every farm starts with one barn. It gives the opening view a centre to sit
@@ -80,6 +82,7 @@ export function serialize(state) {
     tasks: state.tasks,
     nextTaskId: state.nextTaskId,
     inventory: state.inventory,
+    market: state.market,
   };
 }
 
@@ -123,6 +126,7 @@ export function deserialize(data) {
     tasks: data.tasks || [],
     nextTaskId: data.nextTaskId || 1,
     inventory: data.inventory || {},
+    market: data.market || newMarket(),
   };
 
   // The grid's building marks are an index over state.buildings, and an index

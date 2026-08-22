@@ -14,6 +14,7 @@ import {
 } from './inventory.js';
 import { ANIMALS, animalDef, makeAnimal, SWIMMERS } from './animals.js';
 import { animalCapacity } from './build.js';
+import { priceOf, priceMultiplier, recordSale } from './market.js';
 import {
   HAND_PRICE, HAND_CAPACITY, makeHand, handCount, handCapacity,
 } from './farmhand.js';
@@ -56,12 +57,20 @@ export const MATERIALS = {
 };
 
 /** Seeds resell at half price — enough to undo a mistake, never a money loop. */
-export function sellPrice(id) {
+/**
+ * What one of these fetches.
+ *
+ * Takes the state because crops and produce are traded on a market whose prices
+ * move (see sim/market.js). Seeds and materials are not: a seed is bought back
+ * at half what it cost, and building materials are deliberately kept out of the
+ * market so a barn's price never wanders.
+ */
+export function sellPrice(state, id) {
   if (isSeedId(id)) {
     const crop = CROPS[cropFromSeedId(id)];
     return crop ? Math.floor(crop.seedCost / 2) : 0;
   }
-  return ITEMS[id]?.sell || 0;
+  return priceOf(state, id);
 }
 
 export function buyPrice(id) {
@@ -117,9 +126,12 @@ export function buyList(state) {
 /** Everything in the bag that's worth money, as display-ready rows. */
 export function sellList(state) {
   return Object.entries(state.inventory)
-    .filter(([id, qty]) => qty > 0 && sellPrice(id) > 0)
+    .filter(([id, qty]) => qty > 0 && sellPrice(state, id) > 0)
     .map(([id, qty]) => ({
-      id, name: itemName(id), qty, price: sellPrice(id), group: itemGroup(id),
+      id, name: itemName(id), qty, price: sellPrice(state, id), group: itemGroup(id),
+      // What the market is doing to this price, so the sell list can show it
+      // where the decision is actually made rather than only in the panel.
+      multiplier: priceMultiplier(state, id),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -276,7 +288,7 @@ export function buy(state, id, qty = 1) {
 export function sell(state, id, qty = 1) {
   if (qty <= 0) return { ok: false, reason: 'nothing to sell' };
 
-  const price = sellPrice(id);
+  const price = sellPrice(state, id);
   if (!price) return { ok: false, reason: "that isn't worth anything" };
 
   const have = countItem(state, id);
@@ -286,6 +298,8 @@ export function sell(state, id, qty = 1) {
 
   const earned = price * qty;
   state.money += earned;
+  // The town now holds these, which is what moves the price next time.
+  recordSale(state, id, qty, earned);
   emitUnlessSuspended('money:changed', { delta: earned });
   return { ok: true, earned, qty };
 }

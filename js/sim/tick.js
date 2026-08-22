@@ -14,6 +14,7 @@ import { updateAnimals } from './animals.js';
 import { updateHands } from './farmhand.js';
 import { updateWeeds } from './weeds.js';
 import { updateMushrooms } from './mushrooms.js';
+import { updateMarket } from './market.js';
 
 /** @param {object} state */
 export function tick(state) {
@@ -29,4 +30,5 @@ export function tick(state) {
   updateHands(state);
   updateWeeds(state);
   updateMushrooms(state);
+  updateMarket(state);
 }

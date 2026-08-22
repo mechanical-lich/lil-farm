@@ -31,6 +31,36 @@ Siting one takes two taps — a corner, then the opposite corner — rather than
 
 Cost is a flat base plus a rate per tile, set so the smallest barn comes out at exactly what a barn has always cost. Bigger ones are therefore slightly cheaper per tile, which is the right way round: committing to one big barn should beat dotting small ones about. Farmhands follow the animals housed rather than the building count — one to every four — since one hand for a nine-wide barn made no sense.
 
+## The market
+Crops and animal produce sell at prices that move. The farm this was written for had seventy-two plots of eggplant and nothing else — and three hundred unplanted cabbage seeds in the bag.
+
+Eggplant does not win on price. Measured, it is the *worst* crop in the game per minute: wheat earns 4.80 a minute to eggplant's 2.00. It wins because nobody sows but the player, so the only crop worth growing is the one that survives being left alone for eight hours. Price alone cannot fix that, and this does not try to. What it fixes is the choice *between* the crops you can walk away from.
+
+**The town has no fixed appetite — only opinions about proportions.** A fixed one breaks: a farm selling a thousand eggplants a day would sit at the floor price for ever, in every good, which is a pay cut rather than a decision. So the market asks what *share* of your sales each good is, against the share it wanted. Doubling the size of the farm changes nothing; changing what you plant changes everything.
+
+The wanted shares are not equal, and that is the subtle part. An even split would ask for equal *value* of carrots and eggplants, and a carrot is worth a tenth of an eggplant — matching one eggplant plot would mean ten times the sowing. The first version did exactly that and priced a genuinely varied seven-crop farm as a monoculture. The shares are now weighted by what a plot or an animal actually returns for one visit, so "a normal farm" is the balance point and the price only asks how far you have strayed from it.
+
+Measured over several weeks of simulated trading:
+
+| what you sell | what you're paid |
+|---|---|
+| one crop, nothing else | x0.64 average, x0.50 in a bad week |
+| four goods | x0.92 |
+| seven goods | x0.99 |
+| a beginner's first carrots and wheat | x0.96 |
+
+That last row matters as much as the first. The early game has no choice — carrots and wheat are what you can afford — so a beginner's small volumes are diluted by the town's own stock and barely move anything. The market wakes up as the farm grows into it.
+
+Demand *drifts* twice a day rather than being redrawn, so a good climbing two days running is a trend worth acting on instead of noise you can only react to. A glut clears faster for something the town wants and lingers for something it does not, which is the difference between a bad week and a bad month for whoever grew it.
+
+**The market panel** opens from the money chip — that chip already reads as "your money", so it is where a hand goes when the question is about earning, and it costs nothing on a bottom row that is three buttons wide on a phone.
+
+Each good gets two bars, not one: what the town **wants**, and what it **has**, sharing a notch at normal. One bar was tried first and said nothing, because for every good the player is not selling the stock is identical — the bar only repeated what the colour already showed. Wanting and having are the two halves of the rule, and a good can be wanted and over-supplied at once, which is exactly when it is worth knowing that somebody else's crop is the better bet.
+
+Only the part of the stock bar that **overhangs the notch** is red. Colouring the whole bar by how much stock there was needed a key to explain which end meant what, and it was misread twice — so the surplus is now shown as the surplus rather than as a colour standing in for one, and needs no key at all. The prices in the sell list are tinted the same way, because the shop is where the decision is actually made.
+
+Materials are deliberately not traded: a barn whose price wandered would be a nuisance rather than a decision. Nor are mushrooms — that is the foraging fantasy, and haggling over a morel cheapens finding one.
+
 ## Art
 Two Kenney tilesheets (CC0), both 16x16 tiles and sharing a palette so they mix freely:
 

@@ -20,7 +20,7 @@
   <div id="ui">
     <!-- Top bar: money and what the farmer is up to. -->
     <div id="hud">
-      <div class="hud-chip" id="hud-money">$0</div>
+      <button class="hud-chip" id="hud-money" aria-expanded="false">$0</button>
       <button class="hud-chip grow" id="hud-status" aria-expanded="false"
               title="What the farmer is doing — tap for the whole queue">
         <span id="hud-status-text">Idle</span>
@@ -98,6 +98,15 @@
         <button id="settings-give">Top up supplies</button>
         <button id="settings-reset" class="danger"></button>
       </div>
+    </div>
+
+    <div class="panel" id="market-panel">
+      <div class="panel-head">
+        <h2>Market</h2>
+        <button id="market-close">Done</button>
+      </div>
+      <p id="market-note"></p>
+      <ul id="market-list"></ul>
     </div>
 
     <div class="panel" id="inv-panel">

@@ -105,6 +105,13 @@ export function initShopPanel(state, {
       return;
     }
 
+    // The market explains where these prices came from. Opening it closes the
+    // shop on its own, the way any two panels do.
+    if (act === 'market') {
+      emit('market:show');
+      return;
+    }
+
     // Hiring works exactly like buying an animal: the shop steps aside and the
     // player says where they should start.
     if (act === 'hand') {
@@ -274,6 +281,18 @@ export function initShopPanel(state, {
       return '<li class="empty">Nothing to sell yet. Go harvest something!</li>';
     }
 
+    // A way through to the market from where the selling happens: prices that
+    // move need somewhere to explain themselves, and the money chip that opens
+    // the market panel is not somewhere anyone would think to look. At the
+    // foot of the list rather than the head of it — the answer to "why these
+    // prices" is only wanted after the prices have been read, and putting it
+    // first made the player scroll past an explanation they had not asked for
+    // every time they came to sell a crop.
+    const link = `
+      <li class="market-link">
+        <button data-act="market">Why these prices? See the market</button>
+      </li>`;
+
     return groups.map((group) => `
       <li class="sell-head">
         <span>${esc(group.name)}</span>
@@ -282,10 +301,32 @@ export function initShopPanel(state, {
       ${group.rows.map((row) => `
         <li>
           <span class="shop-name">${esc(row.name)}<em>have ${row.qty}</em></span>
-          <span class="shop-price">$${row.price} ea</span>
+          <span class="shop-price ${priceMood(row)}" title="${priceHint(row)}">$${row.price} ea</span>
           <button data-act="sell" data-id="${row.id}" data-qty="1">1</button>
           <button data-act="sell" data-id="${row.id}" data-qty="all">All</button>
-        </li>`).join('')}`).join('');
+        </li>`).join('')}`).join('') + link;
+  }
+
+  /**
+   * Whether this is fetching more or less than it usually does.
+   *
+   * The market is where the price comes from, but the shop is where the player
+   * decides — so the answer has to be legible at the moment of selling, not
+   * only in the panel that explains it. A dead band around the middle keeps
+   * every row from being tinted over a couple of percent.
+   */
+  function priceMood(row) {
+    if (!(row.multiplier > 0)) return '';
+    if (row.multiplier > 1.08) return 'high';
+    if (row.multiplier < 0.92) return 'low';
+    return '';
+  }
+
+  function priceHint(row) {
+    if (!(row.multiplier > 0)) return '';
+    const change = Math.round((row.multiplier - 1) * 100);
+    if (change === 0) return 'the usual price';
+    return `${Math.abs(change)}% ${change > 0 ? 'above' : 'below'} the usual price`;
   }
 
   // Money and stock both change from outside the panel (harvests landing, the

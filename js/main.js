@@ -27,6 +27,7 @@ import { PLOT, plotBounds } from './world/land.js';
 import { attachInput } from './ui/input.js';
 import { initToolbar, TOOLS } from './ui/toolbar.js';
 import { initTaskPanel } from './ui/taskpanel.js';
+import { initMarketPanel } from './ui/marketpanel.js';
 import { initShopPanel } from './ui/shoppanel.js';
 import { initSettingsPanel } from './ui/settingspanel.js';
 import { initHud } from './ui/hud.js';
@@ -78,6 +79,7 @@ async function boot() {
   const autosaver = new Autosaver(() => serialize(state));
   const hud = initHud(state);
   initTaskPanel(state);
+  initMarketPanel(state);
   initShopPanel(state, {
     onMessage: (msg, kind) => toast(msg, kind),
     // Land is bought from the little map in the shop, so nothing to site here —

@@ -7,6 +7,7 @@ import {
   SAVE_KEY, SAVE_VERSION, AUTOSAVE_MIN_MS, AUTOSAVE_MAX_MS, ANIMAL_VARIANTS,
 } from '../config.js';
 import { expandSaveToCells } from '../world/expand.js';
+import { newMarket } from '../sim/market.js';
 
 /**
  * Migrations from version N to N+1, applied in order. Add an entry whenever the
@@ -64,6 +65,16 @@ const migrations = {
       if (t.type === 'build' && t.buildKind === 'barn' && !(t.w > 0)) { t.w = 3; t.h = 2; }
     }
     data.version = 6;
+    return data;
+  },
+
+  // Crops and produce are traded on a market now. An established farm opens on
+  // a balanced one — every price exactly what it has always been — and moves
+  // from there as it sells. Starting anywhere else would hand somebody a
+  // fortune or a pay cut for a day's play they had already done.
+  6: (data) => {
+    if (!data.market) data.market = newMarket();
+    data.version = 7;
     return data;
   },
 };

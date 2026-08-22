@@ -34,4 +34,6 @@ npm test
 
 ## Credits
 
-Art by [Kenney](https://kenney.nl) (CC0), with additions by Mechanical Lich.
+Art by [Kenney](https://kenney.nl) (CC0)
+Tiny Creatures by Clint Bellanger (CC0)
+Random additions by Mechanical Lich (CC0)

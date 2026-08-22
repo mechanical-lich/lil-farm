@@ -58,6 +58,11 @@ import {
   costLabel, placementProblem, reconcileBuildings,
 } from '../js/sim/build.js';
 import { TOWN, WATER, RIVER } from '../js/render/sprites.js';
+import {
+  TRADED, PRICE_FLOOR, PRICE_CEILING, GLUT_RATIO, TICKS_PER_DAY, newMarket, priceOf,
+  priceMultiplier, recordSale, updateMarket, basePrice, marketRows, multiplierFor,
+  glutRatio,
+} from '../js/sim/market.js';
 import { barnGrid } from '../js/render/tilerender.js';
 import { decodePng } from '../tools/png.mjs';
 import {
@@ -1357,6 +1362,185 @@ test('the building record is the source of truth, found from any of its tiles', 
     }
   }
   assertEqual(buildingAt(s, 8, 5), null, 'a tile just outside belongs to nothing');
+});
+
+// --- the market ---------------------------------------------------------
+
+/** Sells `perDay` worth of each good, in dribbles, for a number of days. */
+function trade(s, days, perDay) {
+  for (let t = 0; t < days * TICKS_PER_DAY; t++) {
+    s.tickCount++;
+    if (s.tickCount % 600 === 0) {
+      for (const [id, value] of Object.entries(perDay)) recordSale(s, id, 1, value / 144);
+    }
+    updateMarket(s);
+  }
+}
+
+/** What the player actually realises on a given sales mix, as a multiplier. */
+function realised(s, mix) {
+  let earned = 0;
+  let base = 0;
+  for (const [id, value] of Object.entries(mix)) {
+    earned += value * priceMultiplier(s, id);
+    base += value;
+  }
+  return earned / base;
+}
+
+function marketFarm(seed = 900) {
+  return { tickCount: 0, rng: makeRng(seed), market: newMarket() };
+}
+
+/**
+ * What a sales mix realises, averaged over several weeks.
+ *
+ * Averaged on purpose. Whether the town happens to want eggplant this week
+ * swings a single run a long way, and that swing *is* the feature — a farmer
+ * who catches a good week should do well out of it. What has to hold underneath
+ * is the gradient: growing several things beats growing one.
+ */
+function overSeeds(mix, days = 4) {
+  const seeds = [1, 7, 42, 99, 900];
+  return seeds.reduce((sum, seed) => {
+    const s = marketFarm(seed);
+    trade(s, days, mix);
+    return sum + realised(s, mix);
+  }, 0) / seeds.length;
+}
+
+test('a farm that has sold nothing sees ordinary prices', () => {
+  // The market opens balanced. Anything else would hand an established farm a
+  // windfall or a pay cut for a day's play it had already done.
+  const s = marketFarm();
+  for (const id of TRADED) {
+    assertEqual(priceOf(s, id), basePrice(id), `${id} starts at its usual price`);
+  }
+});
+
+test('the price curve bottoms out only under a real monoculture', () => {
+  assertEqual(multiplierFor(1), 1, 'selling a normal share is full price');
+  assertEqual(multiplierFor(0), PRICE_CEILING, 'bringing none of it pays the most');
+  assertEqual(multiplierFor(GLUT_RATIO), PRICE_FLOOR, 'and the floor needs a glut');
+  assert(multiplierFor(2) > 0.85, 'twice your usual share is barely marked down');
+  assertEqual(multiplierFor(GLUT_RATIO * 4), PRICE_FLOOR, 'nothing goes below the floor');
+});
+
+test('selling one thing and nothing else drives its price down', () => {
+  const paid = overSeeds({ eggplant: 50000 });
+  assert(paid < 0.8, `a monoculture averages x${paid.toFixed(2)} of full price`);
+
+  const s = marketFarm();
+  trade(s, 4, { eggplant: 50000 });
+  assertEqual(priceOf(s, 'eggplant'),
+    Math.round(basePrice('eggplant') * priceMultiplier(s, 'eggplant')),
+    'and the price follows the multiplier');
+});
+
+test('what nobody is bringing is worth more than what you are flooding', () => {
+  const s = marketFarm();
+  trade(s, 4, { eggplant: 50000 });
+  const flooded = priceMultiplier(s, 'eggplant');
+  const others = TRADED.filter((id) => id !== 'eggplant').map((id) => priceMultiplier(s, id));
+  assert(Math.max(...others) > flooded + 0.4, 'with a gap worth switching a few plots over');
+});
+
+test('the town has opinions about what it wants, not just what it has', () => {
+  // Demand has to reach the price of things you are *not* selling, or the panel
+  // has nothing to say: dividing by a drifting number cancels the drift, and
+  // every good you did not grow came out at an identical price.
+  const s = marketFarm(31);
+  trade(s, 6, { eggplant: 50000 });
+  const untraded = TRADED.filter((id) => id !== 'eggplant').map((id) => priceMultiplier(s, id));
+  const spread = Math.max(...untraded) - Math.min(...untraded);
+  assert(spread > 0.15, `the goods she is not selling differ by ${spread.toFixed(2)}`);
+});
+
+test('a varied farm is paid close to full price', () => {
+  // The point of the whole feature: the gradient between growing one thing and
+  // growing several has to be worth the trouble of switching.
+  const mono = { eggplant: 50000 };
+  const four = { eggplant: 25000, cabbage: 12000, milk: 8000, egg: 5000 };
+  const seven = {
+    eggplant: 20000, cabbage: 8000, tomato: 6000, corn: 5000,
+    milk: 6000, egg: 3000, wool: 2000,
+  };
+
+  const over = overSeeds;
+
+  const one = over(mono);
+  const some = over(four);
+  const many = over(seven);
+  assert(one < 0.8, `one crop earns ${one.toFixed(2)} of full price`);
+  assert(some > one + 0.1, `four goods earn more (${some.toFixed(2)} against ${one.toFixed(2)})`);
+  assert(many > some, `and seven more still (${many.toFixed(2)})`);
+  assert(many > 0.95, `a varied farm is paid near full price (${many.toFixed(2)})`);
+});
+
+test('a beginner selling their first crops is left alone', () => {
+  // The early game has no choice: carrots and wheat are what you can afford.
+  // Pricing that as a monoculture would punish a player for being new.
+  const paid = overSeeds({ carrot: 150, wheat: 120 });
+  assert(paid > 0.9, `a beginner is paid x${paid.toFixed(2)}, near enough full price`);
+});
+
+test('a glut clears if you stop flooding it', () => {
+  // Measured on the glut alone, with the town's changing appetite held out of
+  // it — otherwise this is testing the weather rather than the mechanism.
+  const s = marketFarm();
+  trade(s, 4, { eggplant: 50000 });
+  const glutted = glutRatio(s.market, 'eggplant');
+  assert(glutted > 2, 'the town is holding a lot of it to begin with');
+
+  trade(s, 4, { cabbage: 20000 });          // sell something else for a while
+  assert(glutRatio(s.market, 'eggplant') < glutted / 2,
+    'and works through it once she stops bringing more');
+});
+
+test('the market is deterministic, so catching up twice agrees', () => {
+  // Same rule as weeds and mushrooms: state.rng only, driven by tickCount.
+  // Two farms replaying the same days must arrive at the same prices.
+  const a = marketFarm(4321);
+  const b = marketFarm(4321);
+  trade(a, 5, { corn: 3000, milk: 2000 });
+  trade(b, 5, { corn: 3000, milk: 2000 });
+  assertEqual(a.market.demand, b.market.demand, 'demand drifted identically');
+  assertEqual(TRADED.map((id) => priceOf(a, id)), TRADED.map((id) => priceOf(b, id)),
+    'and the prices match');
+});
+
+test('demand drifts rather than being redrawn', () => {
+  // Drift is what gives the market panel something to show: a good climbing two
+  // days running is a trend you can act on, where a fresh roll every twelve
+  // hours would be noise you could only react to.
+  const s = marketFarm(77);
+  const before = { ...s.market.demand };
+  trade(s, 1, {});
+  let moved = 0;
+  for (const id of TRADED) {
+    const change = Math.abs(s.market.demand[id] - before[id]) / before[id];
+    assert(change < 0.8, `${id} moved by ${(change * 100).toFixed(0)}% in a day, which is a jump`);
+    if (change > 0.01) moved++;
+  }
+  assert(moved >= TRADED.length - 1, 'but everything did move');
+});
+
+test('selling records against the market, and only for traded goods', () => {
+  const s = farmWithMaterials(902);
+  s.inventory = { eggplant: 10, wood: 50 };
+
+  sell(s, 'eggplant', 10);
+  assert(s.market.supply.eggplant > 0, 'the town now holds the eggplants');
+
+  sell(s, 'wood', 50);
+  assertEqual(s.market.supply.wood, undefined, 'but building materials are not traded');
+});
+
+test('an old save opens on a balanced market', () => {
+  const old = { version: 6, buildings: [], tasks: [] };
+  const out = migrate(old);
+  assertEqual(out.version, SAVE_VERSION, 'brought up to date');
+  assert(out.market && out.market.demand.eggplant > 0, 'and given a market to trade on');
 });
 
 // --- barns the player sizes ---------------------------------------------

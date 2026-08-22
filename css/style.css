@@ -302,6 +302,146 @@ body {
 
 .panel li.sell-head b { color: var(--ink); }
 
+/* The way through from the sell list to the market that set these prices. */
+.panel li.market-link {
+  border-bottom: none;
+  padding: 4px 0 8px;
+}
+
+.panel li.market-link button {
+  width: 100%;
+  background: transparent;
+  border-style: dashed;
+  font-size: 13px;
+  font-weight: 600;
+  color: #7a604a;
+}
+
+/* --- the market -------------------------------------------------------- */
+
+#market-note {
+  margin: 0;
+  padding: 8px 4px 10px;
+  color: #7a604a;
+  font-size: 13px;
+}
+
+#market-note b { color: var(--ink); }
+
+/* Which bar is which. Two colours need saying once, not guessing at. */
+.market-key {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.market-key i {
+  width: 14px;
+  height: 6px;
+  border-radius: 3px;
+}
+
+.market-key i.wants { background: #6f9bd1; }
+
+.market-key i.has { margin-left: 8px; background: #8a8f7a; }
+
+.market-key em { font-style: normal; opacity: 0.55; }
+
+.panel li.market {
+  display: block;
+  padding: 8px 0 10px;
+}
+
+.market-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.market-top b { white-space: nowrap; }
+
+/* What the town is keen on, beside the name — the part you can act on before
+   you have sold any of it. */
+.market-top em {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(94, 194, 79, 0.22);
+  color: #2f7a2a;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+li.market.glut .market-top em { background: rgba(163, 61, 46, 0.16); color: #a33d2e; }
+
+/* The change sits with the price rather than in its own column: what the
+   player wants is "sixty, and that's up", read as one thing. */
+.market-top small {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #7a604a;
+}
+
+li.market.short .market-top small { color: #2f7a2a; }
+li.market.glut .market-top small { color: #a33d2e; }
+
+.market-bars {
+  display: grid;
+  gap: 3px;
+  margin-top: 6px;
+}
+
+.market-bar {
+  position: relative;
+  height: 7px;
+  border-radius: 4px;
+  background: rgba(122, 96, 74, 0.16);
+}
+
+.market-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  transition: width 240ms ease;
+}
+
+/* Demand above, stock below, so the eye reads "they want this much, they have
+   this much" downward — and a row where the lower bar overhangs the upper one
+   is a glut without needing to be told. */
+.market-bar.wants i { background: #6f9bd1; }
+.market-bar.has i { background: #8a8f7a; }
+
+/* Only the overhang past the notch is red, which is the glut itself rather
+   than a colour standing in for one. */
+.market-bar.has s {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 0 4px 4px 0;
+  background: #d4674f;
+}
+
+/* The notch is the halfway mark on both bars: what the town normally wants,
+   and what a normal farm normally brings. */
+.market-bar u {
+  position: absolute;
+  top: -2px;
+  left: 50%;
+  width: 2px;
+  height: 11px;
+  background: var(--ink);
+  opacity: 0.4;
+}
+
 /* --- the mushroom journal ---------------------------------------------- */
 
 .panel li.journal {
@@ -553,6 +693,12 @@ body {
   font-size: 14px;
   white-space: nowrap;
 }
+
+/* What the market is doing to this price, where the selling actually happens.
+   Colour only — the number is still the number, and a tint that shouted would
+   turn an ordinary sell list into a dashboard. */
+.shop-price.high { color: #2f7a2a; }
+.shop-price.low { color: #a33d2e; }
 
 #shop-list button { min-width: 48px; }
 
