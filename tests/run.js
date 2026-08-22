@@ -21,7 +21,7 @@ import {
 import {
   MUSHROOMS, MUSHROOMS_BY_ID, SPECIES, MUSHROOM_MAX_FRACTION, sprout, forage,
   mushroomAt, rollSpecies, journalCount, journalFound, journalRows,
-  canSprout as canSproutShroom,
+  canSprout as canSproutShroom, COLOURS_PER_SPECIES, rollColour, isRainbow,
 } from '../js/sim/mushrooms.js';
 import {
   addTask, cancelTask, prioritizeTask, taskForTile, tillRow, queueTillRow, clearBuildSite,
@@ -3953,15 +3953,57 @@ test('a solid field needs no wedges at all', () => {
 
 // --- mushrooms ----------------------------------------------------------
 
-test('the sheet is fully catalogued: four kinds, four colours each', () => {
-  assertEqual(MUSHROOMS.length, 16, 'sixteen mushrooms on the sheet');
-  assertEqual(new Set(MUSHROOMS.map((m) => m.sprite)).size, 16, 'each with its own sprite');
-  assertEqual(new Set(MUSHROOMS.map((m) => m.id)).size, 16, 'and its own name');
+test('the sheet is fully catalogued: seven kinds, five colours each', () => {
+  const kinds = Object.keys(SPECIES).length;
+  const expected = kinds * COLOURS_PER_SPECIES;
+  assertEqual(MUSHROOMS.length, expected, `${expected} mushrooms in the catalogue`);
+  assertEqual(new Set(MUSHROOMS.map((m) => m.sprite)).size, expected, 'each with its own sprite');
+  assertEqual(new Set(MUSHROOMS.map((m) => m.id)).size, expected, 'and its own name');
   for (const [species, def] of Object.entries(SPECIES)) {
-    assertEqual(MUSHROOMS.filter((m) => m.species === species).length, 4,
-      `${species} should have four colours`);
+    assertEqual(MUSHROOMS.filter((m) => m.species === species).length, COLOURS_PER_SPECIES,
+      `${species} should have five colours`);
     assert(ITEMS[def.item], `${species} needs somewhere to go in the bag`);
+    assert(def.sell > 0, `${species} needs to be worth something`);
   }
+});
+
+test('the catalogue matches the sheet on disk', () => {
+  // The sprites are indices into one long row, and the sheet is art that gets
+  // replaced from outside the code. A mushroom pointing past the end of it
+  // draws nothing at all, and nothing else here would notice.
+  const { w, h } = pngSize('assets/mushrooms.png');
+  assertEqual(h, TILE, 'the sheet is a single row');
+  assertEqual(w % TILE, 0, 'a whole number of sprites wide');
+  assertEqual(w / TILE, MUSHROOMS.length, 'with exactly as many sprites as there are mushrooms');
+  for (const m of MUSHROOMS) {
+    assert(m.sprite >= 0 && m.sprite < w / TILE, `${m.id} points at a sprite that exists`);
+  }
+});
+
+test('the rainbow one is the rare find', () => {
+  // It is the fifth colour of every kind and it looks like a prize, so it must
+  // not turn up as often as the other four. Rolled rather than reasoned: the
+  // weights and the roll have to agree.
+  const s = { rng: makeRng(4242) };
+  let rainbows = 0;
+  const rolls = 4000;
+  for (let i = 0; i < rolls; i++) if (isRainbow(rollColour(s, 'button'))) rainbows++;
+  const rate = rainbows / rolls;
+  assert(rate > 0.02 && rate < 0.06, `about one in twenty-five, got one in ${Math.round(1 / rate)}`);
+});
+
+test('adding colours did not rename anything already found', () => {
+  // A journal entry is keyed by colour and species. Reordering the colours
+  // would quietly rename every mushroom anybody has ever collected, so the
+  // four that were always there keep their ids and their order.
+  for (const id of ['tan_button', 'red_toadstool', 'umber_bolete', 'ash_morel']) {
+    assert(MUSHROOMS_BY_ID[id], `${id} is still in the catalogue`);
+  }
+  const toadstools = MUSHROOMS.filter((m) => m.species === 'toadstool').map((m) => m.id);
+  assertEqual(toadstools.slice(0, 4),
+    ['red_toadstool', 'green_toadstool', 'pink_toadstool', 'navy_toadstool'],
+    'in the order they have always been in');
+  assertEqual(toadstools[4], 'rainbow_toadstool', 'with the new one appended');
 });
 
 test('a new farm has mushrooms already up, near the farmhouse', () => {
@@ -4065,8 +4107,9 @@ test('the journal counts finds, not what you are carrying', () => {
   assertEqual(journalFound(s), 1, 'but only one kind discovered');
 
   const rows = journalRows(s);
-  assertEqual(rows.length, 16, 'the journal lists every kind, found or not');
-  assertEqual(rows.filter((r) => r.found === 0).length, 15, 'the rest are still out there');
+  assertEqual(rows.length, MUSHROOMS.length, 'the journal lists every kind, found or not');
+  assertEqual(rows.filter((r) => r.found === 0).length, MUSHROOMS.length - 1,
+    'the rest are still out there');
 });
 
 test('mushrooms and the journal survive a save round trip', () => {

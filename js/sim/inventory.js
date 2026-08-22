@@ -39,8 +39,11 @@ export const ITEMS = {
   // Foraged. Four kinds rather than sixteen: the journal remembers every
   // colour, the bag only needs to know what it's worth.
   mushroom_button: { name: 'Button mushrooms', sell: 12, group: 'foraged' },
+  mushroom_chestnut: { name: 'Chestnut mushrooms', sell: 20, group: 'foraged' },
   mushroom_toadstool: { name: 'Toadstools', sell: 28, group: 'foraged' },
+  mushroom_portobello: { name: 'Portobellos', sell: 45, group: 'foraged' },
   mushroom_bolete: { name: 'Boletes', sell: 65, group: 'foraged' },
+  mushroom_parasol: { name: 'Parasols', sell: 95, group: 'foraged' },
   mushroom_morel: { name: 'Morels', sell: 150, group: 'foraged' },
 };
 

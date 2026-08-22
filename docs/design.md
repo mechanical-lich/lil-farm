@@ -61,6 +61,13 @@ Only the part of the stock bar that **overhangs the notch** is red. Colouring th
 
 Materials are deliberately not traded: a barn whose price wandered would be a nuisance rather than a decision. Nor are mushrooms — that is the foraging fantasy, and haggling over a morel cheapens finding one.
 
+## Foraging
+Seven kinds of mushroom, each in five colours: thirty-five to find and keep in the journal. The fifth colour of every kind is a rainbow one, and it is deliberately rare — around one find in twenty-five. Picking colours evenly would have made the rarest-looking thing on the sheet the most ordinary thing in the journal.
+
+The journal is keyed by colour and species, which is why the four original colours of each kind keep their ids and their order: reordering them would quietly rename every mushroom anybody had already collected. New colours go on the end.
+
+Sprite indices are derived from the sheet's layout — species order, five to a kind — rather than written out by hand. Thirty-five indices typed one at a time is an invitation to get one wrong in a way nothing would catch, so a test also reads the sheet off disk and checks that every mushroom points at a sprite that actually exists.
+
 ## Art
 Two Kenney tilesheets (CC0), both 16x16 tiles and sharing a palette so they mix freely:
 

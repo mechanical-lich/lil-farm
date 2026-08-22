@@ -23,36 +23,90 @@ import { addItem } from './inventory.js';
 import { isReserved } from './build.js';
 
 /**
- * Four kinds, each in four colours — the sheet is one row of sixteen, grouped
- * by shape. Rarity is a spawn weight rather than a percentage, so adding a kind
- * later doesn't mean re-balancing all the others.
+ * Seven kinds, each in five colours — the sheet is one row of thirty-five,
+ * grouped by shape, with the sprites of a kind running consecutively.
+ *
+ * Rarity is a spawn weight rather than a percentage, so adding a kind means
+ * picking one number rather than re-balancing all the others. The weights below
+ * happen to sum to a hundred, which makes them readable as percentages, but
+ * nothing depends on that.
+ *
+ * `sprites` is derived rather than written out: the sheet is laid out in
+ * species order, five to a kind, and typing thirty-five indices by hand is an
+ * invitation to get one wrong in a way nothing would catch.
  */
+const SHEET_ORDER = ['toadstool', 'bolete', 'morel', 'button', 'chestnut', 'portobello', 'parasol'];
+
+/** How many colours each kind comes in. The fifth is always the rainbow one. */
+export const COLOURS_PER_SPECIES = 5;
+
+const spritesFor = (species) => {
+  const first = SHEET_ORDER.indexOf(species) * COLOURS_PER_SPECIES;
+  return Array.from({ length: COLOURS_PER_SPECIES }, (_, i) => first + i);
+};
+
 export const SPECIES = {
   button: {
     name: 'Button mushroom', item: 'mushroom_button',
-    sell: 12, weight: 60, sprites: [12, 13, 14, 15],
+    sell: 12, weight: 44, sprites: spritesFor('button'),
+  },
+  chestnut: {
+    name: 'Chestnut mushroom', item: 'mushroom_chestnut',
+    sell: 20, weight: 22, sprites: spritesFor('chestnut'),
   },
   toadstool: {
     name: 'Toadstool', item: 'mushroom_toadstool',
-    sell: 28, weight: 25, sprites: [0, 1, 2, 3],
+    sell: 28, weight: 16, sprites: spritesFor('toadstool'),
+  },
+  portobello: {
+    name: 'Portobello', item: 'mushroom_portobello',
+    sell: 45, weight: 9, sprites: spritesFor('portobello'),
   },
   bolete: {
     name: 'Bolete', item: 'mushroom_bolete',
-    sell: 65, weight: 12, sprites: [4, 5, 6, 7],
+    sell: 65, weight: 5, sprites: spritesFor('bolete'),
+  },
+  parasol: {
+    name: 'Parasol', item: 'mushroom_parasol',
+    sell: 95, weight: 3, sprites: spritesFor('parasol'),
   },
   morel: {
     name: 'Morel', item: 'mushroom_morel',
-    sell: 150, weight: 3, sprites: [8, 9, 10, 11],
+    sell: 150, weight: 1, sprites: spritesFor('morel'),
   },
 };
 
-/** The colour names, in sheet order within each species. */
+/**
+ * The colour names, in sheet order within each species.
+ *
+ * The first four of each are the colours that have always been there, in the
+ * order they have always been in, because a journal entry is keyed by colour
+ * and species — reordering these would quietly rename every mushroom anybody
+ * has ever found. The rainbow one is new, and goes last for the same reason.
+ */
 const COLOURS = {
-  button: ['Tan', 'Orange', 'Blue', 'Spotted'],
-  toadstool: ['Red', 'Green', 'Pink', 'Navy'],
-  bolete: ['Umber', 'Tan', 'Orange', 'Violet'],
-  morel: ['Orange', 'Brown', 'Pink', 'Ash'],
+  button: ['Tan', 'Orange', 'Blue', 'Spotted', 'Rainbow'],
+  toadstool: ['Red', 'Green', 'Pink', 'Navy', 'Rainbow'],
+  bolete: ['Umber', 'Tan', 'Orange', 'Violet', 'Rainbow'],
+  morel: ['Orange', 'Brown', 'Pink', 'Ash', 'Rainbow'],
+  chestnut: ['Tan', 'Orange', 'Blue', 'Spotted', 'Rainbow'],
+  portobello: ['Tan', 'Orange', 'Blue', 'Spotted', 'Rainbow'],
+  parasol: ['Tan', 'Orange', 'Blue', 'Spotted', 'Rainbow'],
 };
+
+/**
+ * How a colour is picked: the weight of the rainbow one against each of the
+ * four ordinary ones.
+ *
+ * Picking evenly would make a fifth of every find a rainbow, which would leave
+ * the rarest-looking thing on the sheet the most ordinary thing in the journal.
+ * At one against six it comes out around one find in twenty-five — often enough
+ * to happen, rare enough to be worth showing somebody.
+ */
+export const COLOUR_WEIGHT = { ordinary: 6, rainbow: 1 };
+
+/** The rainbow one is always the last colour of its kind. */
+export const isRainbow = (id) => id.startsWith('rainbow_');
 
 /**
  * All sixteen, flat. This is the journal's running order and the thing spawning
@@ -117,12 +171,22 @@ export function rollSpecies(state) {
   let roll = state.rng.int(total);
   for (const [species, def] of Object.entries(SPECIES)) {
     roll -= def.weight;
-    if (roll < 0) {
-      const colours = MUSHROOMS.filter((m) => m.species === species);
-      return colours[state.rng.int(colours.length)].id;
-    }
+    if (roll < 0) return rollColour(state, species);
   }
   return MUSHROOMS[0].id;
+}
+
+/** Which colour of a kind turned up. The rainbow one is the rare find. */
+export function rollColour(state, species) {
+  const colours = MUSHROOMS.filter((m) => m.species === species);
+  const weigh = (m) => (isRainbow(m.id) ? COLOUR_WEIGHT.rainbow : COLOUR_WEIGHT.ordinary);
+  const total = colours.reduce((n, m) => n + weigh(m), 0);
+  let roll = state.rng.int(total);
+  for (const m of colours) {
+    roll -= weigh(m);
+    if (roll < 0) return m.id;
+  }
+  return colours[0].id;
 }
 
 export function sprout(state, x, y, id) {

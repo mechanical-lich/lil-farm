@@ -470,7 +470,7 @@ li.market.glut .market-top small { color: #a33d2e; }
   margin: 0 auto 2px;
   image-rendering: pixelated;
   background-image: url(../assets/mushrooms.png);
-  background-size: 768px 48px;
+  background-size: 1680px 48px;   /* 35 sprites at 48px */
   background-color: rgba(132, 198, 105, 0.45);
   border: 2px solid var(--panel-edge);
   border-radius: 8px;
