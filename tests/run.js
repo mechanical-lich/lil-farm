@@ -1803,6 +1803,53 @@ test('a bed keeps its extremes instead of going muddy', () => {
   assert(average > 0.5, `the bed stayed colourful (spread ${average.toFixed(2)})`);
 });
 
+test('flowers saved by the one-hue build still open', () => {
+  // The single-hue version shipped before the genome became three genes, so
+  // there are saves in the wild carrying the old shape — and the new code does
+  // not degrade on it, it throws. Both the flowers in the ground and the seeds
+  // in the bag have to be rewritten to the flower they always looked like.
+  const before = {
+    version: 8,
+    flowers: {
+      '10,10': { kind: 'daisy', hue: 120, sat: 70, split: false },
+      '11,10': { kind: 'poppy', hue: 200, sat: 85, split: true },
+    },
+    inventory: {
+      wood: 5,
+      flowerseed_daisy_h120: 3,
+      flowerseed_poppy_h200s85t: 2,
+    },
+  };
+
+  const after = migrate(before);
+  assertEqual(after.version, SAVE_VERSION, 'brought up to date');
+
+  assertEqual(after.flowers['10,10'].hues, [120, 120, 120], 'a plain flower stays plain');
+  assertEqual(after.flowers['10,10'].hue, undefined, 'and loses the old field');
+  // The old `split` swung the middle tone 35 degrees; the flower has to keep
+  // looking like itself.
+  assertEqual(after.flowers['11,10'].hues, [200, 235, 200], 'a two-tone one keeps both tones');
+
+  assertEqual(after.inventory.flowerseed_daisy_h120, 3, 'a plain seed id still works as it was');
+  assertEqual(after.inventory['flowerseed_poppy_h200-235-200s85'], 2, 'a two-tone seed is rewritten');
+  assertEqual(after.inventory.flowerseed_poppy_h200s85t, undefined, 'and the old id is gone');
+  assertEqual(after.inventory.wood, 5, 'everything else is untouched');
+});
+
+test('two old seed ids that become one keep their seeds', () => {
+  // The old code left the saturation off when it was the default, so the same
+  // flower could be written either way. Both land on one id now, and the
+  // player should not lose a packet to the tidying up.
+  const before = {
+    version: 8,
+    flowers: {},
+    inventory: { flowerseed_daisy_h120t: 2, flowerseed_daisy_h120s70t: 3 },
+  };
+  const after = migrate(before);
+  assertEqual(after.inventory['flowerseed_daisy_h120-155-120'], 5,
+    'the counts are added, not overwritten');
+});
+
 test('a bred colour says so, and a wild one does not', () => {
   // A crossed colour is the one thing in the bag that cannot be found again by
   // walking around: lose the seeds and it is gone. It should not look like the

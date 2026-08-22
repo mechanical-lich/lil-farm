@@ -8,6 +8,7 @@ import {
 } from '../config.js';
 import { expandSaveToCells } from '../world/expand.js';
 import { newMarket } from '../sim/market.js';
+import { makeGenome, seedIdFor } from '../sim/flowergenes.js';
 
 /**
  * Migrations from version N to N+1, applied in order. Add an entry whenever the
@@ -87,7 +88,61 @@ const migrations = {
     data.version = 8;
     return data;
   },
+
+  // A flower's colour used to be one hue for all three of the greys on the
+  // sheet, with a flag that swung the middle one 35 degrees. It is three hues
+  // now, one per grey, because that is what makes crossing worth doing.
+  //
+  // Both the flowers in the ground and the seeds in the bag carry the old
+  // shape, and the new code cannot read either — a flower saved by the old
+  // build throws rather than degrading, and a seed would quietly grow the wrong
+  // colour. Both are rewritten here to the flower they always looked like.
+  8: (data) => {
+    for (const flower of Object.values(data.flowers || {})) {
+      if (Array.isArray(flower.hues)) continue;
+      const hue = flower.hue || 0;
+      flower.hues = [hue, flower.split ? (hue + SPLIT_SHIFT) % 360 : hue, hue];
+      delete flower.hue;
+      delete flower.split;
+    }
+
+    const bag = data.inventory || {};
+    for (const [id, qty] of Object.entries(bag)) {
+      const rebuilt = rewriteFlowerSeedId(id);
+      if (!rebuilt || rebuilt === id) continue;
+      // Two old ids can land on one new one; keep the seeds rather than the id.
+      bag[rebuilt] = (bag[rebuilt] || 0) + qty;
+      delete bag[id];
+    }
+
+    data.version = 9;
+    return data;
+  },
 };
+
+/** The swing the old `split` flag applied to the middle tone. */
+const SPLIT_SHIFT = 35;
+
+/**
+ * Turns a seed id written by the one-hue build into its three-hue equivalent.
+ * @returns {string|null} null if this is not an old-style flower seed
+ */
+function rewriteFlowerSeedId(id) {
+  if (!id.startsWith('flowerseed_')) return null;
+  const rest = id.slice('flowerseed_'.length);
+  const cut = rest.indexOf('_');
+  if (cut < 0) return null;
+  const kind = rest.slice(0, cut);
+  const code = rest.slice(cut + 1);
+  if (code.includes('-')) return null;                 // already three hues
+
+  const parsed = /^h(\d+)(?:s(\d+))?(t?)$/.exec(code);
+  if (!parsed) return null;
+  const hue = +parsed[1];
+  const sat = parsed[2] ? +parsed[2] : undefined;
+  const mid = parsed[3] ? (hue + SPLIT_SHIFT) % 360 : hue;
+  return seedIdFor(kind, makeGenome([hue, mid, hue], sat));
+}
 
 export function loadSave() {
   let raw;
