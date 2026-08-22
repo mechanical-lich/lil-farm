@@ -48,18 +48,47 @@ export const HUE_STEP = 360 / WILD_HUES;
 /** How strongly a wild flower is coloured. Bred ones may drift from this. */
 export const WILD_SATURATION = 70;
 
+/** The three greys on the sheet, and so the three genes: lightest first. */
+export const TONE_COUNT = 3;
+
 const clampSat = (s) => Math.max(10, Math.min(100, Math.round(s)));
+const wrap = (h) => ((Math.round(h) % 360) + 360) % 360;
 
 /**
- * A genome. Hue is degrees around the wheel, saturation a percentage, and
- * `split` says whether the middle of the three tones swings to a neighbouring
- * hue — which is what makes a two-tone flower.
+ * A genome: one hue for each of the three greys the sheet is drawn in, and a
+ * saturation shared by all of them.
+ *
+ * Three hues rather than one, because the sheet gives three colours to replace
+ * and a gene apiece is what makes crossing worth doing. With a single hue
+ * driving all three tones there was almost nothing to recombine — a child could
+ * take "the colour" from one parent or the other and that was the whole of it.
+ * With three, a flower can have its mother's petals over its father's shadow,
+ * which is a thing neither parent was and neither could produce alone.
+ *
+ * The three *lightnesses* are fixed (see render/flowerart.js). Only the hues
+ * are inherited, so a flower always reads as lit face, middle and shadow
+ * however wild its colours get, and no cross can come out flat or inside out.
+ *
+ * Accepts a single number for the common case of a flower that is all one
+ * colour, which is every wild one.
  */
-export function makeGenome(hue, sat = WILD_SATURATION, split = false) {
-  return { hue: ((Math.round(hue) % 360) + 360) % 360, sat: clampSat(sat), split: !!split };
+export function makeGenome(hues, sat = WILD_SATURATION) {
+  const list = Array.isArray(hues) ? hues : [hues, hues, hues];
+  const out = [];
+  for (let i = 0; i < TONE_COUNT; i++) out.push(wrap(list[i] ?? list[0]));
+  return { hues: out, sat: clampSat(sat) };
 }
 
-/** A wild colour: one of the two dozen on the ring, at the wild saturation. */
+/** The colour a flower reads as: its petals, the lightest of the three. */
+export const petalHue = (g) => g.hues[0];
+
+/**
+ * A wild colour: one of the two dozen on the ring, all three tones alike.
+ *
+ * Wild flowers are deliberately of one colour. A three-toned flower is
+ * therefore visibly the work of a gardener, which makes the first one a player
+ * breeds unmistakable without anything having to announce it.
+ */
 export function rollWildGenome(rng) {
   return makeGenome(rng.int(WILD_HUES) * HUE_STEP);
 }
@@ -70,17 +99,21 @@ export function rollWildGenome(rng) {
  * a save you can debug, and this game has needed that more than once.
  */
 export function genomeCode(g) {
-  const parts = [`h${g.hue}`];
-  if (g.sat !== WILD_SATURATION) parts.push(`s${g.sat}`);
-  if (g.split) parts.push('t');
-  return parts.join('');
+  const [a, b, c] = g.hues;
+  // One colour writes itself once. Most flowers are wild, and a save full of
+  // `h120-120-120` would be noise in something meant to stay readable.
+  const hues = a === b && b === c ? `h${a}` : `h${a}-${b}-${c}`;
+  return g.sat === WILD_SATURATION ? hues : `${hues}s${g.sat}`;
 }
 
 export function parseGenome(code) {
-  const hue = /h(\d+)/.exec(code);
-  if (!hue) return null;
+  const hues = /h(\d+)(?:-(\d+)-(\d+))?/.exec(code);
+  if (!hues) return null;
   const sat = /s(\d+)/.exec(code);
-  return makeGenome(+hue[1], sat ? +sat[1] : WILD_SATURATION, /t/.test(code));
+  const list = hues[2] === undefined
+    ? +hues[1]
+    : [+hues[1], +hues[2], +hues[3]];
+  return makeGenome(list, sat ? +sat[1] : WILD_SATURATION);
 }
 
 // --- seeds ---------------------------------------------------------------
@@ -121,7 +154,8 @@ export function readSeedId(id) {
  * found again by walking around — lose the seeds and it is gone.
  */
 export function isWildGenome(g) {
-  return g.hue % HUE_STEP === 0 && g.sat === WILD_SATURATION && !g.split;
+  const [a, b, c] = g.hues;
+  return a === b && b === c && a % HUE_STEP === 0 && g.sat === WILD_SATURATION;
 }
 
 export const isCross = (g) => !isWildGenome(g);
@@ -132,7 +166,7 @@ export const isCross = (g) => !isWildGenome(g);
  * once at the front — anything else leaves a capital stranded in the middle.
  */
 export function flowerLabel(kind, genome) {
-  const name = `${hueName(genome.hue).toLowerCase()} ${FLOWERS[kind].name.toLowerCase()}`;
+  const name = `${hueName(petalHue(genome)).toLowerCase()} ${FLOWERS[kind].name.toLowerCase()}`;
   return isCross(genome) ? `crossed ${name}` : name;
 }
 
@@ -191,24 +225,56 @@ export function blendHue(a, b, rng) {
 }
 
 /**
- * A child of two flowers.
+ * How often a child is a blend of its parents rather than an inheritance.
  *
- * Halfway between its parents and then nudged, because a child that is exactly
- * the midpoint every time makes breeding a calculator rather than a garden —
- * and because the nudge is what eventually reaches the colours no pair of wild
- * flowers sits either side of.
+ * Both are needed, and for opposite reasons. Blending is what *finds* colours:
+ * halfway between two parents is somewhere neither of them was, which is how
+ * the gaps in the wild ring get filled. But blending alone converges — every
+ * generation pulls toward the average, so a bed left crossing long enough goes
+ * quietly uniform and muddy, and the striking colours that went into it are
+ * gone for good.
+ *
+ * Inheriting instead keeps them. A child that takes its hue whole from one
+ * parent is a colour that survives another generation intact, so a shade worth
+ * having can spread through a bed rather than being averaged away by its own
+ * offspring.
+ */
+export const BLEND_CHANCE = 0.6;
+
+/**
+ * A child of two flowers, by one of two routes.
+ *
+ * **Blended:** halfway between its parents and then nudged. The nudge matters —
+ * a child that is exactly the midpoint every time makes breeding a calculator
+ * rather than a garden, and it is what eventually reaches the colours no pair
+ * of wild flowers sits either side of.
+ *
+ * **Inherited:** each gene taken whole from one parent or the other, and taken
+ * faithfully. A flower may end up with its mother's colour at its father's
+ * strength, which is a combination neither parent had without being a colour
+ * neither parent could pass on.
  */
 export function crossGenomes(a, b, rng) {
-  const hue = blendHue(a.hue, b.hue, rng) + rng.range(-MUTATION, MUTATION + 1);
-  const sat = Math.round((a.sat + b.sat) / 2) + rng.range(-5, 6);
-  // Two-tone is carried by one parent or the other rather than blended: it is
-  // a thing a flower either does or does not do.
-  const split = rng.chance(0.5) ? a.split : b.split;
-  return makeGenome(hue, sat, split);
+  if (rng.chance(BLEND_CHANCE)) {
+    const hues = a.hues.map((hue, i) => blendHue(hue, b.hues[i], rng)
+      + rng.range(-MUTATION, MUTATION + 1));
+    return makeGenome(hues, Math.round((a.sat + b.sat) / 2) + rng.range(-5, 6));
+  }
+
+  // Each tone rolled on its own, which is where the interesting flowers come
+  // from: a child can take its petals from one parent and its shadow from the
+  // other, and be a thing neither of them was.
+  const hues = a.hues.map((hue, i) => (rng.chance(0.5) ? hue : b.hues[i]));
+  return makeGenome(hues, rng.chance(0.5) ? a.sat : b.sat);
 }
 
 /** Which of the wild ring's slots a hue falls in — the unit a journal counts. */
 export function hueSlot(hue) {
   const h = ((hue % 360) + 360) % 360;
   return Math.round(h / HUE_STEP) % WILD_HUES;
+}
+
+/** How many of a flower's three tones differ — 1 for a plain one, up to 3. */
+export function toneCount(g) {
+  return new Set(g.hues).size;
 }

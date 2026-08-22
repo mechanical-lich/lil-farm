@@ -21,10 +21,14 @@ import { FLOWERS } from '../sim/flowergenes.js';
 /** The three greys the artist left to be replaced, lightest first. */
 export const KEYS = [[255, 255, 255], [198, 198, 198], [141, 141, 141]];
 
-/** How far the middle tone swings when a flower is two-toned, in degrees. */
-const SPLIT_SHIFT = 35;
-
-/** Lightness of each of the three tones. */
+/**
+ * Lightness of each of the three tones, lightest first.
+ *
+ * Fixed, and not inherited. The hues are the genes; the lightnesses are what
+ * keep a flower legible as a flower — lit face, middle, shadow — however wild
+ * its colours get. Let these vary and a cross could come out flat, or inside
+ * out with its shadow brighter than its petals.
+ */
 const TONES = [0.82, 0.62, 0.42];
 
 /**
@@ -48,19 +52,19 @@ export function useFlowerSheet(img) {
 }
 
 /**
- * The three colours a genome produces, lightest first.
+ * The three colours a genome produces, lightest first — one per gene.
  *
- * One hue drives all three, so a flower is always a believable single flower
- * rather than three colours that happened to land on the same sprite. The
- * `split` gene swings the middle tone to a neighbour on the wheel, which is
- * what gives two-tone flowers without letting them turn muddy.
+ * A wild flower has all three hues alike and so comes out as one colour in
+ * three shades. A bred one may have three different hues, which is what a
+ * gardener's flower looks like and what nothing found in the grass ever does.
  */
 export function palette(genome) {
   const sat = genome.sat / 100;
-  return TONES.map((light, i) => {
-    const hue = i === 1 && genome.split ? genome.hue + SPLIT_SHIFT : genome.hue;
-    return hsl(hue, i === 2 ? Math.min(1, sat + 0.05) : sat, light);
-  });
+  return TONES.map((light, i) => hsl(
+    genome.hues[i],
+    i === 2 ? Math.min(1, sat + 0.05) : sat,
+    light,
+  ));
 }
 
 /** HSL to RGB, the short way. h in degrees, s and l as fractions. */
@@ -74,7 +78,7 @@ export function hsl(h, s, l) {
 }
 
 /** A key that two identical flowers share and two different ones do not. */
-const keyFor = (kind, g) => `${kind}:${g.hue}:${g.sat}:${g.split ? 1 : 0}`;
+const keyFor = (kind, g) => `${kind}:${g.hues.join('-')}:${g.sat}`;
 
 /**
  * The canvas for one flower, recoloured and kept.

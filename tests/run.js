@@ -66,7 +66,7 @@ import {
 import { barnGrid } from '../js/render/tilerender.js';
 import {
   FLOWER_KINDS, WILD_HUES, HUE_STEP, makeGenome, rollWildGenome, readSeedId, isFlowerSeed,
-  seedIdFor as flowerSeedId, blendHue, crossGenomes, isCross, seedName,
+  seedIdFor as flowerSeedId, blendHue, crossGenomes, isCross, seedName, petalHue, toneCount,
 } from '../js/sim/flowergenes.js';
 import {
   plant as plantFlower, pick as pickFlower, flowerAt, canBloom, canPlantAt, pickedCount,
@@ -1421,7 +1421,11 @@ test('wild flowers only ever come in the two dozen wild colours', () => {
   // anywhere on the wheel would hand the player the whole collection for free.
   const s = { rng: makeRng(31337) };
   const hues = new Set();
-  for (let i = 0; i < 600; i++) hues.add(rollWildGenome(s.rng).hue);
+  for (let i = 0; i < 600; i++) {
+    const g = rollWildGenome(s.rng);
+    assertEqual(new Set(g.hues).size, 1, 'a wild flower is all one colour');
+    hues.add(petalHue(g));
+  }
   assertEqual(hues.size, WILD_HUES, 'exactly the ring, no more');
   for (const hue of hues) assertEqual(hue % HUE_STEP, 0, `${hue} sits on the ring`);
 });
@@ -1502,7 +1506,7 @@ test('the seed drawer is grouped by flower, and sorted round the wheel', () => {
   };
   const groups = seedGroups(s);
   assertEqual(groups.map((g) => g.kind), ['daisy', 'poppy'], 'a group per flower, in sheet order');
-  assertEqual(groups[0].seeds.map((x) => x.genome.hue), [40, 200], 'sorted by colour within it');
+  assertEqual(groups[0].seeds.map((x) => petalHue(x.genome)), [40, 200], 'sorted by colour within it');
   assertEqual(groups[1].seeds[0].qty, 5, 'carrying the counts');
 });
 
@@ -1599,8 +1603,10 @@ test('two flowers of a kind raise a third that takes after both', () => {
   for (let i = 0; i < 200 && !child; i++) child = breedAt(s, at.x, at.y);
   assert(child, 'a cross eventually took');
   assertEqual(child.kind, 'poppy', 'of their own kind');
-  const between = child.hue > 30 && child.hue < 90;
-  assert(between, `its colour lies between its parents' (got ${child.hue})`);
+  // Either blended to somewhere between them, or inherited from one outright —
+  // both are crossings, and both stay within the span of the parents.
+  assert(petalHue(child.genome) >= 30 && petalHue(child.genome) <= 90,
+    `its colour comes from its parents (got ${petalHue(child.genome)})`);
 });
 
 test('a dry bed is a bed left alone', () => {
@@ -1735,6 +1741,68 @@ test('the recolour cache does not grow without end', () => {
   assert(cacheSize() <= CACHE_LIMIT, `kept ${cacheSize()}, which is over the limit`);
 });
 
+test('a child is sometimes blended and sometimes inherited', () => {
+  // Both routes are needed, for opposite reasons. Blending finds colours that
+  // neither parent had; inheriting keeps the ones they did. Blending alone
+  // converges — every generation pulls toward the average, and a bed left
+  // crossing long enough goes quietly uniform.
+  const rng = makeRng(4242);
+  const mum = makeGenome(0, 70);
+  const dad = makeGenome(120, 95);
+
+  let inherited = 0;
+  let blended = 0;
+  for (let i = 0; i < 400; i++) {
+    const child = crossGenomes(mum, dad, rng);
+    const hueFromParent = child.hue === mum.hue || child.hue === dad.hue;
+    const satFromParent = child.sat === mum.sat || child.sat === dad.sat;
+    if (hueFromParent && satFromParent) inherited++;
+    else blended++;
+  }
+  assert(inherited > 40, `some children take after a parent outright (got ${inherited})`);
+  assert(blended > 40, `and some are a mix of the two (got ${blended})`);
+});
+
+test('an inherited gene is copied faithfully', () => {
+  // The point of inheriting is that a colour worth having survives another
+  // generation intact. A mutation on this path would average it away slowly
+  // instead of quickly.
+  const rng = makeRng(77);
+  const mum = makeGenome(30, 60);
+  const dad = makeGenome(210, 90);
+  for (let i = 0; i < 400; i++) {
+    const child = crossGenomes(mum, dad, rng);
+    if (child.hue !== mum.hue && child.hue !== dad.hue) continue;   // a blend
+    if (child.sat !== mum.sat && child.sat !== dad.sat) continue;
+    assert([mum.hue, dad.hue].includes(child.hue), 'the hue is exactly one parent\u2019s');
+    assert([mum.sat, dad.sat].includes(child.sat), 'and so is the strength');
+  }
+});
+
+test('a bed keeps its extremes instead of going muddy', () => {
+  // Measured rather than argued. A bed of red, green and blue is filled in by
+  // crossing; with blending alone the colours crowd toward the middle, and the
+  // striking ones that went in are gone.
+  const spread = (hues) => {
+    const x = hues.reduce((n, h) => n + Math.cos((h * Math.PI) / 180), 0) / hues.length;
+    const y = hues.reduce((n, h) => n + Math.sin((h * Math.PI) / 180), 0) / hues.length;
+    return 1 - Math.hypot(x, y);
+  };
+  const grow = (rng) => {
+    const bed = [makeGenome(0), makeGenome(120), makeGenome(240)];
+    while (bed.length < 40) {
+      bed.push(crossGenomes(bed[rng.int(bed.length)], bed[rng.int(bed.length)], rng));
+    }
+    return bed.map(petalHue);
+  };
+
+  let total = 0;
+  const seeds = [1, 2, 3, 4, 5, 6];
+  for (const seed of seeds) total += spread(grow(makeRng(seed)));
+  const average = total / seeds.length;
+  assert(average > 0.5, `the bed stayed colourful (spread ${average.toFixed(2)})`);
+});
+
 test('a bred colour says so, and a wild one does not', () => {
   // A crossed colour is the one thing in the bag that cannot be found again by
   // walking around: lose the seeds and it is gone. It should not look like the
@@ -1743,7 +1811,7 @@ test('a bred colour says so, and a wild one does not', () => {
   assert(!isCross(wild), 'straight off the wild ring');
   assertEqual(seedName(flowerSeedId('daisy', wild)), 'Amber daisy seeds', 'named plainly');
 
-  for (const bred of [makeGenome(23), makeGenome(45, 90), makeGenome(45, 70, true)]) {
+  for (const bred of [makeGenome(23), makeGenome(45, 90), makeGenome([45, 120, 45])]) {
     assert(isCross(bred), `${JSON.stringify(bred)} came from parents`);
     assert(seedName(flowerSeedId('daisy', bred)).startsWith('Crossed '), 'and says so');
   }
@@ -1753,16 +1821,28 @@ test('a bred colour says so, and a wild one does not', () => {
     'Crossed orange bird of paradise seeds', 'no stray capitals mid-sentence');
 });
 
-test('a genome paints three tones of one colour', () => {
-  // One hue drives all three, so a flower is always a believable single flower
-  // rather than three colours that happened to land on the same sprite.
+test('a wild flower is one colour in three shades', () => {
   const [light, mid, dark] = palette(makeGenome(0));
   assert(light[0] > mid[0] && mid[0] > dark[0], 'light to dark');
   for (const tone of [light, mid, dark]) {
     assert(tone[0] > tone[1] && tone[0] > tone[2], 'and all of them red');
   }
-  const split = palette(makeGenome(0, 70, true));
-  assert(split[1].join() !== mid.join(), 'a two-tone flower swings its middle');
+});
+
+test('each of the three tones is its own gene', () => {
+  // The sheet gives three colours to replace, and a gene apiece is what makes
+  // crossing worth doing: a child can take its petals from one parent and its
+  // shadow from the other.
+  const three = palette(makeGenome([0, 120, 240]));
+  assert(three[0][0] > three[0][1], 'petals red');
+  assert(three[1][1] > three[1][0], 'middle green');
+  assert(three[2][2] > three[2][0], 'shadow blue');
+
+  // The lightnesses are not inherited, so no cross can come out flat or with
+  // its shadow brighter than its face.
+  const bright = (c) => c[0] + c[1] + c[2];
+  assert(bright(three[0]) > bright(three[1]) && bright(three[1]) > bright(three[2]),
+    'still lit face, middle and shadow whatever the hues');
 });
 
 // --- the market ---------------------------------------------------------

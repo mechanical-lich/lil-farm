@@ -21,6 +21,7 @@ import { isReserved } from './build.js';
 import {
   FLOWERS, FLOWER_KINDS, WILD_HUES, HUE_STEP, makeGenome, rollWildGenome,
   seedIdFor, readSeedId, hueName, hueSlot, crossGenomes, flowerLabel, isCross, sentenceCase,
+  petalHue,
 } from './flowergenes.js';
 
 export * from './flowergenes.js';
@@ -157,7 +158,7 @@ export function reconcileFlowers(state) {
 /** Puts a flower in the world. Used by spawning, by planting, and by breeding. */
 export function plant(state, x, y, kind, genome) {
   state.flowers = state.flowers || {};
-  state.flowers[`${x},${y}`] = { kind, ...genome };
+  state.flowers[`${x},${y}`] = { kind, hues: [...genome.hues], sat: genome.sat };
   state.grid.setObject(x, y, OBJ.FLOWER);
   emitUnlessSuspended('flower:bloomed', { x, y, kind });
   return state.flowers[`${x},${y}`];
@@ -167,7 +168,7 @@ export function plant(state, x, y, kind, genome) {
 export function flowerAt(state, x, y) {
   const f = (state.flowers || {})[`${x},${y}`];
   if (!f || !FLOWERS[f.kind]) return null;
-  const genome = makeGenome(f.hue, f.sat, f.split);
+  const genome = makeGenome(f.hues, f.sat);
   return { kind: f.kind, genome, name: sentenceCase(flowerLabel(f.kind, genome)) };
 }
 
@@ -193,8 +194,8 @@ export function pick(state, x, y) {
   const id = seedIdFor(found.kind, found.genome);
   addItem(state, id, count);
 
-  const first = !hasFound(state, found.kind, found.genome.hue);
-  record(state, found.kind, found.genome.hue);
+  const first = !hasFound(state, found.kind, petalHue(found.genome));
+  record(state, found.kind, petalHue(found.genome));
   emitUnlessSuspended('flower:picked', { x, y, kind: found.kind, name: found.name, first });
   return { [id]: count };
 }
@@ -255,7 +256,7 @@ export function updateBreeding(state) {
 
 /**
  * Tries to raise a child from the flower at (x, y) and one of its neighbours.
- * @returns {object|null} the flower that grew, if one did
+ * @returns {{kind, genome, name}|null} the flower that grew, if one did
  */
 export function breedAt(state, x, y) {
   const mother = flowerAt(state, x, y);
@@ -280,11 +281,13 @@ export function breedAt(state, x, y) {
   const where = spots[state.rng.int(spots.length)];
   const genome = crossGenomes(mother.genome, father.genome, state.rng);
 
-  const grown = plant(state, where.x, where.y, mother.kind, genome);
+  plant(state, where.x, where.y, mother.kind, genome);
   emitUnlessSuspended('flower:bred', {
     x: where.x, y: where.y, kind: mother.kind, name: flowerLabel(mother.kind, genome),
   });
-  return grown;
+  // The same shape flowerAt gives, rather than the raw record: a caller asking
+  // what grew wants the flower, not the row in the table.
+  return flowerAt(state, where.x, where.y);
 }
 
 /** Is this flower still damp enough to be interested in its neighbours? */
@@ -379,6 +382,6 @@ export function seedGroups(state) {
       kind,
       name: FLOWERS[kind].name,
       sprite: FLOWERS[kind].sprite,
-      seeds: byKind.get(kind).sort((a, b) => a.genome.hue - b.genome.hue),
+      seeds: byKind.get(kind).sort((a, b) => petalHue(a.genome) - petalHue(b.genome)),
     }));
 }

@@ -71,6 +71,12 @@ Sprite indices are derived from the sheet's layout — species order, five to a 
 ## Flowers
 Eight flowers, and no list of variants anywhere. The sheet is drawn in three greys — 255, 198 and 141 — and every flower in the game is one of those eight with those greys replaced by colours worked out from its genome. Stems, the sunflower's brown eye and the daisy's dark one are not grey, so they survive the swap and a flower still reads as itself whatever colour it turns.
 
+**Three greys, three genes.** The sheet gives three colours to replace, and each is inherited separately. That is what makes crossing worth doing: with one hue driving all three tones there was almost nothing to recombine — a child took "the colour" from one parent or the other and that was the whole of it. With three, a flower can have its mother's petals over its father's shadow, which is a thing neither parent was and neither could produce alone.
+
+The three *lightnesses* are fixed and not inherited. Only hues are. That keeps a flower legible as a flower — lit face, middle, shadow — however wild its colours get, and means no cross can come out flat or inside out with its shadow brighter than its petals.
+
+Wild flowers have all three hues alike, so they read as one colour in three shades. A three-toned flower is therefore visibly the work of a gardener, and the first one a player breeds is unmistakable without anything having to announce it.
+
 **Hue is a number of degrees, not an index into a palette.** That is the one decision the whole thing rests on. Breeding is coming — two flowers of a kind standing next to each other will raise a third that shares their genes — and a child's colour is its parents' colours averaged. Averaging two palette indices is meaningless; averaging two angles is exactly right. Building it any other way now would mean migrating every seed anybody owns later.
 
 Wild flowers only come in a coarse ring of **24 hues**. Everything between them has to be bred. That gap is the point: a wheel with holes in it is an invitation, where a wheel already full is a shelf.
@@ -97,7 +103,13 @@ A watered flower has visibly damp ground under it. Grass has no wet version the 
 
 **A tap waters; picking takes the harvest tool.** Watering is what you do to the same bed again and again, so it belongs on the tool already in your hand. Picking is the thing you do once and cannot undo, and a tap is far too easy to make by accident to be allowed to destroy a colour that took a week to breed.
 
-A child is halfway between its parents and then nudged a few degrees. The nudge matters twice over: without it breeding is a calculator rather than a garden, and with it the wheel eventually reaches colours no pair of wild flowers sits either side of.
+A child comes about one of two ways, and both are needed for opposite reasons.
+
+**Blended** — halfway between its parents and then nudged a few degrees. The nudge matters twice over: without it breeding is a calculator rather than a garden, and with it the wheel eventually reaches colours no pair of wild flowers sits either side of.
+
+**Inherited** — each gene taken whole from one parent or the other, faithfully and without mutation. A flower may end up with its mother's colour at its father's strength: a combination neither parent had, without being a colour neither could pass on.
+
+Blending alone converges. Every generation pulls toward the average, so a bed left crossing long enough goes quietly uniform and muddy, and the striking colours that went into it are gone for good. Inheriting is what keeps them: a shade worth having can spread through a bed rather than being averaged away by its own offspring. Measured on a bed of red, green and blue filled out to forty flowers — with blending alone the colours crowd toward the middle (spread 0.43); at six blends in ten they stay ranged around the wheel (0.55) while still turning up two dozen distinct shades.
 
 The blend goes **the short way round the wheel**, which is the whole reason hue is stored as an angle. As plain numbers 350 and 10 average to 180 — the exact opposite colour — where anybody looking at two red flowers expects red. Directly opposite parents have no halfway at all, so the child takes after one of them rather than landing somewhere arbitrary.
 

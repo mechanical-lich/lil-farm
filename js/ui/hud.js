@@ -4,7 +4,7 @@ import { on, emit } from '../engine/events.js';
 import { inventoryList } from '../sim/inventory.js';
 import { journalRows, journalFound, MUSHROOMS } from '../sim/mushrooms.js';
 import { journalRows as flowerJournalRows, seedGroups } from '../sim/flowers.js';
-import { makeGenome, hueName, isFlowerSeed, isCross } from '../sim/flowergenes.js';
+import { makeGenome, hueName, isFlowerSeed, isCross, petalHue } from '../sim/flowergenes.js';
 import { flowerDataUrl } from '../render/flowerart.js';
 import { taskLabel } from '../sim/tasks.js';
 
@@ -120,7 +120,7 @@ export function initHud(state, { onPlantFlower } = {}) {
       ${g.seeds.map((seed) => `
         <li class="seed">
           <img alt="" src="${flowerDataUrl(seed.kind, seed.genome)}">
-          <span class="shop-name">${esc(hueName(seed.genome.hue))}${isCross(seed.genome) ? ' <i>cross</i>' : ''}<em>${seed.qty} seed${seed.qty === 1 ? '' : 's'}</em></span>
+          <span class="shop-name">${esc(hueName(petalHue(seed.genome)))}${isCross(seed.genome) ? ' <i>cross</i>' : ''}<em>${seed.qty} seed${seed.qty === 1 ? '' : 's'}</em></span>
           <button data-plant="${seed.id}">Plant</button>
         </li>`).join('')}`).join('');
 
