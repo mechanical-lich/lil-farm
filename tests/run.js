@@ -64,6 +64,16 @@ import {
   glutRatio,
 } from '../js/sim/market.js';
 import { barnGrid } from '../js/render/tilerender.js';
+import {
+  FLOWER_KINDS, WILD_HUES, HUE_STEP, makeGenome, rollWildGenome, readSeedId, isFlowerSeed,
+  seedIdFor as flowerSeedId, blendHue, crossGenomes, isCross, seedName,
+} from '../js/sim/flowergenes.js';
+import {
+  plant as plantFlower, pick as pickFlower, flowerAt, canBloom, canPlantAt, pickedCount,
+  hasFound, seedGroups, FLOWER_INTERVAL, FLOWER_MAX_FRACTION,
+  breedAt, totalCap, BREED_INTERVAL, water as waterFlower, isWatered, FLOWER_WET_TICKS,
+} from '../js/sim/flowers.js';
+import { palette, KEYS, flowerCanvas, cacheSize, CACHE_LIMIT } from '../js/render/flowerart.js';
 import { decodePng } from '../tools/png.mjs';
 import {
   riverPieceAt, autotileQuadrants, isWaterAt, isDirtAt as isDirt,
@@ -1362,6 +1372,397 @@ test('the building record is the source of truth, found from any of its tiles', 
     }
   }
   assertEqual(buildingAt(s, 8, 5), null, 'a tile just outside belongs to nothing');
+});
+
+// --- flowers ------------------------------------------------------------
+
+test('the sheet is still drawn in the three greys the genome replaces', () => {
+  // The whole feature rests on flowers.png being greyscale in exactly these
+  // three values. If the art is redrawn with 254 instead of 255, every flower
+  // silently stops taking colour and nothing else here would notice.
+  const sheet = decodePng('assets/flowers.png');
+  assertEqual(sheet.height, TILE, 'one row');
+  assertEqual(sheet.width / TILE, FLOWER_KINDS.length, 'one sprite per kind');
+
+  const seen = new Set();
+  for (let i = 0; i < sheet.rgba.length; i += 4) {
+    if (sheet.rgba[i + 3] === 0) continue;
+    seen.add(`${sheet.rgba[i]},${sheet.rgba[i + 1]},${sheet.rgba[i + 2]}`);
+  }
+  for (const key of KEYS) {
+    assert(seen.has(key.join(',')), `the sheet still uses ${key.join(',')}`);
+  }
+});
+
+test('a genome survives the round trip through a seed id', () => {
+  // The id *is* the storage: a seed carries its colour in its own name so the
+  // inventory can stay a flat map of counts. If that trip is lossy, a player's
+  // seeds quietly turn into different flowers.
+  for (const genome of [makeGenome(0), makeGenome(137), makeGenome(200, 90, true), makeGenome(359, 15)]) {
+    const id = flowerSeedId('daisy', genome);
+    const read = readSeedId(id);
+    assertEqual(read.kind, 'daisy', 'the kind comes back');
+    assertEqual(read.genome, genome, `${id} comes back unchanged`);
+  }
+  assertEqual(readSeedId('carrot_seed'), null, 'and it ignores ordinary seeds');
+});
+
+test('seeds of the same colour stack, and near-misses do not', () => {
+  const a = flowerSeedId('poppy', makeGenome(120));
+  const b = flowerSeedId('poppy', makeGenome(120));
+  const c = flowerSeedId('poppy', makeGenome(135));
+  assertEqual(a, b, 'the same flower gives the same id');
+  assert(a !== c, 'a different hue gives a different one');
+  assert(flowerSeedId('daisy', makeGenome(120)) !== a, 'and so does a different kind');
+});
+
+test('wild flowers only ever come in the two dozen wild colours', () => {
+  // Everything between them is what breeding is for. A wild roll that landed
+  // anywhere on the wheel would hand the player the whole collection for free.
+  const s = { rng: makeRng(31337) };
+  const hues = new Set();
+  for (let i = 0; i < 600; i++) hues.add(rollWildGenome(s.rng).hue);
+  assertEqual(hues.size, WILD_HUES, 'exactly the ring, no more');
+  for (const hue of hues) assertEqual(hue % HUE_STEP, 0, `${hue} sits on the ring`);
+});
+
+test('picking a flower gives its seeds and remembers the colour', () => {
+  const s = weedableFarm(9401);
+  const genome = makeGenome(210);
+  plantFlower(s, s.farmer.x + 1, s.farmer.y, 'peony', genome);
+
+  const gained = pickFlower(s, s.farmer.x + 1, s.farmer.y);
+  const id = flowerSeedId('peony', genome);
+  assert(gained[id] > 0, 'seeds of that exact flower');
+  assertEqual(countItem(s, id), gained[id], 'and they went in the bag');
+  assertEqual(flowerAt(s, s.farmer.x + 1, s.farmer.y), null, 'the flower is gone');
+  assertEqual(s.grid.getObject(s.farmer.x + 1, s.farmer.y), OBJ.NONE, 'and so is its tile marker');
+
+  assertEqual(pickedCount(s, 'peony'), 1, 'the journal counted it');
+  assert(hasFound(s, 'peony', 210), 'and remembers that colour');
+  assert(!hasFound(s, 'peony', 30), 'but not one never seen');
+  assert(!hasFound(s, 'daisy', 210), 'nor the same colour of another kind');
+});
+
+test('the flower itself never goes in the bag', () => {
+  // Flowers do not sell and are not carried. What you take away is seeds and
+  // the memory of having seen it.
+  const s = weedableFarm(9402);
+  plantFlower(s, s.farmer.x + 1, s.farmer.y, 'crocus', makeGenome(60));
+  const gained = pickFlower(s, s.farmer.x + 1, s.farmer.y);
+  for (const id of Object.keys(gained)) {
+    assert(isFlowerSeed(id), `${id} should be seeds, not a flower`);
+  }
+  assertEqual(countItem(s, 'crocus'), 0, 'no flower item exists to hold');
+});
+
+test('flowers grow only on open ground you own, and stop at a cap', () => {
+  const s = weedableFarm(9403);
+  const x = s.farmer.x + 3;
+  const y = s.farmer.y + 3;
+  assert(canBloom(s, x, y), 'open owned grass will do');
+
+  s.grid.setObject(x, y, OBJ.ROCK);
+  assert(!canBloom(s, x, y), 'not where something is standing');
+  s.grid.setObject(x, y, OBJ.NONE);
+
+  s.grid.setGround(x, y, GROUND.TILLED);
+  assert(!canBloom(s, x, y), 'not in a bed');
+  s.grid.setGround(x, y, GROUND.GRASS);
+
+  // Run long enough that the cap, not the clock, is what stops it.
+  for (let i = 0; i < FLOWER_INTERVAL * 400; i++) tick(s);
+  const owned = s.grid.owned.size * PLOT * PLOT;
+  assert(Object.keys(s.flowers).length <= Math.max(1, Math.floor(owned * FLOWER_MAX_FRACTION)),
+    'a week away cannot carpet the farm');
+  assert(Object.keys(s.flowers).length > 0, 'but some did grow');
+});
+
+test('flowers and their journal survive a save round trip', () => {
+  const s = weedableFarm(9404);
+  plantFlower(s, s.farmer.x + 1, s.farmer.y, 'phlox', makeGenome(300, 85, true));
+  pickFlower(s, s.farmer.x + 1, s.farmer.y);
+  plantFlower(s, s.farmer.x + 2, s.farmer.y, 'bluebell', makeGenome(45));
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  const still = flowerAt(back, s.farmer.x + 2, s.farmer.y);
+  assertEqual(still.kind, 'bluebell', 'the flower is still standing');
+  assertEqual(still.genome, makeGenome(45), 'with its colour intact');
+  assertEqual(pickedCount(back, 'phlox'), 1, 'and the journal came too');
+  assert(hasFound(back, 'phlox', 300), 'colour and all');
+});
+
+test('the seed drawer is grouped by flower, and sorted round the wheel', () => {
+  const s = weedableFarm(9405);
+  s.inventory = {
+    wood: 20,
+    [flowerSeedId('daisy', makeGenome(200))]: 3,
+    [flowerSeedId('daisy', makeGenome(40))]: 1,
+    [flowerSeedId('poppy', makeGenome(90))]: 5,
+  };
+  const groups = seedGroups(s);
+  assertEqual(groups.map((g) => g.kind), ['daisy', 'poppy'], 'a group per flower, in sheet order');
+  assertEqual(groups[0].seeds.map((x) => x.genome.hue), [40, 200], 'sorted by colour within it');
+  assertEqual(groups[1].seeds[0].qty, 5, 'carrying the counts');
+});
+
+test('the farmer can plant on the square he is standing on', () => {
+  // He walks onto the tile to plant it, so asking "is anyone standing here" at
+  // the moment of planting is asking whether he exists. Sharing one rule with
+  // wild growth made every single planting fail with "nowhere to plant it now".
+  const s = weedableFarm(9406);
+  const at = { x: s.farmer.x, y: s.farmer.y };
+  s.grid.setObject(at.x, at.y, OBJ.NONE);
+  s.grid.setGround(at.x, at.y, GROUND.GRASS);
+
+  assert(!canBloom(s, at.x, at.y), 'nothing comes up wild under his boots');
+  assert(canPlantAt(s, at.x, at.y), 'but he may put one there himself');
+});
+
+test('planting a saved colour puts that exact flower back', () => {
+  const s = weedableFarm(9407);
+  const genome = makeGenome(285);
+  const id = flowerSeedId('crocus', genome);
+  s.inventory = { [id]: 2 };
+
+  const at = { x: s.farmer.x + 2, y: s.farmer.y };
+  s.grid.setObject(at.x, at.y, OBJ.NONE);
+  addTask(s, taskForTile(s, at.x, at.y, 'plantflower', { seedId: id }));
+  for (let i = 0; i < 900 && s.tasks.length; i++) tick(s);
+
+  const grown = flowerAt(s, at.x, at.y);
+  assertEqual(grown.kind, 'crocus', 'the right flower');
+  assertEqual(grown.genome, genome, 'in the colour those seeds held');
+  assertEqual(countItem(s, id), 1, 'and one seed was spent');
+  assertEqual(s.grid.getObject(at.x, at.y), OBJ.FLOWER, 'the tile says so too');
+});
+
+test('a queued planting costs nothing if it is cancelled', () => {
+  // The same promise planting a crop makes: the seed leaves the bag when it
+  // goes in the ground, not when the job is ordered.
+  const s = weedableFarm(9408);
+  const id = flowerSeedId('daisy', makeGenome(15));
+  s.inventory = { [id]: 1 };
+  const at = { x: s.farmer.x + 2, y: s.farmer.y };
+  s.grid.setObject(at.x, at.y, OBJ.NONE);
+
+  const task = addTask(s, taskForTile(s, at.x, at.y, 'plantflower', { seedId: id }));
+  assertEqual(countItem(s, id), 1, 'still in the bag while it waits');
+  cancelTask(s, task.id);
+  assertEqual(countItem(s, id), 1, 'and still there afterwards');
+});
+
+test('a flower record with no tile behind it is swept up on load', () => {
+  // The tile marker is what the world draws and what a tap finds, so a record
+  // without one is invisible and unreachable — but it would still hold its
+  // square against planting and count against the spawn cap.
+  const s = weedableFarm(9409);
+  const at = { x: s.farmer.x + 1, y: s.farmer.y };
+  s.grid.setGround(at.x, at.y, GROUND.GRASS);
+  s.grid.setObject(at.x, at.y, OBJ.NONE);
+  plantFlower(s, at.x, at.y, 'peony', makeGenome(100));
+  s.grid.setObject(at.x, at.y, OBJ.NONE);   // however it happened
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual(flowerAt(back, at.x, at.y), null, 'the ghost is gone');
+  assert(canPlantAt(back, at.x, at.y), 'and the square is free again');
+});
+
+test('a child takes the short way round the colour wheel', () => {
+  // The whole reason hue is an angle. As plain numbers, 350 and 10 average to
+  // 180 — the exact opposite colour — where anybody looking at two red flowers
+  // expects red.
+  const rng = makeRng(11);
+  assertEqual(blendHue(350, 10, rng), 0, 'red and red make red');
+  assertEqual(blendHue(0, 90, rng), 45, 'and the ordinary case still works');
+  assertEqual(blendHue(300, 60, rng), 0, 'wrapping through zero');
+
+  // Directly opposite parents have no halfway: it takes after one of them.
+  const opposite = blendHue(0, 180, rng);
+  assert(opposite === 0 || opposite === 180, 'rather than landing somewhere arbitrary');
+});
+
+test('two flowers of a kind raise a third that takes after both', () => {
+  const s = weedableFarm(9410);
+  const at = { x: s.farmer.x + 3, y: s.farmer.y + 3 };
+  for (let dy = -1; dy <= 2; dy++) {
+    for (let dx = -1; dx <= 2; dx++) {
+      s.grid.setGround(at.x + dx, at.y + dy, GROUND.GRASS);
+      s.grid.setObject(at.x + dx, at.y + dy, OBJ.NONE);
+    }
+  }
+  plantFlower(s, at.x, at.y, 'poppy', makeGenome(30));
+  plantFlower(s, at.x + 1, at.y, 'poppy', makeGenome(90));
+  waterFlower(s, at.x, at.y);
+
+  let child = null;
+  for (let i = 0; i < 200 && !child; i++) child = breedAt(s, at.x, at.y);
+  assert(child, 'a cross eventually took');
+  assertEqual(child.kind, 'poppy', 'of their own kind');
+  const between = child.hue > 30 && child.hue < 90;
+  assert(between, `its colour lies between its parents' (got ${child.hue})`);
+});
+
+test('a dry bed is a bed left alone', () => {
+  // Watering is the whole of the player's control over breeding. A bed they
+  // like exactly as it is has to stay exactly as it is, and stopping should be
+  // as easy as not doing something.
+  const s = weedableFarm(9414);
+  const at = { x: s.farmer.x + 3, y: s.farmer.y + 3 };
+  for (let dy = -1; dy <= 2; dy++) {
+    for (let dx = -1; dx <= 2; dx++) {
+      s.grid.setGround(at.x + dx, at.y + dy, GROUND.GRASS);
+      s.grid.setObject(at.x + dx, at.y + dy, OBJ.NONE);
+    }
+  }
+  plantFlower(s, at.x, at.y, 'bluebell', makeGenome(30));
+  plantFlower(s, at.x + 1, at.y, 'bluebell', makeGenome(90));
+
+  for (let i = 0; i < 200; i++) assertEqual(breedAt(s, at.x, at.y), null, 'dry flowers keep to themselves');
+
+  waterFlower(s, at.x, at.y);
+  assert(isWatered(s, at.x, at.y), 'watering takes');
+  let child = null;
+  for (let i = 0; i < 200 && !child; i++) child = breedAt(s, at.x, at.y);
+  assert(child, 'and now it will cross');
+});
+
+test('a watering outlasts the gap between breeding attempts', () => {
+  // Set to the time soil takes to dry at first, which sounded right and was
+  // not: soil dries faster than breeding is attempted, so a watering wore off
+  // before a single attempt was made and the can appeared to do nothing.
+  assert(FLOWER_WET_TICKS > BREED_INTERVAL * 2,
+    'a watering must buy several attempts, or the control is a coin toss');
+});
+
+test('a watering wears off, and the bed goes quiet again', () => {
+  const s = weedableFarm(9415);
+  const at = { x: s.farmer.x + 3, y: s.farmer.y + 3 };
+  for (let dy = -1; dy <= 2; dy++) {
+    for (let dx = -1; dx <= 2; dx++) {
+      s.grid.setGround(at.x + dx, at.y + dy, GROUND.GRASS);
+      s.grid.setObject(at.x + dx, at.y + dy, OBJ.NONE);
+    }
+  }
+  plantFlower(s, at.x, at.y, 'phlox', makeGenome(30));
+  plantFlower(s, at.x + 1, at.y, 'phlox', makeGenome(90));
+  waterFlower(s, at.x, at.y);
+
+  s.tickCount += FLOWER_WET_TICKS + 1;
+  assert(!isWatered(s, at.x, at.y), 'it has dried out');
+  for (let i = 0; i < 200; i++) assertEqual(breedAt(s, at.x, at.y), null, 'and stopped crossing');
+});
+
+test('a tap waters a flower; picking it takes the harvest tool', () => {
+  // Watering is what a player does to the same bed again and again, so it
+  // belongs on the tool already in their hand. Picking is the thing they do
+  // once and cannot undo, and a tap is far too easy to make by accident to be
+  // allowed to destroy a colour that took a week to breed.
+  const s = weedableFarm(9417);
+  const at = { x: s.farmer.x + 2, y: s.farmer.y };
+  s.grid.setGround(at.x, at.y, GROUND.GRASS);
+  s.grid.setObject(at.x, at.y, OBJ.NONE);
+  plantFlower(s, at.x, at.y, 'daisy', makeGenome(0));
+
+  assertEqual(taskForTile(s, at.x, at.y, 'auto').type, 'water', 'a plain tap waters it');
+  assertEqual(taskForTile(s, at.x, at.y, 'harvest').type, 'pick', 'harvest picks it');
+  assertEqual(taskForTile(s, at.x, at.y, 'clear').type, 'pick', 'and so does clearing the tile');
+});
+
+test('watering a flower is work the farmer does', () => {
+  const s = weedableFarm(9416);
+  const at = { x: s.farmer.x + 2, y: s.farmer.y };
+  s.grid.setGround(at.x, at.y, GROUND.GRASS);
+  s.grid.setObject(at.x, at.y, OBJ.NONE);
+  plantFlower(s, at.x, at.y, 'crocus', makeGenome(180));
+
+  const spec = taskForTile(s, at.x, at.y, 'water');
+  assert(spec, 'the water tool offers itself on a flower');
+  assertEqual(spec.detail, 'Teal crocus', 'and says which one');
+
+  addTask(s, spec);
+  for (let i = 0; i < 600 && s.tasks.length; i++) tick(s);
+  assert(isWatered(s, at.x, at.y), 'the farmer watered it');
+});
+
+test('only flowers of the same kind will cross', () => {
+  const s = weedableFarm(9411);
+  const at = { x: s.farmer.x + 3, y: s.farmer.y + 3 };
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 2; dx++) {
+      s.grid.setGround(at.x + dx, at.y + dy, GROUND.GRASS);
+      s.grid.setObject(at.x + dx, at.y + dy, OBJ.NONE);
+    }
+  }
+  plantFlower(s, at.x, at.y, 'poppy', makeGenome(30));
+  plantFlower(s, at.x + 1, at.y, 'daisy', makeGenome(90));
+  waterFlower(s, at.x, at.y);
+
+  for (let i = 0; i < 200; i++) assertEqual(breedAt(s, at.x, at.y), null, 'a poppy and a daisy do not');
+});
+
+test('breeding needs somewhere to put the child, and stops at a ceiling', () => {
+  const s = weedableFarm(9412);
+  const at = { x: s.farmer.x + 3, y: s.farmer.y + 3 };
+  // Two parents boxed in by rocks: nowhere for a child to go.
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 2; dx++) {
+      s.grid.setGround(at.x + dx, at.y + dy, GROUND.GRASS);
+      s.grid.setObject(at.x + dx, at.y + dy, OBJ.ROCK);
+    }
+  }
+  s.grid.setObject(at.x, at.y, OBJ.NONE);
+  s.grid.setObject(at.x + 1, at.y, OBJ.NONE);
+  plantFlower(s, at.x, at.y, 'peony', makeGenome(30));
+  plantFlower(s, at.x + 1, at.y, 'peony', makeGenome(90));
+  waterFlower(s, at.x, at.y);
+  assertEqual(breedAt(s, at.x, at.y), null, 'no bare ground, no child');
+
+  // And the ceiling holds however long a farm is left alone.
+  const roomy = weedableFarm(9413);
+  for (let i = 0; i < BREED_INTERVAL * 2000; i++) tick(roomy);
+  assert(Object.keys(roomy.flowers).length <= totalCap(roomy),
+    'a fortnight away cannot bury the farm');
+});
+
+test('the recolour cache does not grow without end', () => {
+  // Breeding invents colours that have never existed before, so a long session
+  // meets a great many of them. A cache that only ever grows is a slow leak
+  // however small the entries are.
+  for (let hue = 0; hue < CACHE_LIMIT + 80; hue++) {
+    flowerCanvas('daisy', makeGenome(hue % 360, 40 + (hue % 60)));
+  }
+  assert(cacheSize() <= CACHE_LIMIT, `kept ${cacheSize()}, which is over the limit`);
+});
+
+test('a bred colour says so, and a wild one does not', () => {
+  // A crossed colour is the one thing in the bag that cannot be found again by
+  // walking around: lose the seeds and it is gone. It should not look like the
+  // wild ones in a list of packets.
+  const wild = makeGenome(HUE_STEP * 3);
+  assert(!isCross(wild), 'straight off the wild ring');
+  assertEqual(seedName(flowerSeedId('daisy', wild)), 'Amber daisy seeds', 'named plainly');
+
+  for (const bred of [makeGenome(23), makeGenome(45, 90), makeGenome(45, 70, true)]) {
+    assert(isCross(bred), `${JSON.stringify(bred)} came from parents`);
+    assert(seedName(flowerSeedId('daisy', bred)).startsWith('Crossed '), 'and says so');
+  }
+
+  // One capital, at the front, wherever the words came from.
+  assertEqual(seedName(flowerSeedId('bird', makeGenome(23))),
+    'Crossed orange bird of paradise seeds', 'no stray capitals mid-sentence');
+});
+
+test('a genome paints three tones of one colour', () => {
+  // One hue drives all three, so a flower is always a believable single flower
+  // rather than three colours that happened to land on the same sprite.
+  const [light, mid, dark] = palette(makeGenome(0));
+  assert(light[0] > mid[0] && mid[0] > dark[0], 'light to dark');
+  for (const tone of [light, mid, dark]) {
+    assert(tone[0] > tone[1] && tone[0] > tone[2], 'and all of them red');
+  }
+  const split = palette(makeGenome(0, 70, true));
+  assert(split[1].join() !== mid.join(), 'a two-tone flower swings its middle');
 });
 
 // --- the market ---------------------------------------------------------
@@ -3045,9 +3446,12 @@ test('a duck heads for the water when it has nothing else to do', () => {
   assert(onWater, 'it should have taken to the water');
 });
 
-test('a duck returns to the water after coming ashore to lay', () => {
-  // Wandering alone isn't enough: it drifts further inland after every trip,
-  // which is the opposite of preferring the water.
+test('a duck spends its life on the water, going ashore only to lay', () => {
+  // Measured as time spent wet, not as where it happens to be standing when
+  // the test stops. A duck ashore on a laying errand is a duck doing its job,
+  // and a snapshot catches one at random — that assertion passed or failed on
+  // the seed rather than on the behaviour, and adding flowers to the tick
+  // shifted the dice enough to expose it.
   const s = farmWithMaterials(9804);
   completeBuild(s, { buildKind: 'barn', x: s.farmer.x - 1, y: s.farmer.y - 4 });
   const px = s.farmer.x + 4;
@@ -3058,11 +3462,16 @@ test('a duck returns to the water after coming ashore to lay', () => {
   duck.food = 1e9;
   duck.water = 1e9;
 
-  // Long enough to lay several times over, so any inland drift compounds.
-  for (let i = 0; i < ANIMALS.duck.produceTicks * 4; i++) tick(s);
+  // Long enough to lay several times over, so any inland drift would compound.
+  let wet = 0;
+  const ticks = ANIMALS.duck.produceTicks * 4;
+  for (let i = 0; i < ticks; i++) {
+    tick(s);
+    if (isWater(s.grid.getGround(duck.x, duck.y))) wet++;
+  }
 
-  const home = Math.max(Math.abs(duck.x - (px + 1)), Math.abs(duck.y - (s.farmer.y + 1)));
-  assert(home <= 3, `it wandered ${home} tiles from its pond`);
+  const share = wet / ticks;
+  assert(share > 0.9, `it was only on the water ${Math.round(share * 100)}% of the time`);
 });
 
 test('a duck comes ashore to lay, and never lays on the pond', () => {

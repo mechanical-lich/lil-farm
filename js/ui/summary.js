@@ -52,6 +52,16 @@ export function buildSummary(state, catchup) {
   const weeds = counts['weed:grown'] || 0;
   if (weeds > 0) lines.push(`${weeds} ${weeds === 1 ? 'weed' : 'weeds'} sprang up`);
 
+  // Crosses get their own line rather than being lumped in with the wild
+  // flowers. A colour that has never existed before appearing in a bed the
+  // player planted is the single most interesting thing that can happen while
+  // they are away, and it happens roughly once an hour — so a farm left
+  // overnight has something waiting that is worth walking out to look at.
+  const crossed = counts['flower:bred'] || 0;
+  if (crossed > 0) {
+    lines.push(`${crossed} new ${crossed === 1 ? 'flower' : 'flowers'} crossed in your beds`);
+  }
+
   // Things that are true *now* rather than events — the reason a farm can look
   // idle. Animals never die, so this is the only way neglect ever shows up.
   const nudges = [];

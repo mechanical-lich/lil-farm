@@ -1,0 +1,64 @@
+<!-- Flower palette preview: open tools/flower-preview.html.
+     Recolours flowers.png with generated genomes, so the palette function can
+     be judged on a wall of flowers rather than one at a time. Works from disk
+     as well as through the dev server. -->
+<meta charset=utf8><title>Flower preview</title><body style="background:#84c669;margin:0;color:#123;font:12px monospace">
+<canvas id=c style="image-rendering:pixelated;width:100%"></canvas>
+<script>
+const T=16;
+// the three greys the artist left to be replaced
+const KEYS=[[255,255,255],[198,198,198],[141,141,141]];
+
+function hsl(h,s,l){                       // h 0..360, s/l 0..1
+  const a=s*Math.min(l,1-l);
+  const f=(n)=>{const k=(n+h/30)%12; return Math.round(255*(l-a*Math.max(-1,Math.min(k-3,9-k,1))));};
+  return [f(0),f(8),f(4)];
+}
+
+/** A genome: a hue, a saturation step, and whether the mid tone shifts hue. */
+function palette(g){
+  const h=g.hue, s=[0.45,0.7,0.95][g.sat];
+  const midHue=g.split ? (h+35)%360 : h;
+  return [ hsl(h,s,0.82), hsl(midHue,s,0.62), hsl(h,Math.min(1,s+0.05),0.42) ];
+}
+
+function recolour(img, index, g){
+  const cv=document.createElement('canvas'); cv.width=T; cv.height=T;
+  const x=cv.getContext('2d',{willReadFrequently:true});
+  x.imageSmoothingEnabled=false;
+  x.drawImage(img,index*T,0,T,T,0,0,T,T);
+  const d=x.getImageData(0,0,T,T), p=d.data, pal=palette(g);
+  for(let i=0;i<p.length;i+=4){
+    if(!p[i+3]) continue;
+    for(let k=0;k<3;k++){
+      if(p[i]===KEYS[k][0] && p[i+1]===KEYS[k][1] && p[i+2]===KEYS[k][2]){
+        p[i]=pal[k][0]; p[i+1]=pal[k][1]; p[i+2]=pal[k][2]; break;
+      }
+    }
+  }
+  x.putImageData(d,0,0);
+  return cv;
+}
+
+const img=new Image();
+img.onload=()=>{
+  const n=img.width/T, S=6, GAP=4, PAD=28;
+  const rows=10;
+  const cv=document.getElementById('c'), x=cv.getContext('2d');
+  cv.width=PAD+n*(T*S+GAP); cv.height=40+rows*(T*S+GAP);
+  x.imageSmoothingEnabled=false;
+  x.fillStyle='#84c669'; x.fillRect(0,0,cv.width,cv.height);
+  x.fillStyle='#123'; x.font='bold 14px monospace';
+  x.fillText('8 flowers x 10 random genomes — every colour generated, none authored',6,18);
+  let seed=12345;
+  const rnd=()=>{seed=(seed*1103515245+12345)>>>0; return seed/4294967296;};
+  for(let r=0;r<rows;r++){
+    for(let i=0;i<n;i++){
+      const g={hue:Math.floor(rnd()*24)*15, sat:Math.floor(rnd()*3), split:rnd()<0.3};
+      const c=recolour(img,i,g);
+      x.drawImage(c,0,0,T,T,PAD+i*(T*S+GAP),30+r*(T*S+GAP),T*S,T*S);
+    }
+  }
+};
+img.src='../assets/flowers.png?v='+Date.now();
+</script></body>

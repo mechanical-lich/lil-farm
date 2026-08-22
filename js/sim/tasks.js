@@ -14,6 +14,8 @@ import {
 } from './build.js';
 import { animalDef, TROUGH_CAPACITY, isReady } from './animals.js';
 import { mushroomAt, forage } from './mushrooms.js';
+import { flowerAt, pick as pickFlower, canPlantAt } from './flowers.js';
+import { readSeedId, seedName } from './flowergenes.js';
 import { handAt, carriedTotal } from './farmhand.js';
 
 /** Work is measured in ticks (1 tick = 1 second). */
@@ -24,6 +26,8 @@ export const TASK_TYPES = {
   demolish: { label: 'Remove', verb: 'Removing' },
   pickup: { label: 'Pick up', verb: 'Picking up' },
   forage: { label: 'Pick', verb: 'Picking' },
+  pick: { label: 'Pick', verb: 'Picking' },
+  plantflower: { label: 'Plant', verb: 'Planting' },
   fill: { label: 'Fill', verb: 'Filling' },
   collect: { label: 'Collect', verb: 'Collecting' },
   gather: { label: 'Take', verb: 'Taking' },
@@ -103,6 +107,14 @@ export function clearBuildSite(state, task) {
   };
 
   for (const t of footprint(task.buildKind, task.x, task.y, sizeOf(task))) {
+    if (flowerAt(state, t.x, t.y)) {
+      // Same reasoning as mushrooms below: pick() clears the tile and takes
+      // the state.flowers entry with it. Paving over one would strand the
+      // entry for ever and eat a slot in the spawn cap.
+      add(pickFlower(state, t.x, t.y));
+      continue;
+    }
+
     if (mushroomAt(state, t.x, t.y)) {
       // forage() clears the tile, banks the mushroom and writes the journal —
       // and, critically, removes the state.mushrooms entry. Paving over one
@@ -278,7 +290,7 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
     work: def.work || 10,
     // A mushroom says which one it is, so the queue reads "Pick red toadstool"
     // rather than the same line four times over.
-    detail: mushroomAt(state, x, y)?.name || def.name,
+    detail: mushroomAt(state, x, y)?.name || flowerAt(state, x, y)?.name || def.name,
     // Blocking obstacles are worked on from an adjacent tile.
     adjacent: !!def.blocks,
   } : null);
@@ -332,11 +344,31 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
       return { type: 'plant', x, y, work: WORK.plant, detail: cropDef(type).name, cropType: type };
     }
 
-    case 'water':
+    // Putting a saved colour back in the ground. Flowers grow in grass rather
+    // than in a bed, so this asks the same question wild ones do — is this open
+    // ground you own — rather than looking for tilled soil.
+    case 'plantflower': {
+      const seed = readSeedId(opts.seedId);
+      if (!seed || !canPlantAt(state, x, y)) return null;
+      return {
+        type: 'plantflower', x, y, work: WORK.plant,
+        detail: seedName(opts.seedId).replace(/ seeds$/, ''),
+        seedId: opts.seedId,
+      };
+    }
+
+    case 'water': {
+      // A flower is watered to make it cross with its neighbours — see
+      // sim/flowers.js. It grows in grass, so this asks about the flower
+      // rather than about the ground under it.
+      const bloom = flowerAt(state, x, y);
+      if (bloom) return { type: 'water', x, y, work: WORK.water, detail: bloom.name };
+
       // Watering bare tilled soil is allowed: the player can prepare a bed.
       if (!isTilled(ground)) return null;
       if (crop && crop.dead) return null;
       return { type: 'water', x, y, work: WORK.water, detail: crop ? cropDef(crop.type).name : 'soil' };
+    }
 
     case 'build': {
       const kind = opts.buildKind;
@@ -355,13 +387,23 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
       };
     }
 
-    case 'harvest':
+    case 'harvest': {
+      // Picking a flower is deliberate: you reach for the harvest tool first.
+      // A tap takes the flower's *water* (see 'auto' below), because watering
+      // is what a player does over and over to a bed they are breeding, and
+      // picking is the thing they do once and cannot undo.
+      const bloom = flowerAt(state, x, y);
+      if (bloom) {
+        const def = objDef(OBJ.FLOWER);
+        return { type: 'pick', x, y, work: def.work, detail: bloom.name };
+      }
       if (!crop) return null;
       if (crop.dead) {
         return { type: 'harvest', x, y, work: WORK.clearDead, detail: 'dead crop' };
       }
       if (!isRipe(crop)) return null;
       return { type: 'harvest', x, y, work: WORK.harvest, detail: cropDef(crop.type).name };
+    }
 
     case 'auto':
     default: {
@@ -395,6 +437,14 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
         }
         return null;
       }
+      // A tap on a flower waters it. Watering is the only say the player has
+      // over breeding, and it is a thing they will do to the same bed again and
+      // again — so it belongs on the tool that is already in their hand. There
+      // is no way to undo a picking, and a tap is too easy to make by accident
+      // to be allowed to destroy a colour that took a week to breed.
+      const bloom = flowerAt(state, x, y);
+      if (bloom) return { type: 'water', x, y, work: WORK.water, detail: bloom.name };
+
       if (crop) {
         if (crop.dead) return { type: 'harvest', x, y, work: WORK.clearDead, detail: 'dead crop' };
         if (isRipe(crop)) return { type: 'harvest', x, y, work: WORK.harvest, detail: cropDef(crop.type).name };

@@ -8,6 +8,8 @@ const HALF = TILE / 2;
 import { GROUND, OBJ, isTilled, isWater } from '../world/tiledefs.js';
 import { SPRITES, TOWN, WATER, RIVER, BARN, CAPSULES, srcRect, sheetFor } from './sprites.js';
 import { mushroomAt } from '../sim/mushrooms.js';
+import { flowerAt, isWatered } from '../sim/flowers.js';
+import { flowerCanvas } from './flowerart.js';
 import { pendingGroundTiles } from '../sim/build.js';
 import { hash2d } from '../engine/rng.js';
 import { cropStage, isStalled, spoilRemaining, SPOIL_TICKS } from '../sim/crops.js';
@@ -625,6 +627,24 @@ function drawObject(ctx, sheets, state, objId, x, y) {
       // find, and it has to still be the same find after a reload.
       const m = mushroomAt(state, x, y);
       if (m) blit(ctx, sheets, [m.sprite, 0, 'shrooms'], px, py);
+      break;
+    }
+    case OBJ.FLOWER: {
+      // A watered flower is the one that will cross with its neighbours, so it
+      // has to be possible to tell at a glance which ones are damp — otherwise
+      // the player's only control over breeding is invisible. Grass has no wet
+      // version the way soil does, so the ground under it is simply darkened.
+      if (isWatered(state, x, y)) {
+        ctx.fillStyle = 'rgba(46, 86, 140, 0.22)';
+        ctx.fillRect(px, py + 4, TILE, TILE - 4);
+      }
+
+      // Drawn from its own recoloured canvas rather than from a sheet — see
+      // render/flowerart.js. By the time it reaches here it is an ordinary
+      // image, and this is an ordinary blit.
+      const f = flowerAt(state, x, y);
+      const art = f && flowerCanvas(f.kind, f.genome);
+      if (art) ctx.drawImage(art, px, py);
       break;
     }
     default:

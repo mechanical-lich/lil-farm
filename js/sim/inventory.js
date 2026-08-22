@@ -1,5 +1,6 @@
 // Item stacks. Pure data operations; the UI listens for 'inventory:changed'.
 
+import { isFlowerSeed, seedName } from './flowergenes.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 
 // Sell prices are tuned against CROPS.seedCost and growTicks — see the balance
@@ -60,6 +61,9 @@ export function itemGroup(id) {
 
 export function itemName(id) {
   if (ITEMS[id]) return ITEMS[id].name;
+  // A flower seed carries its flower's genome in its own id, so there are far
+  // too many of them to list — it says its own name instead.
+  if (isFlowerSeed(id)) return seedName(id);
   // Seeds are generated per crop rather than listed one by one.
   if (id.endsWith('_seed')) {
     const base = id.slice(0, -5);

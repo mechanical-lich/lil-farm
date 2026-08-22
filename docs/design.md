@@ -68,6 +68,45 @@ The journal is keyed by colour and species, which is why the four original colou
 
 Sprite indices are derived from the sheet's layout — species order, five to a kind — rather than written out by hand. Thirty-five indices typed one at a time is an invitation to get one wrong in a way nothing would catch, so a test also reads the sheet off disk and checks that every mushroom points at a sprite that actually exists.
 
+## Flowers
+Eight flowers, and no list of variants anywhere. The sheet is drawn in three greys — 255, 198 and 141 — and every flower in the game is one of those eight with those greys replaced by colours worked out from its genome. Stems, the sunflower's brown eye and the daisy's dark one are not grey, so they survive the swap and a flower still reads as itself whatever colour it turns.
+
+**Hue is a number of degrees, not an index into a palette.** That is the one decision the whole thing rests on. Breeding is coming — two flowers of a kind standing next to each other will raise a third that shares their genes — and a child's colour is its parents' colours averaged. Averaging two palette indices is meaningless; averaging two angles is exactly right. Building it any other way now would mean migrating every seed anybody owns later.
+
+Wild flowers only come in a coarse ring of **24 hues**. Everything between them has to be bred. That gap is the point: a wheel with holes in it is an invitation, where a wheel already full is a shelf.
+
+**A seed carries its flower's genome in its own id** — `flowerseed_daisy_h135`. The inventory stays the flat map of counts it has always been: two seeds of the very same colour stack, two of nearly the same colour do not, and nothing about the save's shape had to change to hold a thousand possible colours. It is also why the seed drawer has to be grouped by flower — a collector ends up with dozens of ids.
+
+Recolouring means reading a sprite's pixels back and writing new ones, far too slow to do while drawing. Each genome is recoloured once into a little canvas and cached, so every draw after that is an ordinary blit and the renderer never learns anything unusual is happening. A 16x16 canvas is about a kilobyte, so a farm holding a few dozen colours costs a few dozen kilobytes.
+
+Flowers do not sell and are never carried. Picking one gives a handful of its seeds and a line in the journal, which is the whole of what a flower is worth here.
+
+**Putting one back is work**, like everything else: planting is a task the farmer walks over and does, and the seed leaves the bag only when it goes in the ground — so a cancelled planting costs nothing, the same promise crops make.
+
+There are two questions about a square, not one, and conflating them broke every planting. *Can a flower come up here on its own?* refuses a square anybody is standing on, because a flower appearing under the farmer's boots reads as a glitch. *May the farmer put one here?* cannot ask that, because he has walked onto the square to plant it. They share their ground rules and differ only in that.
+
+**Breeding, and the watering can that controls it.** A *watered* flower with a neighbour of its own kind puts up a third nearby that takes after both, and it spreads the way anything on a grid spreads — a bed kept damp fills in with the colours between the ones that were planted.
+
+Watering is the whole of the control, and it is what makes this a garden rather than a weather report. Crossing first happened wherever two flowers touched, which left a player who liked their bed exactly as it was no way to say so. Now a dry bed is a bed left alone, and stopping is as easy as not doing something. Measured: three crosses in a watered bed of daisies, none at all in an identical bed of poppies left dry, and none once the daisies dried out.
+
+One watering buys about two crosses. That number is a relationship, not a taste: the damp has to outlast the gap between breeding attempts by a comfortable margin. It was first set to the time soil takes to dry, on the grounds that it is the same gesture — which was tidy and wrong, because soil dries *faster* than breeding is attempted, so a watering routinely wore off before a single attempt was made and the can appeared to do nothing at all. A test now asserts the one is several times the other.
+
+A watered flower has visibly damp ground under it. Grass has no wet version the way soil does, so the tile is simply darkened — without it the player's only lever over breeding would be invisible.
+
+**A crossed colour says so.** Wild flowers come off a coarse ring at a fixed strength, so anything not exactly on that ring came from a pair of parents — `Crossed orange daisy seeds`, and a tag on the packet in the drawer. It is worth marking because a bred colour is the one thing in the bag that cannot be found again by walking around: lose the seeds and it is gone.
+
+**A tap waters; picking takes the harvest tool.** Watering is what you do to the same bed again and again, so it belongs on the tool already in your hand. Picking is the thing you do once and cannot undo, and a tap is far too easy to make by accident to be allowed to destroy a colour that took a week to breed.
+
+A child is halfway between its parents and then nudged a few degrees. The nudge matters twice over: without it breeding is a calculator rather than a garden, and with it the wheel eventually reaches colours no pair of wild flowers sits either side of.
+
+The blend goes **the short way round the wheel**, which is the whole reason hue is stored as an angle. As plain numbers 350 and 10 average to 180 — the exact opposite colour — where anybody looking at two red flowers expects red. Directly opposite parents have no halfway at all, so the child takes after one of them rather than landing somewhere arbitrary.
+
+Crosses are slow on purpose — around three an hour in a full bed, one an hour in a sparse one — and they get their own line in the away summary. A colour that has never existed before appearing in a bed you planted is the most interesting thing that can happen while you are gone, and it should be waiting for you when you come back.
+
+The total ceiling on flowers sits well above the wild one. Wild flowers only ever fill a little of the valley, and the gap underneath is the room a garden has to keep crossing in — without it, a farm that had grown a few wild flowers would find its beds silently sterile.
+
+**The journal is two halves.** The wheels are the collection — each kind showing how many of its 24 colours have been seen, with the unfound ones as question marks. The drawer below is the working stock, grouped by flower and sorted round the wheel, each packet showing the colour it will actually grow. Planting starts there: the packet's button steps the journal aside, sites the flower on the map with a ghost in its real colour, and brings the drawer back exactly as it was left — so filling a border with one colour is a few taps rather than a trip through the menus for each.
+
 ## Art
 Two Kenney tilesheets (CC0), both 16x16 tiles and sharing a palette so they mix freely:
 

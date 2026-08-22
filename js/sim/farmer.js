@@ -17,6 +17,10 @@ import { plantCrop, waterTile, harvestCrop, seedIdFor } from './crops.js';
 import { completeBuild, demolish, canCompleteBuild } from './build.js';
 import { fillWaterTrough, fillFeedTrough, collectFrom } from './animals.js';
 import { forage } from './mushrooms.js';
+import {
+  pick as pickFlower, plant as plantFlower, canPlantAt, water as waterFlower,
+} from './flowers.js';
+import { readSeedId } from './flowergenes.js';
 import { takeFromHand } from './farmhand.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 
@@ -180,6 +184,22 @@ function applyTaskResult(state, task) {
       }
       break;
 
+    case 'plantflower': {
+      // The seed leaves the bag only now, the same as a crop's does, so
+      // cancelling a queued planting never costs the player anything.
+      const seed = readSeedId(task.seedId);
+      if (!seed || !canPlantAt(state, task.x, task.y)) {
+        emitUnlessSuspended('task:failed', { task, reason: 'nowhere to plant it now' });
+        break;
+      }
+      if (removeItem(state, task.seedId, 1)) {
+        plantFlower(state, task.x, task.y, seed.kind, seed.genome);
+      } else {
+        emitUnlessSuspended('task:failed', { task, reason: 'no seeds' });
+      }
+      break;
+    }
+
     case 'untill': {
       // Undo a bed back to plain grass. The row axis and any wetness must go
       // with it, or a later bed on this tile would inherit a stale orientation
@@ -193,7 +213,8 @@ function applyTaskResult(state, task) {
     }
 
     case 'water':
-      waterTile(state, task.x, task.y);
+      // A flower takes the watering itself; anything else is soil.
+      if (!waterFlower(state, task.x, task.y)) waterTile(state, task.x, task.y);
       break;
 
     case 'harvest':
@@ -209,6 +230,13 @@ function applyTaskResult(state, task) {
       if (!res.ok) {
         emitUnlessSuspended('task:failed', { task, reason: res.reason || 'could not fill it' });
       }
+      break;
+    }
+
+    case 'pick': {
+      // What colour it was is looked up as it is picked, not when the task was
+      // queued — the same reason foraging does it this way.
+      gained = pickFlower(state, task.x, task.y);
       break;
     }
 

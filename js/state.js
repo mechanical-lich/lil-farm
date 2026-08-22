@@ -7,6 +7,7 @@ import { generateWorld, startingBarnAnchor } from './world/worldgen.js';
 import { placeStructure, reconcileBuildings } from './sim/build.js';
 import { seedStartingMushrooms } from './sim/mushrooms.js';
 import { newMarket } from './sim/market.js';
+import { reconcileFlowers } from './sim/flowers.js';
 import { startingPlot } from './world/land.js';
 import { makeRng } from './engine/rng.js';
 
@@ -31,6 +32,8 @@ export function newGame(seed = (Date.now() ^ 0x5f3759df) >>> 0) {
     crops: {},
     mushrooms: {},   // tile key -> mushroom id; see sim/mushrooms.js
     journal: {},     // mushroom id -> how many you have ever picked
+    flowers: {},     // tile key -> {kind, hue, sat, split}; see sim/flowers.js
+    flowerJournal: {},  // kind -> {picked, hues[]}
     wetUntil: {},    // tileKey -> tick at which watered soil dries out
     tillDir: {},     // tileKey -> 'h' | 'v', the axis of the row it was tilled in
     buildings: [],   // multi-tile structures; the grid only marks their footprint
@@ -73,6 +76,8 @@ export function serialize(state) {
     nextHandId: state.nextHandId,
     crops: state.crops,
     mushrooms: state.mushrooms,
+    flowers: state.flowers,
+    flowerJournal: state.flowerJournal,
     journal: state.journal,
     wetUntil: state.wetUntil,
     tillDir: state.tillDir,
@@ -117,6 +122,8 @@ export function deserialize(data) {
     nextHandId: data.nextHandId || 1,
     crops: data.crops || {},
     mushrooms: data.mushrooms || {},
+    flowers: data.flowers || {},
+    flowerJournal: data.flowerJournal || {},
     journal: data.journal || {},
     wetUntil: data.wetUntil || {},
     tillDir: data.tillDir || {},
@@ -132,6 +139,7 @@ export function deserialize(data) {
   // The grid's building marks are an index over state.buildings, and an index
   // can go stale. Putting it right on load is cheap and stops a farm carrying a
   // wrong answer around with it forever.
+  reconcileFlowers(state);
   const fixed = reconcileBuildings(state);
   if (fixed.cleared || fixed.restored) {
     console.warn(`building marks repaired on load: ${fixed.cleared} stale, ${fixed.restored} missing`);

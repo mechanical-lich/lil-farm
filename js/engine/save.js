@@ -77,6 +77,16 @@ const migrations = {
     data.version = 7;
     return data;
   },
+
+  // Flowers grow wild now, and a journal remembers which have been picked. An
+  // established farm starts with neither: they arrive as the grass grows them,
+  // the same way weeds and mushrooms did when those were added.
+  7: (data) => {
+    data.flowers = data.flowers || {};
+    data.flowerJournal = data.flowerJournal || {};
+    data.version = 8;
+    return data;
+  },
 };
 
 export function loadSave() {

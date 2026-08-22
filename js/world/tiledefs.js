@@ -41,6 +41,7 @@ export const OBJ = {
   BUILDING: 12,
   EGG: 13,
   MUSHROOM: 14,
+  FLOWER: 15,
 };
 
 export const OBJ_DEFS = {
@@ -72,6 +73,13 @@ export const OBJ_DEFS = {
   // Which mushroom is standing here lives in state.mushrooms, keyed by tile —
   // the grid has one byte per tile and there are sixteen of them. `yields` is
   // therefore left off: sim/mushrooms.js decides what goes in the bag.
+  // Like a mushroom: something standing in the grass that you walk over and
+  // stoop to pick. Which flower and what colour lives in state.flowers, keyed
+  // by tile — the grid has one byte per tile and a flower has a genome.
+  [OBJ.FLOWER]: {
+    name: 'flower', blocks: false, clearable: true,
+    task: 'pick', work: 4,
+  },
   [OBJ.MUSHROOM]: {
     name: 'mushroom', blocks: false, clearable: true,
     task: 'forage', work: 4,

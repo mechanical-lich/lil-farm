@@ -1,6 +1,6 @@
 // Entry point: load or create a farm, replay the time you were away, then run.
 
-import { TICK_MS, START_INVENTORY, TESTING } from './config.js';
+import { TILE, TICK_MS, START_INVENTORY, TESTING } from './config.js';
 import { loadSheets } from './render/sprites.js';
 import { Renderer } from './render/renderer.js';
 import { Camera } from './render/camera.js';
@@ -15,6 +15,9 @@ import {
   snapBarn, BARN_LIMITS, barnCapacity, costLabel, placementProblem,
 } from './sim/build.js';
 import { drawBuilding } from './render/tilerender.js';
+import { flowerCanvas } from './render/flowerart.js';
+import { canPlantAt } from './sim/flowers.js';
+import { readSeedId, seedName } from './sim/flowergenes.js';
 import { drawAnimalSprite, drawHandSprite } from './render/entityrender.js';
 import { drawObjectSprite } from './render/tilerender.js';
 import { DECOR, decorDef, canPlaceDecor, placeDecor } from './sim/decor.js';
@@ -77,7 +80,13 @@ async function boot() {
 
   initToasts();
   const autosaver = new Autosaver(() => serialize(state));
-  const hud = initHud(state);
+  const hud = initHud(state, {
+    // From the seed drawer straight out to the map: the journal steps aside,
+    // the flower is sited, and the drawer comes back exactly as it was left.
+    onPlantFlower: (seedId, reopen) => {
+      beginPlacement(flowerPlacement(state, seedId, reopen), state.farmer.x, state.farmer.y);
+    },
+  });
   initTaskPanel(state);
   initMarketPanel(state);
   initShopPanel(state, {
@@ -469,6 +478,37 @@ function barnPlacement(state, kind) {
       if (!spec) return { ok: false, reason: "that won't fit there" };
       addTask(state, spec);
       return { ok: true, message: `Queued: ${p.w}×${p.h} ${def.name.toLowerCase()}` };
+    },
+  };
+}
+
+/**
+ * Siting a flower from the seed drawer.
+ *
+ * The ghost is the flower itself, in the colour those seeds will actually
+ * grow — the whole point of keeping a particular seed is its colour, so
+ * showing a generic sprite would be showing the one thing that does not
+ * matter. Confirming queues the planting for the farmer rather than putting
+ * the flower straight in the ground: it is work, like everything else.
+ */
+function flowerPlacement(state, seedId, reopen) {
+  const seed = readSeedId(seedId);
+  const label = seedName(seedId).replace(/ seeds$/, '');
+  return {
+    w: 1,
+    h: 1,
+    after: reopen,
+    confirmLabel: `✓ Plant the ${label.toLowerCase()} here`,
+    validate: (x, y) => !!seed && canPlantAt(state, x, y),
+    draw: (ctx, sheets, at) => {
+      const art = seed && flowerCanvas(seed.kind, seed.genome);
+      if (art) ctx.drawImage(art, at.x * TILE, at.y * TILE);
+    },
+    confirm: (x, y) => {
+      const spec = taskForTile(state, x, y, 'plantflower', { seedId });
+      if (!spec) return { ok: false, reason: "it won't grow there" };
+      addTask(state, spec);
+      return { ok: true, message: `Queued: plant ${label.toLowerCase()}` };
     },
   };
 }

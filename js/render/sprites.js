@@ -7,6 +7,7 @@
 //   'animals' — assets/animals.png              a row per animal, a column per colour
 //   'battle'  — assets/battle_tilemap_packed.png  water: ponds and rivers
 //   'barn'    — assets/barn.png                  the barn, gathered and extended
+//   'flowers' — assets/flowers.png               eight flowers in three greys
 //
 // Both share the same palette (#84c669 grass, #eaa56c dirt), so tiles from the
 // two sheets sit next to each other seamlessly.
@@ -21,6 +22,7 @@
 
 import { TILE } from '../config.js';
 import { setAnimalVariants } from '../sim/animals.js';
+import { useFlowerSheet } from './flowerart.js';
 
 /**
  * The soil capsule set — the art tilling is actually drawn with.
@@ -321,10 +323,11 @@ function loadImage(src) {
  * Loads both tilesheets and prepares derived tiles.
  * @returns {Promise<{farm: HTMLImageElement, town: HTMLImageElement,
  *   emotes: HTMLImageElement, shrooms: HTMLImageElement,
- *   animals: HTMLImageElement, battle: HTMLImageElement, barn: HTMLImageElement}>}
+ *   animals: HTMLImageElement, battle: HTMLImageElement, barn: HTMLImageElement,
+ *   flowers: HTMLImageElement}>}
  */
 export async function loadSheets() {
-  const [farm, town, emotes, shrooms, animals, battle, barn] = await Promise.all([
+  const [farm, town, emotes, shrooms, animals, battle, barn, flowers] = await Promise.all([
     loadImage('assets/tilemap_packed.png'),
     loadImage('assets/town_tilemap_packed.png'),
     loadImage('assets/emotes.png'),
@@ -332,6 +335,7 @@ export async function loadSheets() {
     loadImage('assets/animals.png'),
     loadImage('assets/battle_tilemap_packed.png'),
     loadImage('assets/barn.png'),
+    loadImage('assets/flowers.png'),
   ]);
   buildCapsules(farm);
 
@@ -340,7 +344,11 @@ export async function loadSheets() {
   // whole job — there's no constant to remember to bump.
   setAnimalVariants(Math.round(animals.width / TILE));
 
-  return { farm, town, emotes, shrooms, animals, battle, barn };
+  // The flower sheet is drawn in greys and recoloured per genome, so it is
+  // handed to the palette cache rather than blitted from directly.
+  useFlowerSheet(flowers);
+
+  return { farm, town, emotes, shrooms, animals, battle, barn, flowers };
 }
 
 /** Resolves which sheet image a sprite reference belongs to. */

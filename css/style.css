@@ -317,6 +317,79 @@ body {
   color: #7a604a;
 }
 
+/* The collapsed flower-seed line in the bag: one row standing in for dozens,
+   so it has to say where the rest of them went. */
+#inv-list li span em {
+  display: block;
+  font-style: normal;
+  font-size: 12px;
+  color: #7a604a;
+}
+
+/* --- the flower journal ------------------------------------------------ */
+
+.bloom-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.bloom {
+  margin: 0;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+/* The picture is generated per genome, so it arrives as an image rather than
+   a slice of a sheet like the mushrooms do. */
+.bloom img,
+.bloom span {
+  display: block;
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 2px;
+  image-rendering: pixelated;
+  background-color: rgba(132, 198, 105, 0.45);
+  border: 2px solid var(--panel-edge);
+  border-radius: 8px;
+}
+
+.bloom.unfound span {
+  background-color: rgba(185, 138, 84, 0.16);
+  border-style: dashed;
+}
+
+.bloom figcaption { color: #7a604a; }
+.bloom figcaption b { display: block; color: var(--ink); }
+
+/* A colour that only exists because somebody bred it — and which cannot be
+   found again by walking around, so it is worth marking. */
+.panel li.seed .shop-name i {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #7a4ea3;
+}
+
+/* A seed packet: what it grows, what colour, and how to get it planted. */
+.panel li.seed {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.panel li.seed img {
+  width: 32px;
+  height: 32px;
+  image-rendering: pixelated;
+  background: rgba(132, 198, 105, 0.45);
+  border: 2px solid var(--panel-edge);
+  border-radius: 6px;
+}
+
 /* --- the market -------------------------------------------------------- */
 
 #market-note {
