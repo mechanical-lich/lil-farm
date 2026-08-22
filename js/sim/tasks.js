@@ -397,6 +397,17 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
         const def = objDef(OBJ.FLOWER);
         return { type: 'pick', x, y, work: def.work, detail: bloom.name };
       }
+
+      // A mushroom is gathered rather than grown, but it is still something you
+      // reach out and take — so the harvest tool finds it too. Clearing the
+      // tile still works, as it always has; this is about the tool a player
+      // picks up when they mean "collect", which is the harvest one.
+      const shroom = mushroomAt(state, x, y);
+      if (shroom) {
+        const def = objDef(OBJ.MUSHROOM);
+        return { type: 'forage', x, y, work: def.work, detail: shroom.name };
+      }
+
       if (!crop) return null;
       if (crop.dead) {
         return { type: 'harvest', x, y, work: WORK.clearDead, detail: 'dead crop' };

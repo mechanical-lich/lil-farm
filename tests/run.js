@@ -1659,6 +1659,27 @@ test('a watering wears off, and the bed goes quiet again', () => {
   for (let i = 0; i < 200; i++) assertEqual(breedAt(s, at.x, at.y), null, 'and stopped crossing');
 });
 
+test('the harvest tool gathers mushrooms as well as crops', () => {
+  // A mushroom is gathered rather than grown, but it is still something you
+  // reach out and take. Clearing the tile still works, as it always has.
+  const s = weedableFarm(9418);
+  const at = { x: s.farmer.x + 2, y: s.farmer.y };
+  s.grid.setGround(at.x, at.y, GROUND.GRASS);
+  s.grid.setObject(at.x, at.y, OBJ.NONE);
+  sprout(s, at.x, at.y, 'red_toadstool');
+
+  const picked = taskForTile(s, at.x, at.y, 'harvest');
+  assert(picked, 'the harvest tool offers itself on a mushroom');
+  assertEqual(picked.type, 'forage', 'as a foraging job');
+  assertEqual(picked.detail, 'Red toadstool', 'and says which one');
+  assertEqual(taskForTile(s, at.x, at.y, 'clear').type, 'forage', 'clearing still picks it too');
+
+  addTask(s, picked);
+  for (let i = 0; i < 600 && s.tasks.length; i++) tick(s);
+  assertEqual(mushroomAt(s, at.x, at.y), null, 'the farmer picked it');
+  assert(countItem(s, SPECIES.toadstool.item) > 0, 'and it went in the bag');
+});
+
 test('a tap waters a flower; picking it takes the harvest tool', () => {
   // Watering is what a player does to the same bed again and again, so it
   // belongs on the tool already in their hand. Picking is the thing they do

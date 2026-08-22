@@ -66,6 +66,8 @@ Seven kinds of mushroom, each in five colours: thirty-five to find and keep in t
 
 The journal is keyed by colour and species, which is why the four original colours of each kind keep their ids and their order: reordering them would quietly rename every mushroom anybody had already collected. New colours go on the end.
 
+The harvest tool gathers mushrooms as well as crops. A mushroom is found rather than grown, but it is still something you reach out and take, and "collect" is what a player means when they pick that tool up. Clearing the tile still works, as it always has, and a plain tap still picks one — a mushroom on the ground is meant to be taken on sight, unlike a flower, which a tap waters instead.
+
 Sprite indices are derived from the sheet's layout — species order, five to a kind — rather than written out by hand. Thirty-five indices typed one at a time is an invitation to get one wrong in a way nothing would catch, so a test also reads the sheet off disk and checks that every mushroom points at a sprite that actually exists.
 
 ## Flowers
