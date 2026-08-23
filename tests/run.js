@@ -10,6 +10,7 @@ import { Grid } from '../js/world/grid.js';
 import { GROUND, OBJ, isTilled, isWater, objDef } from '../js/world/tiledefs.js';
 import { generateWorld, startingBarnAnchor } from '../js/world/worldgen.js';
 import { findPath, besideBox, insideBox } from '../js/world/pathfind.js';
+import { Camera } from '../js/render/camera.js';
 import {
   PLOT, plotOfTile, plotBounds, plotIndex, startingPlot, landPrice, nextLandPrice,
   canBuyPlot, buyPlot, buyablePlots, totalPlots,
@@ -1372,6 +1373,49 @@ test('the building record is the source of truth, found from any of its tiles', 
     }
   }
   assertEqual(buildingAt(s, 8, 5), null, 'a tile just outside belongs to nothing');
+});
+
+// --- the camera ---------------------------------------------------------
+
+test('the view can be pushed past the map, but only as far as the bars', () => {
+  // The top bar and the bottom controls float over the canvas, so a tile
+  // beneath one can be seen but not tapped. Running the view on past the edge
+  // by the height of each bar is what makes the first and last rows of the
+  // valley reachable at all.
+  const cam = new Camera(120, 120);
+  cam.setViewport(400, 600);
+  cam.setInset({ top: 52, bottom: 106 });
+
+  cam.centerOnTile(60, 0);
+  cam.panBy(0, 9999);                       // shove upward as far as it goes
+  assertEqual(Math.round(cam.y), Math.round(-52 / cam.zoom), 'stops one bar past the top');
+
+  cam.centerOnTile(60, 119);
+  cam.panBy(0, -9999);
+  const floor = 120 * TILE - 600 / cam.zoom + 106 / cam.zoom;
+  assertEqual(Math.round(cam.y), Math.round(floor), 'and one bar past the bottom');
+
+  // Sideways, where nothing covers the map, it still stops at the edge.
+  cam.panBy(9999, 0);
+  assertEqual(cam.x, 0, 'no overscroll where there is no bar');
+});
+
+test('overscroll is measured in screen pixels, not world ones', () => {
+  // A bar covers the same amount of *screen* however far the map is zoomed in,
+  // so the allowance has to shrink in world terms as the zoom grows.
+  const far = new Camera(120, 120);
+  far.setViewport(400, 600);
+  far.setInset({ top: 60 });
+  far.zoom = 1;
+  far.centerOnTile(60, 0);
+  far.panBy(0, 9999);
+  const atOne = far.y;
+
+  far.zoom = 3;
+  far.centerOnTile(60, 0);
+  far.panBy(0, 9999);
+  assert(far.y > atOne, 'zoomed in, the same bar is fewer world pixels');
+  assertEqual(Math.round(far.y * 3), Math.round(atOne), 'and exactly proportionally so');
 });
 
 // --- flowers ------------------------------------------------------------

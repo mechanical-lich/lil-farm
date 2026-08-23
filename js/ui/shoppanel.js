@@ -62,6 +62,14 @@ export function initShopPanel(state, {
   openBtn.addEventListener('click', () => setOpen(!open));
   document.getElementById('shop-close').addEventListener('click', () => setOpen(false));
 
+  // Straight to the sell list, from wherever asked — the market panel offers
+  // this once a player has finished reading why their prices moved.
+  on('shop:sell', () => {
+    tab = 'sell';
+    setOpen(true);
+    render();
+  });
+
   tabs.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-tab]');
     if (!btn) return;

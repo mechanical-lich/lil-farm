@@ -1,6 +1,6 @@
 // Canvas setup and the top-level draw call.
 
-import { COLORS, MAX_FPS, MAX_DPR } from '../config.js';
+import { COLORS, MAX_FPS, MAX_DPR, TILE } from '../config.js';
 import { drawGround, drawCrops, drawObjects, drawUnowned } from './tilerender.js';
 import {
   entitiesByRow, drawTaskMarkers, drawTillAnchor, drawPlacementGhost, drawEmotes,
@@ -89,8 +89,14 @@ export class Renderer {
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.imageSmoothingEnabled = false;
 
-    ctx.fillStyle = COLORS.sky;
+    // Everything outside the map, then the map's own ground over the top of it.
+    ctx.fillStyle = COLORS.beyond;
     ctx.fillRect(0, 0, this.cssW, this.cssH);
+
+    const edge = camera.worldToScreen(0, 0);
+    const far = camera.worldToScreen(camera.mapW * TILE, camera.mapH * TILE);
+    ctx.fillStyle = COLORS.sky;
+    ctx.fillRect(edge.x, edge.y, far.x - edge.x, far.y - edge.y);
 
     // Work in world pixels: translate by the camera, scale by zoom. Rounding
     // the translation to whole device pixels prevents shimmering seams.

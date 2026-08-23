@@ -11,6 +11,18 @@ export class Camera {
     this.y = 0;
     this.viewW = 1;             // CSS pixels
     this.viewH = 1;
+    // How far past the edge of the map the view may be pushed, in CSS pixels.
+    // The bars along the top and bottom sit *over* the map, so a tile beneath
+    // one cannot be tapped; letting the view run on past the edge is what makes
+    // the first and last rows of the valley reachable at all. Set from the real
+    // heights of those bars — see main.js.
+    this.inset = { top: 0, bottom: 0, left: 0, right: 0 };
+  }
+
+  /** @param {{top?: number, bottom?: number, left?: number, right?: number}} inset */
+  setInset(inset) {
+    this.inset = { ...this.inset, ...inset };
+    this.clamp();
   }
 
   setViewport(w, h) {
@@ -47,9 +59,21 @@ export class Camera {
     const visW = this.viewW / this.zoom;
     const visH = this.viewH / this.zoom;
 
-    // If the map is smaller than the view, center it instead of clamping.
-    this.x = visW >= worldW ? (worldW - visW) / 2 : clampNum(this.x, 0, worldW - visW);
-    this.y = visH >= worldH ? (worldH - visH) / 2 : clampNum(this.y, 0, worldH - visH);
+    // The overscroll is measured in screen pixels and used in world ones, so it
+    // has to be divided by the zoom: the bars cover the same amount of *screen*
+    // however far in the map is zoomed.
+    const top = this.inset.top / this.zoom;
+    const bottom = this.inset.bottom / this.zoom;
+    const left = this.inset.left / this.zoom;
+    const right = this.inset.right / this.zoom;
+
+    // If the map is smaller than the view, centre it instead of clamping.
+    this.x = visW >= worldW
+      ? (worldW - visW) / 2
+      : clampNum(this.x, -left, worldW - visW + right);
+    this.y = visH >= worldH
+      ? (worldH - visH) / 2
+      : clampNum(this.y, -top, worldH - visH + bottom);
   }
 
   screenToWorld(sx, sy) {

@@ -390,6 +390,23 @@ body {
   border-radius: 6px;
 }
 
+/* Two buttons in a panel head, kept together at the right. */
+.panel-head .head-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Icons-only tools: the label goes and the button shrinks to its icon.
+   Squeezed to 44px, which is Apple's minimum tap target and so the floor —
+   eight tools will not fit a 375px phone whatever we do (that would need
+   408px with the gaps), but seven do, against four with the labels on. */
+#toolbar.icons-only button.tool {
+  min-width: 44px;
+  padding-left: 0;
+  padding-right: 0;
+  font-size: 20px;
+}
+
 /* --- the market -------------------------------------------------------- */
 
 #market-note {

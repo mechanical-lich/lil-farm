@@ -37,6 +37,14 @@ export function initMarketPanel(state) {
   toggle.addEventListener('click', () => setOpen(!open));
   document.getElementById('market-close').addEventListener('click', () => setOpen(false));
 
+  // The way back out to the shop. The sell list links in here to explain its
+  // prices; somebody who has read the explanation and decided to act on it
+  // should not have to go the long way round to do it.
+  document.getElementById('market-sell').addEventListener('click', () => {
+    setOpen(false);
+    emit('shop:sell');
+  });
+
   // Prices only move when something is sold or when demand rolls, so there is
   // no reason to redraw on a timer.
   on('money:changed', () => { if (open) render(); });

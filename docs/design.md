@@ -53,6 +53,10 @@ That last row matters as much as the first. The early game has no choice — car
 
 Demand *drifts* twice a day rather than being redrawn, so a good climbing two days running is a trend worth acting on instead of noise you can only react to. A glut clears faster for something the town wants and lingers for something it does not, which is the difference between a bad week and a bad month for whoever grew it.
 
+Preferences — the handful of choices that belong to the person rather than the farm — live in their own localStorage key, not in the save (`engine/prefs.js`). A preference should survive starting a new farm, and importing somebody else's backup should not silently change how your game looks. They degrade to their defaults rather than throwing, because Safari in private mode refuses localStorage outright and no preference is worth a white screen.
+
+**Tool labels can be turned off.** The tool bar scrolls sideways on a phone and the words are what make it scroll: measured at 375px, four tools are reachable with labels on and seven without. Eight will not fit either way — that would need more width than the phone has, once every button clears the 44px tap target. The names stay in each button's tooltip and aria-label, so nothing is lost but the pixels.
+
 **The market panel** opens from the money chip — that chip already reads as "your money", so it is where a hand goes when the question is about earning, and it costs nothing on a bottom row that is three buttons wide on a phone.
 
 Each good gets two bars, not one: what the town **wants**, and what it **has**, sharing a notch at normal. One bar was tried first and said nothing, because for every good the player is not selling the stock is identical — the bar only repeated what the colour already showed. Wanting and having are the two halves of the rule, and a good can be wanted and over-supplied at once, which is exactly when it is worth knowing that somebody else's crop is the better bet.
@@ -120,6 +124,15 @@ Crosses are slow on purpose — around three an hour in a full bed, one an hour 
 The total ceiling on flowers sits well above the wild one. Wild flowers only ever fill a little of the valley, and the gap underneath is the room a garden has to keep crossing in — without it, a farm that had grown a few wild flowers would find its beds silently sterile.
 
 **The journal is two halves.** The wheels are the collection — each kind showing how many of its 24 colours have been seen, with the unfound ones as question marks. The drawer below is the working stock, grouped by flower and sorted round the wheel, each packet showing the colour it will actually grow. Planting starts there: the packet's button steps the journal aside, sites the flower on the map with a ghost in its real colour, and brings the drawer back exactly as it was left — so filling a border with one colour is a few taps rather than a trip through the menus for each.
+
+## The edge of the view
+The top bar and the bottom controls float *over* the map rather than beside it — on a phone there is no room to give them their own strip. That leaves the tiles beneath them visible but untappable, which is a quiet trap: the first and last rows of the valley could be seen and never worked.
+
+So the view runs on a little past the map, by exactly the height of each bar. Scroll the row out from under the bar and into the open, and it behaves like any other. Past the edge is painted dark rather than another shade of green, so the overscroll reads as the end of the world instead of more of it.
+
+The allowance is measured from the bars themselves rather than written down, because they change height — the build tools add a row, siting something adds the confirm bar above that, and a phone in landscape is different again. It is watched with a ResizeObserver rather than wired to a list of events, since that list would have to name everything that can change a height and would be wrong the first time somebody added a row without knowing to update it.
+
+It is measured in screen pixels and applied in world ones, divided by the zoom: a bar covers the same amount of screen however far the map is zoomed in.
 
 ## Art
 Two Kenney tilesheets (CC0), both 16x16 tiles and sharing a palette so they mix freely:

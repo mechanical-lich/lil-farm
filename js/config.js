@@ -118,4 +118,9 @@ export const COLORS = {
   dirt: '#cf8254',
   dirtDark: '#b86542',
   sky: '#5b8c4a',
+  // Past the edge of the valley. Dark rather than another shade of green: the
+  // view can be pushed a little way beyond the map so the rows hidden under the
+  // bars can be scrolled into the open, and that overscroll should read as the
+  // end of the world rather than as more of it.
+  beyond: '#1b2a17',
 };

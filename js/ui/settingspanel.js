@@ -5,6 +5,7 @@
 // panel is the only way to get a copy of a farm out and back in again, so the
 // import path is deliberately careful: validate, confirm, then replace.
 
+import { getPref, setPref } from '../engine/prefs.js';
 import { on, emit } from '../engine/events.js';
 import { TESTING, START_INVENTORY } from '../config.js';
 import { exportSave, validateSave, writeSave, clearSave, listBackups } from '../engine/save.js';
@@ -117,6 +118,25 @@ export function initSettingsPanel(state, { serialize, autosaver, onMessage } = {
   });
 
   // --- debug -----------------------------------------------------------
+
+  // --- display ----------------------------------------------------------
+  //
+  // Kept in preferences rather than in the save: how the bar looks belongs to
+  // the phone and the person holding it, not to the farm. See engine/prefs.js.
+  const labelsBtn = document.getElementById('settings-toollabels');
+  const showLabels = () => {
+    const on = getPref('toolLabels');
+    labelsBtn.textContent = on ? 'Tool labels: on' : 'Tool labels: icons only';
+    labelsBtn.classList.toggle('on', on);
+  };
+  labelsBtn.addEventListener('click', () => {
+    const next = !getPref('toolLabels');
+    setPref('toolLabels', next);
+    showLabels();
+    emit('prefs:changed', 'toolLabels');
+    onMessage?.(next ? 'Tool labels on' : 'Tools show icons only');
+  });
+  showLabels();
 
   document.getElementById('settings-give').addEventListener('click', () => {
     for (const [id, qty] of Object.entries(START_INVENTORY)) addItem(state, id, qty);

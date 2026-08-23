@@ -9,6 +9,7 @@
 
 import { CROPS, seedIdFor } from '../sim/crops.js';
 import { BUILDABLES, canAfford, costLabel } from '../sim/build.js';
+import { getPref } from '../engine/prefs.js';
 import { countItem } from '../sim/inventory.js';
 import { on } from '../engine/events.js';
 
@@ -23,16 +24,16 @@ import { on } from '../engine/events.js';
  * end where a deliberate trip is no hardship.
  */
 export const TOOLS = [
-  { id: 'auto', label: '👆 Tap', hint: 'Do whatever the tile needs' },
+  { id: 'auto', icon: '👆', name: 'Tap', hint: 'Do whatever the tile needs' },
   // Next to Tap because they're the two that act on what's already there,
   // rather than on the ground: tap it, or pick it up and move it.
-  { id: 'move', label: '✊ Move', hint: 'Drag your animals and people where you want them' },
-  { id: 'harvest', label: '🧺 Harvest', hint: 'Pick ripe crops, mushrooms and flowers' },
-  { id: 'water', label: '💧 Water', hint: 'Seeds only start growing once watered' },
-  { id: 'plant', label: '🌱 Plant', hint: 'Sow the selected seed' },
-  { id: 'clear', label: '🪓 Clear', hint: 'Chop, clear, and take down what you built' },
-  { id: 'till', label: '🚜 Till', hint: 'Tap both ends of a row to plough it' },
-  { id: 'build', label: '🔨 Build', hint: 'Fences, gates, roads and troughs' },
+  { id: 'move', icon: '✊', name: 'Move', hint: 'Drag your animals and people where you want them' },
+  { id: 'harvest', icon: '🧺', name: 'Harvest', hint: 'Pick ripe crops, mushrooms and flowers' },
+  { id: 'water', icon: '💧', name: 'Water', hint: 'Seeds only start growing once watered' },
+  { id: 'plant', icon: '🌱', name: 'Plant', hint: 'Sow the selected seed' },
+  { id: 'clear', icon: '🪓', name: 'Clear', hint: 'Chop, clear, and take down what you built' },
+  { id: 'till', icon: '🚜', name: 'Till', hint: 'Tap both ends of a row to plough it' },
+  { id: 'build', icon: '🔨', name: 'Build', hint: 'Fences, gates, roads and troughs' },
 ];
 
 export function initToolbar(state, { onToolChange } = {}) {
@@ -43,9 +44,28 @@ export function initToolbar(state, { onToolChange } = {}) {
   let cropType = 'carrot';
   let buildKind = 'fence';
 
-  bar.innerHTML = TOOLS.map((t) => (
-    `<button class="tool" data-tool="${t.id}" title="${t.hint}">${t.label}</button>`
-  )).join('');
+  /**
+   * Draws the bar. Icon-only is a preference because the bar scrolls sideways
+   * on a phone, and the words are what make it scroll: measured at 375px, four
+   * tools are reachable with the labels on and seven without. Eight will not
+   * fit either way — that would need more width than the phone has, once every
+   * button clears the minimum tap target.
+   *
+   * The name still goes in the button's label for screen readers and as its
+   * tooltip, so nothing is lost but the pixels.
+   */
+  function renderTools() {
+    const labels = getPref('toolLabels');
+    bar.classList.toggle('icons-only', !labels);
+    bar.innerHTML = TOOLS.map((t) => (
+      `<button class="tool" data-tool="${t.id}" title="${t.name} — ${t.hint}"`
+      + ` aria-label="${t.name}">${t.icon}${labels ? ` ${t.name}` : ''}</button>`
+    )).join('');
+    render();
+  }
+
+  renderTools();
+  on('prefs:changed', (key) => { if (key === 'toolLabels') renderTools(); });
 
   bar.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-tool]');

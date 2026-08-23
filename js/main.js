@@ -134,7 +134,7 @@ async function boot() {
   const paintMode = wirePaintToggle();
   wirePlacementButtons();
   wirePanelTracking();
-  wireLifecycle(autosaver, renderer);
+  wireLifecycle(autosaver, renderer, camera);
 
   attachInput(els.canvas, camera, {
     onTap: (x, y) => queueTileTask(state, toolbar, x, y, { announce: true }),
@@ -771,7 +771,7 @@ function wireWakeUp(state, loop) {
   });
 }
 
-function wireLifecycle(autosaver, renderer) {
+function wireLifecycle(autosaver, renderer, camera) {
   // iOS Safari suspends and eventually kills background tabs, often without a
   // second chance to run code. Write on every hide, not just on unload.
   document.addEventListener('visibilitychange', () => {
@@ -779,8 +779,44 @@ function wireLifecycle(autosaver, renderer) {
   });
   window.addEventListener('pagehide', () => autosaver.saveNow());
 
+  /**
+   * How far the view may be pushed past the edge of the map.
+   *
+   * The top bar and the bottom controls float *over* the canvas, so the tiles
+   * beneath them can be seen but not tapped. Letting the view run on by the
+   * height of each bar is what makes the first and last rows of the valley
+   * reachable — scroll the row out from under the bar and into the open.
+   *
+   * Measured from the bars themselves rather than written down, because they
+   * change height: the build tools add a second row, siting something adds the
+   * confirm bar above that, and a phone in landscape is different again.
+   */
+  const applyInsets = () => {
+    const hud = document.getElementById('hud');
+    const bottom = document.getElementById('bottom');
+    const view = renderer.canvas?.clientHeight || window.innerHeight;
+    camera.setInset({
+      top: Math.round(hud.getBoundingClientRect().bottom),
+      bottom: Math.round(view - bottom.getBoundingClientRect().top),
+    });
+    renderer.invalidate();
+  };
+
   let resizeTimer = 0;
-  const doResize = () => renderer.resize();
+  const doResize = () => { renderer.resize(); applyInsets(); };
+  // The bottom stack grows and shrinks as tools are picked and things are
+  // sited — the build tools add a row, siting one adds the confirm bar above
+  // that — and the reachable area has to follow it. Watched rather than
+  // wired to a list of events, because the list would be a list of everything
+  // that can change a height, and it would be wrong the first time somebody
+  // added a row without knowing to update it.
+  applyInsets();
+  if (typeof ResizeObserver === 'function') {
+    const watch = new ResizeObserver(applyInsets);
+    watch.observe(document.getElementById('bottom'));
+    watch.observe(document.getElementById('hud'));
+  }
+
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(doResize, 100);
