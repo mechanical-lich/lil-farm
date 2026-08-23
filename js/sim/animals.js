@@ -25,7 +25,7 @@ import { emitUnlessSuspended } from '../engine/events.js';
  * its time on the pond and has to come ashore to lay, since an egg can't sit on
  * open water.
  *
- * `row` is the animal's row on assets/animals.png; the columns of that row are
+ * `row` is the animal's row on assets/animals/farm.png; the columns of that row are
  * its colour variations. Each animal picks one when it's bought and keeps it,
  * so a farm ends up with a white cow and a brown one rather than a herd of
  * clones.
@@ -229,7 +229,7 @@ export function animalDef(type) { return ANIMALS[type]; }
 /**
  * How many colours each animal comes in.
  *
- * Set from the width of assets/animals.png when it loads, so adding a column
+ * Set from the width of assets/animals/farm.png when it loads, so adding a column
  * to the image is the whole job — no constant to remember to bump. Falls back
  * to the config value headlessly, where there's no image to measure.
  */

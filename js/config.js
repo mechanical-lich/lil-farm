@@ -16,7 +16,7 @@ export const AUTOSAVE_MAX_MS = 10000;   // always write at least this often when
 
 // --- Animals ------------------------------------------------------------
 //
-// Colour variations per animal: the number of columns on assets/animals.png.
+// Colour variations per animal: the number of columns on assets/animals/farm.png.
 // This is only the fallback — the real count is read off the sheet when it
 // loads (see setAnimalVariants), so adding a column to the image is all it
 // takes to put a new colour in the game. It's here so the simulation has an

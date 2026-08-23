@@ -400,7 +400,7 @@ its *connections* rather than from an area fill — and `blitTurned` supplies th
 east-west straight the sheet doesn't have.
 
 **Animal colours are counted off the sheet, not hardcoded.** `loadSheets` reads
-`assets/animals.png`'s width and calls `setAnimalVariants(width / TILE)`, so
+`assets/animals/farm.png`'s width and calls `setAnimalVariants(width / TILE)`, so
 adding a column to the image puts a new colour in the game with no code change —
 which is what the artist actually wants. `ANIMAL_VARIANTS` in config is only the
 headless fallback, for tests and the save migration.

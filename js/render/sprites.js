@@ -3,11 +3,11 @@
 //   'farm'   — assets/tilemap_packed.png       crops, soil beds, animals, barn
 //   'town'   — assets/town_tilemap_packed.png  grass, dirt, paving, fences, trees
 //   'emotes' — assets/emotes.png               speech bubbles over the animals
-//   'shrooms' — assets/mushrooms.png           one row of 35 foraged mushrooms
-//   'animals' — assets/animals.png              a row per animal, a column per colour
+//   'shrooms' — assets/flora/mushrooms.png           one row of 35 foraged mushrooms
+//   'animals' — assets/animals/farm.png              a row per animal, a column per colour
 //   'battle'  — assets/battle_tilemap_packed.png  water: ponds and rivers
 //   'barn'    — assets/barn.png                  the barn, gathered and extended
-//   'flowers' — assets/flowers.png               eight flowers in three greys
+//   'flowers' — assets/flora/flowers.png               eight flowers in three greys
 //
 // Both share the same palette (#84c669 grass, #eaa56c dirt), so tiles from the
 // two sheets sit next to each other seamlessly.
@@ -205,7 +205,7 @@ export const SPRITES = {
   egg: [5, 10],
 
   // Characters. The livestock that used to live here has moved to its own
-  // sheet, assets/animals.png, which carries a colour variation per column.
+  // sheet, assets/animals/farm.png, which carries a colour variation per column.
   farmer: [0, 9],
   farmerHat: [1, 9],
 };
@@ -331,11 +331,11 @@ export async function loadSheets() {
     loadImage('assets/tilemap_packed.png'),
     loadImage('assets/town_tilemap_packed.png'),
     loadImage('assets/emotes.png'),
-    loadImage('assets/mushrooms.png'),
-    loadImage('assets/animals.png'),
+    loadImage('assets/flora/mushrooms.png'),
+    loadImage('assets/animals/farm.png'),
     loadImage('assets/battle_tilemap_packed.png'),
     loadImage('assets/barn.png'),
-    loadImage('assets/flowers.png'),
+    loadImage('assets/flora/flowers.png'),
   ]);
   buildCapsules(farm);
 

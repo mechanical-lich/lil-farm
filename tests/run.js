@@ -1424,7 +1424,7 @@ test('the sheet is still drawn in the three greys the genome replaces', () => {
   // The whole feature rests on flowers.png being greyscale in exactly these
   // three values. If the art is redrawn with 254 instead of 255, every flower
   // silently stops taking colour and nothing else here would notice.
-  const sheet = decodePng('assets/flowers.png');
+  const sheet = decodePng('assets/flora/flowers.png');
   assertEqual(sheet.height, TILE, 'one row');
   assertEqual(sheet.width / TILE, FLOWER_KINDS.length, 'one sprite per kind');
 
@@ -3915,7 +3915,7 @@ test('the animal sheet and the animal definitions agree', () => {
   // The sheet is art the game indexes into by row and column. If a row is
   // added to ANIMALS without a row on the sheet, that animal draws nothing —
   // and nothing else would catch it, since the renderer has no canvas here.
-  const { w, h } = pngSize('assets/animals.png');
+  const { w, h } = pngSize('assets/animals/farm.png');
   const cols = w / TILE;
   const rows = h / TILE;
   assertEqual(w % TILE, 0, 'the sheet is a whole number of tiles wide');
@@ -4572,7 +4572,7 @@ test('the catalogue matches the sheet on disk', () => {
   // The sprites are indices into one long row, and the sheet is art that gets
   // replaced from outside the code. A mushroom pointing past the end of it
   // draws nothing at all, and nothing else here would notice.
-  const { w, h } = pngSize('assets/mushrooms.png');
+  const { w, h } = pngSize('assets/flora/mushrooms.png');
   assertEqual(h, TILE, 'the sheet is a single row');
   assertEqual(w % TILE, 0, 'a whole number of sprites wide');
   assertEqual(w / TILE, MUSHROOMS.length, 'with exactly as many sprites as there are mushrooms');
@@ -5470,7 +5470,7 @@ test('every module is precached by the service worker', () => {
 test('every asset the game actually asks for is precached', () => {
   // The check above only walked js/. Every art sheet so far has been added to
   // the shell by hand, and a missed one is a 404 offline with nothing to catch
-  // it — assets/animals.png was exactly this near-miss.
+  // it — assets/animals/farm.png was exactly this near-miss.
   //
   // Referenced files, not every file on disk: an unused sheet sitting in
   // assets/ shouldn't be forced into the shell, where it would cost every

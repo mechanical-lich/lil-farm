@@ -341,7 +341,7 @@ The duck is the better layer — sooner than a hen, for more money up front — 
 
 **An egg is never laid where it could never be collected** — not on water, and not on land you don't own. Both would strand it for good, since no task at all can be queued on unowned land.
 
-- **Every animal comes in a colour.**  `assets/animals.png` has a row per animal and a column per variation, and a newly bought animal picks a column at random — so you might get a white cow or a brown one.  It keeps that colour for life.  Adding a column to the image is the whole job: the game counts the columns when the sheet loads, so new colours need no code.
+- **Every animal comes in a colour.**  `assets/animals/farm.png` has a row per animal and a column per variation, and a newly bought animal picks a column at random — so you might get a white cow or a brown one.  It keeps that colour for life.  Adding a column to the image is the whole job: the game counts the columns when the sheet loads, so new colours need no code.
 - Because the colour is rolled when the sale goes through, the placement ghost can't know it.  Rather than show one colour and hand over another, **the ghost cycles through them** — which says "you'll get one of these" without promising which.
 - **Animals are free-range.**  Nothing forces you to fence them.  Fences and gates are how you *choose* to keep them near their troughs, since a gate stops an animal but not the farmer.
 - You need a **barn before you can buy an animal**, and each barn holds 4.
