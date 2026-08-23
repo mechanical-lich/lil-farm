@@ -12,16 +12,26 @@ import { BUILDABLES, canAfford, costLabel } from '../sim/build.js';
 import { countItem } from '../sim/inventory.js';
 import { on } from '../engine/events.js';
 
+/**
+ * The tools, in the order they sit on the bar.
+ *
+ * Ordered by how often a hand reaches for them rather than by the order a
+ * field is worked. The bar scrolls sideways on a phone, so the first few are
+ * the ones always in reach — and the things done every visit (take what is
+ * ready, water what is growing) should not be the ones you have to scroll for.
+ * Setting up a field is the rarer job, so tilling and building sit at the far
+ * end where a deliberate trip is no hardship.
+ */
 export const TOOLS = [
   { id: 'auto', label: '👆 Tap', hint: 'Do whatever the tile needs' },
   // Next to Tap because they're the two that act on what's already there,
   // rather than on the ground: tap it, or pick it up and move it.
   { id: 'move', label: '✊ Move', hint: 'Drag your animals and people where you want them' },
+  { id: 'harvest', label: '🧺 Harvest', hint: 'Pick ripe crops, mushrooms and flowers' },
+  { id: 'water', label: '💧 Water', hint: 'Seeds only start growing once watered' },
+  { id: 'plant', label: '🌱 Plant', hint: 'Sow the selected seed' },
   { id: 'clear', label: '🪓 Clear', hint: 'Chop, clear, and take down what you built' },
   { id: 'till', label: '🚜 Till', hint: 'Tap both ends of a row to plough it' },
-  { id: 'plant', label: '🌱 Plant', hint: 'Sow the selected seed' },
-  { id: 'water', label: '💧 Water', hint: 'Seeds only start growing once watered' },
-  { id: 'harvest', label: '🧺 Harvest', hint: 'Pick ripe crops before they spoil' },
   { id: 'build', label: '🔨 Build', hint: 'Fences, gates, roads and troughs' },
 ];
 
