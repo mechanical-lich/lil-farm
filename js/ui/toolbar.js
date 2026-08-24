@@ -33,7 +33,7 @@ export const TOOLS = [
   { id: 'plant', icon: '🌱', name: 'Plant', hint: 'Sow the selected seed' },
   { id: 'clear', icon: '🪓', name: 'Clear', hint: 'Chop, clear, and take down what you built' },
   { id: 'till', icon: '🚜', name: 'Till', hint: 'Tap both ends of a row to plough it' },
-  { id: 'build', icon: '🔨', name: 'Build', hint: 'Fences, gates, roads and troughs' },
+  { id: 'build', icon: '🔨', name: 'Build', hint: 'Fences, gates, roads, troughs and crates' },
 ];
 
 export function initToolbar(state, { onToolChange } = {}) {

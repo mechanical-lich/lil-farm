@@ -5,6 +5,7 @@ import { SAVE_VERSION, MAP_W, MAP_H, START_MONEY, START_INVENTORY } from './conf
 import { Grid } from './world/grid.js';
 import { generateWorld, startingBarnAnchor } from './world/worldgen.js';
 import { placeStructure, reconcileBuildings } from './sim/build.js';
+import { reconcileCrates } from './sim/crates.js';
 import { seedStartingMushrooms } from './sim/mushrooms.js';
 import { newMarket } from './sim/market.js';
 import { reconcileFlowers } from './sim/flowers.js';
@@ -39,6 +40,7 @@ export function newGame(seed = (Date.now() ^ 0x5f3759df) >>> 0) {
     buildings: [],   // multi-tile structures; the grid only marks their footprint
     nextBuildingId: 1,
     troughs: {},
+    crates: {},     // tile key -> {item, qty}; see sim/crates.js
     tasks: [],
     nextTaskId: 1,
     // See TESTING in config.js — a real farm starts with just a few seeds.
@@ -84,6 +86,7 @@ export function serialize(state) {
     buildings: state.buildings,
     nextBuildingId: state.nextBuildingId,
     troughs: state.troughs,
+    crates: state.crates,
     tasks: state.tasks,
     nextTaskId: state.nextTaskId,
     inventory: state.inventory,
@@ -130,6 +133,8 @@ export function deserialize(data) {
     buildings: data.buildings || [],
     nextBuildingId: data.nextBuildingId || 1,
     troughs: data.troughs || {},
+    // Farms saved before crates existed simply have none.
+    crates: data.crates || {},
     tasks: data.tasks || [],
     nextTaskId: data.nextTaskId || 1,
     inventory: data.inventory || {},
@@ -143,6 +148,10 @@ export function deserialize(data) {
   const fixed = reconcileBuildings(state);
   if (fixed.cleared || fixed.restored) {
     console.warn(`building marks repaired on load: ${fixed.cleared} stale, ${fixed.restored} missing`);
+  }
+  const crates = reconcileCrates(state);
+  if (crates.adopted || crates.dropped) {
+    console.warn(`crate records repaired on load: ${crates.adopted} adopted, ${crates.dropped} dropped`);
   }
   return state;
 }

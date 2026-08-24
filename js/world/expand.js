@@ -80,7 +80,7 @@ function shiftCoordinates(data, dx, dy) {
   for (const b of data.buildings || []) movePoint(b);
   for (const t of data.tasks || []) movePoint(t);
 
-  for (const key of ['crops', 'wetUntil', 'tillDir', 'troughs']) {
+  for (const key of ['crops', 'wetUntil', 'tillDir', 'troughs', 'crates']) {
     data[key] = shiftKeys(data[key], dx, dy);
   }
 }

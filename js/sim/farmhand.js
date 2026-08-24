@@ -21,6 +21,7 @@ import { OBJ, objDef } from '../world/tiledefs.js';
 import { findPath, besideBox } from '../world/pathfind.js';
 import { animalDef, isReady, takeFromAnimal } from './animals.js';
 import { animalCapacity, sizeOf } from './build.js';
+import { crateAt, crateAccepts, depositInto, findCrateFor } from './crates.js';
 
 /** What one farmhand costs to hire. */
 export const HAND_PRICE = 1200;
@@ -149,7 +150,11 @@ function stepHand(state, hand) {
   if (!hand.target) {
     const rested = hand.scannedAt != null && state.tickCount - hand.scannedAt < SCAN_INTERVAL;
     if (!rested) {
-      hand.target = findWork(state, hand);
+      // Gathering first, then stowing: a hand with room in its pockets and a
+      // cow standing ready should milk it before it walks a full satchel of
+      // eggs across the farm. findWork already returns nothing once they're
+      // full, so a full hand goes straight to looking for a crate.
+      hand.target = findWork(state, hand) || findCrate(state, hand);
       hand.scannedAt = state.tickCount;
       if (hand.target) { hand.path = []; hand.restSpot = null; }
     }
@@ -171,13 +176,24 @@ function stepHand(state, hand) {
 
 /** An egg is picked up from its own tile; an animal is worked on from beside. */
 function inReach(hand, target) {
-  if (target.kind === 'animal') {
+  // A crate blocks the tile it stands on, so like an animal it's reached from
+  // alongside rather than stood on.
+  if (target.kind === 'animal' || target.kind === 'crate') {
     return Math.abs(hand.x - target.x) + Math.abs(hand.y - target.y) <= 1;
   }
   return hand.x === target.x && hand.y === target.y;
 }
 
 function stillWorthDoing(state, target, hand) {
+  // Checked before the full-pockets test below, which is about whether there's
+  // room to *gather* — the one errand a full hand still has is the delivery
+  // that empties it.
+  if (target.kind === 'crate') {
+    const crate = crateAt(state, target.x, target.y);
+    return !!crate && Object.entries(hand.carrying || {})
+      .some(([id, qty]) => qty > 0 && crateAccepts(crate, id));
+  }
+
   if (handRoom(hand) <= 0) return false;
   if (target.kind === 'egg') return state.grid.getObject(target.x, target.y) === OBJ.EGG;
 
@@ -198,6 +214,21 @@ function finishJob(state, hand) {
   // there means starting the walk home only to turn round again.
   hand.scannedAt = null;
   if (!target) return;
+
+  if (target.kind === 'crate') {
+    // Only what the crate will take. Whatever it won't — the milk in a satchel
+    // of eggs and milk, or the overflow from a crate with four spaces left —
+    // stays on the hand, which will look for somewhere else to put it.
+    const stowed = depositInto(state, target.x, target.y, hand.carrying);
+    for (const [id, n] of Object.entries(stowed)) {
+      hand.carrying[id] -= n;
+      if (hand.carrying[id] <= 0) delete hand.carrying[id];
+    }
+    if (Object.keys(stowed).length > 0) {
+      emitUnlessSuspended('hand:stowed', { id: hand.id, x: target.x, y: target.y, stowed });
+    }
+    return;
+  }
 
   if (target.kind === 'egg') {
     if (state.grid.getObject(target.x, target.y) !== OBJ.EGG) return;
@@ -297,6 +328,21 @@ function findWork(state, hand) {
 }
 
 /**
+ * Somewhere to put down what they're carrying.
+ *
+ * Only worth walking anywhere if they're actually holding something. A hand
+ * with nothing to stow and nothing to gather rests by the barn exactly as it
+ * always did, and so does one whose goods no crate will take — which is what
+ * makes a farm with no crates on it behave the way it did before crates
+ * existed.
+ */
+function findCrate(state, hand) {
+  if (carriedTotal(hand) === 0) return null;
+  const spot = findCrateFor(state, hand.carrying, hand);
+  return spot ? { kind: 'crate', x: spot.x, y: spot.y } : null;
+}
+
+/**
  * Waiting by the barn between jobs.
  *
  * They used to simply stop wherever the last job left them, which looked less
@@ -373,7 +419,9 @@ function walkTo(state, hand, target) {
   if (!target) return false;
   const path = findPath(state.grid, { x: hand.x, y: hand.y }, { x: target.x, y: target.y }, {
     actor: 'farmer',
-    adjacent: target.kind === 'animal',
+    // Animals and crates are both reached from the tile alongside — one walks
+    // off if you stand on it, the other can't be stood on at all.
+    adjacent: target.kind === 'animal' || target.kind === 'crate',
   });
   if (!path) return false;
   hand.path = path;

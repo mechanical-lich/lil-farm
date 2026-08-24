@@ -8,6 +8,7 @@ const HALF = TILE / 2;
 import { GROUND, OBJ, isTilled, isWater } from '../world/tiledefs.js';
 import { SPRITES, TOWN, WATER, RIVER, BARN, CAPSULES, srcRect, sheetFor } from './sprites.js';
 import { mushroomAt } from '../sim/mushrooms.js';
+import { crateAt, CRATE_CAPACITY } from '../sim/crates.js';
 import { flowerAt, isWatered } from '../sim/flowers.js';
 import { flowerCanvas } from './flowerart.js';
 import { pendingGroundTiles } from '../sim/build.js';
@@ -622,6 +623,9 @@ function drawObject(ctx, sheets, state, objId, x, y) {
     case OBJ.EGG:
       blit(ctx, sheets, SPRITES.egg, px, py);
       break;
+    case OBJ.CRATE:
+      drawCrate(ctx, sheets, state, x, y, px, py);
+      break;
     case OBJ.MUSHROOM: {
       // Which one grew here is state, not a hash of the tile — a mushroom is a
       // find, and it has to still be the same find after a reload.
@@ -661,6 +665,41 @@ function drawObject(ctx, sheets, state, objId, x, y) {
  * sheet has a north-south river channel and no east-west one, and a quarter
  * turn is a better answer than asking for more art.
  */
+/**
+ * A crate, with what's in it shown on the lid.
+ *
+ * The goods sprite is drawn at half size and sunk into the top of the box, so
+ * it reads as something sitting in the crate rather than balanced on it. Half
+ * size because a full 16px egg on a 16px crate hides the crate entirely, and
+ * the point of the picture is to tell a row of crates apart at a glance.
+ *
+ * The fill bar is the other half of that: knowing a crate holds eggs is no use
+ * if you can't see it's nearly full. It only appears once there's something in
+ * there — an empty crate is plain, which is how you spot the one nobody is
+ * using.
+ */
+function drawCrate(ctx, sheets, state, x, y, px, py) {
+  blit(ctx, sheets, SPRITES.crateEmpty, px, py);
+
+  const crate = crateAt(state, x, y);
+  if (!crate || !crate.item || crate.qty <= 0) return;
+
+  const sprite = SPRITES.goods[crate.item];
+  if (sprite) {
+    const { sx, sy, sw, sh } = srcRect(sprite);
+    ctx.drawImage(sheetFor(sheets, sprite), sx, sy, sw, sh, px + 4, py, sw / 2, sh / 2);
+  }
+
+  // A thin bar along the bottom, the same idea as a crop's growth: filled from
+  // the left, and going amber as the crate runs out of room so a full one is
+  // obvious without counting.
+  const frac = Math.min(1, crate.qty / CRATE_CAPACITY);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+  ctx.fillRect(px + 2, py + TILE - 3, TILE - 4, 2);
+  ctx.fillStyle = frac >= 1 ? '#f2a33c' : '#8fd36b';
+  ctx.fillRect(px + 2, py + TILE - 3, Math.round((TILE - 4) * frac), 2);
+}
+
 export function blitTurned(ctx, sheets, sprite, dx, dy, turns = 0) {
   if (!turns) { blit(ctx, sheets, sprite, dx, dy); return; }
   const { sx, sy, sw, sh } = srcRect(sprite);

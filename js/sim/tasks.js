@@ -5,7 +5,7 @@
 // later, so one unreachable rock never deadlocks the whole farm.
 
 import { emitUnlessSuspended } from '../engine/events.js';
-import { addItems } from './inventory.js';
+import { addItems, itemName } from './inventory.js';
 import { OBJ, GROUND, objDef, isTilled, isWater } from '../world/tiledefs.js';
 import { cropAt, isRipe, isStalled, cropDef } from './crops.js';
 import {
@@ -17,6 +17,7 @@ import { mushroomAt, forage } from './mushrooms.js';
 import { flowerAt, pick as pickFlower, canPlantAt } from './flowers.js';
 import { readSeedId, seedName } from './flowergenes.js';
 import { handAt, carriedTotal } from './farmhand.js';
+import { crateAt } from './crates.js';
 
 /** Work is measured in ticks (1 tick = 1 second). */
 export const TASK_TYPES = {
@@ -31,6 +32,7 @@ export const TASK_TYPES = {
   fill: { label: 'Fill', verb: 'Filling' },
   collect: { label: 'Collect', verb: 'Collecting' },
   gather: { label: 'Take', verb: 'Taking' },
+  unload: { label: 'Empty', verb: 'Emptying' },
   till: { label: 'Till', verb: 'Tilling' },
   plant: { label: 'Plant', verb: 'Planting' },
   water: { label: 'Water', verb: 'Watering' },
@@ -49,6 +51,7 @@ export const WORK = {
   fill: 8,
   collect: 6,
   gather: 5,
+  unload: 5,
 };
 
 /** A task the player cannot see the point of is a bug; keep labels concrete. */
@@ -436,6 +439,18 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
           detail: animalDef(ready.type).produces, animalId: ready.id,
         };
       }
+      // A crate with something in it is worth a tap for the same reason a full
+      // farmhand is: it's the farm having gathered something and waiting for
+      // you to come and collect it. An empty one has nothing to offer, so the
+      // tap falls through to whatever else the tile needs.
+      const crate = crateAt(state, x, y);
+      if (crate && crate.item && crate.qty > 0) {
+        return {
+          type: 'unload', x, y, work: WORK.unload,
+          detail: `${itemName(crate.item)} crate`, adjacent: true,
+        };
+      }
+
       const trough = troughAnchorAt(state, x, y);
       if (trough) {
         const t = state.troughs[`${trough.x},${trough.y}`];

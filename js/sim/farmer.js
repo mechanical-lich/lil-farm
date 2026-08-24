@@ -22,6 +22,7 @@ import {
 } from './flowers.js';
 import { readSeedId } from './flowergenes.js';
 import { takeFromHand } from './farmhand.js';
+import { emptyCrate } from './crates.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 
 const WANDER_CHANCE = 0.08;   // per idle tick
@@ -256,6 +257,14 @@ function applyTaskResult(state, task) {
       break;
     }
 
+    case 'unload': {
+      // Everything in the crate, and the crate goes back to having no type —
+      // ready for whatever the hands bring next.
+      gained = emptyCrate(state, task.x, task.y);
+      addItems(state, gained);
+      break;
+    }
+
     case 'collect': {
       const animal = state.animals.find((a) => a.id === task.animalId);
       gained = collectFrom(state, animal);
@@ -267,7 +276,9 @@ function applyTaskResult(state, task) {
       // rather than a permanent scar on the farm.
       const result = demolish(state, task.x, task.y);
       if (result.ok) {
-        gained = result.refund;
+        // A crate comes down with whatever was in it, which goes back to the
+        // player alongside the timber.
+        gained = { ...result.refund, ...(result.contents || {}) };
         addItems(state, gained);
       }
       break;

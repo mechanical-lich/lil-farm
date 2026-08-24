@@ -204,6 +204,16 @@ export const SPRITES = {
   // Eggs a hen has dropped, waiting to be picked up.
   egg: [5, 10],
 
+  // What a crate is holding, drawn small on top of the box so you can read a
+  // row of them from across the farm without tapping any of them. Keyed by the
+  // item ids in sim/inventory.js, so a crate of anything without a picture here
+  // just shows a full-looking box.
+  goods: {
+    egg: [5, 10],
+    milk: [4, 10],
+    wool: [3, 10],
+  },
+
   // Characters. The livestock that used to live here has moved to its own
   // sheet, assets/animals/farm.png, which carries a colour variation per column.
   farmer: [0, 9],

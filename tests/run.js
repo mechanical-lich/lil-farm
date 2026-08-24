@@ -41,6 +41,10 @@ import { ITEMS, ITEM_GROUPS, itemGroup, countItem } from '../js/sim/inventory.js
 import {
   HAND_PRICE, HAND_CAPACITY, carriedTotal, isFull, handCount, handCapacity,
 } from '../js/sim/farmhand.js';
+import {
+  CRATE_CAPACITY, crateAt, crateAccepts, crateRoom, depositInto, emptyCrate,
+  findCrateFor, reconcileCrates,
+} from '../js/sim/crates.js';
 import { DECOR, decorList, salvageValue, canPlaceDecor, placeDecor } from '../js/sim/decor.js';
 import { movableAt, canMoveTo, moveTo } from '../js/sim/moving.js';
 import {
@@ -3573,6 +3577,208 @@ test('a farmhand crosses the farm for work rather than only what is underfoot', 
 
   for (let i = 0; i < 900; i++) tick(s);
   assertEqual(cow.stock, 0, 'it walked the whole way and milked her');
+});
+
+// --- crates -------------------------------------------------------------
+
+/** A farm with a hand and a crate two tiles east of the farmer. */
+function farmWithCrate(seed = 9950) {
+  const { s, hand } = farmWithHand(seed);
+  const cx = s.farmer.x + 2;
+  const cy = s.farmer.y;
+  completeBuild(s, { buildKind: 'crate', x: cx, y: cy });
+  return { s, hand, cx, cy };
+}
+
+test('a crate takes its type from the first thing put in it', () => {
+  const { s, cx, cy } = farmWithCrate(9950);
+  const crate = crateAt(s, cx, cy);
+  assertEqual(crate.item, null, 'a new crate is nothing in particular');
+  assert(crateAccepts(crate, 'egg'), 'so it will take eggs');
+  assert(crateAccepts(crate, 'milk'), 'or milk');
+
+  depositInto(s, cx, cy, { egg: 5 });
+  assertEqual(crate.item, 'egg', 'the first delivery decided');
+  assertEqual(crate.qty, 5, 'and it holds them');
+  assert(crateAccepts(crate, 'egg'), 'more eggs are welcome');
+  assert(!crateAccepts(crate, 'milk'), 'but milk is not — one kind to a crate');
+});
+
+test('emptying a crate frees it to hold something else', () => {
+  const { s, cx, cy } = farmWithCrate(9951);
+  depositInto(s, cx, cy, { egg: 5 });
+
+  assertEqual(emptyCrate(s, cx, cy), { egg: 5 }, 'everything comes out');
+  const crate = crateAt(s, cx, cy);
+  assertEqual(crate.qty, 0, 'leaving it empty');
+  assertEqual(crate.item, null, 'and unclaimed again');
+  assert(crateAccepts(crate, 'milk'), 'so it will take milk now');
+  assertEqual(emptyCrate(s, cx, cy), {}, 'and emptying an empty crate yields nothing');
+});
+
+test('a crate takes what fits and never destroys the rest', () => {
+  const { s, cx, cy } = farmWithCrate(9952);
+  depositInto(s, cx, cy, { egg: CRATE_CAPACITY - 3 });
+
+  const took = depositInto(s, cx, cy, { egg: 10 });
+  assertEqual(took, { egg: 3 }, 'only the three there was room for');
+  assertEqual(crateAt(s, cx, cy).qty, CRATE_CAPACITY, 'full, not over');
+  assertEqual(crateRoom(crateAt(s, cx, cy)), 0, 'and no room left');
+  assertEqual(depositInto(s, cx, cy, { egg: 1 }), {}, 'a full crate takes nothing');
+});
+
+test('a crate only takes the part of a mixed load it is holding', () => {
+  const { s, cx, cy } = farmWithCrate(9953);
+  depositInto(s, cx, cy, { egg: 1 });
+
+  const took = depositInto(s, cx, cy, { egg: 4, milk: 6, wool: 2 });
+  assertEqual(took, { egg: 4 }, 'the eggs went in, the rest did not');
+  assertEqual(crateAt(s, cx, cy).qty, 5, 'five eggs all told');
+});
+
+test('a full farmhand stows its load in a crate and gets back to work', () => {
+  const { s, hand, cx, cy } = farmWithCrate(9954);
+  hand.carrying = { egg: HAND_CAPACITY };
+  assert(isFull(hand), 'pockets full — nothing else can be gathered');
+
+  for (let i = 0; i < 400; i++) tick(s);
+
+  assertEqual(carriedTotal(hand), 0, 'the hand is empty again');
+  assertEqual(crateAt(s, cx, cy).qty, HAND_CAPACITY, 'it is all in the crate');
+  assertEqual(crateAt(s, cx, cy).item, 'egg', 'which is an egg crate now');
+  assertEqual(countItem(s, 'egg'), 0, 'and still none of it in your bag');
+});
+
+test('a hand keeps what the crate will not take and finds another for it', () => {
+  // The mixed-cargo case: an egg crate takes the eggs, and the milk has to go
+  // somewhere else rather than being dropped or stuck.
+  const { s, hand, cx, cy } = farmWithCrate(9955);
+  depositInto(s, cx, cy, { egg: 1 });
+  // Noted now rather than read back later: the farmer walks, so s.farmer.x
+  // after a few hundred ticks is not where the crate was put.
+  const mx = s.farmer.x + 4;
+  const my = s.farmer.y;
+  completeBuild(s, { buildKind: 'crate', x: mx, y: my });
+  hand.carrying = { egg: 10, milk: 8 };
+
+  for (let i = 0; i < 600; i++) tick(s);
+
+  assertEqual(crateAt(s, cx, cy).qty, 11, 'the eggs joined the egg crate');
+  assertEqual(crateAt(s, mx, my).item, 'milk', 'the milk found its own');
+  assertEqual(crateAt(s, mx, my).qty, 8, 'all of it');
+  assertEqual(carriedTotal(hand), 0, 'and the hand is empty');
+});
+
+test('with no crate that will take it, a hand waits by the barn as it always did', () => {
+  const { s, hand, cx, cy } = farmWithCrate(9956);
+  depositInto(s, cx, cy, { egg: CRATE_CAPACITY });     // full, and eggs only
+  hand.carrying = { milk: HAND_CAPACITY };
+
+  for (let i = 0; i < 400; i++) tick(s);
+
+  assertEqual(carriedTotal(hand), HAND_CAPACITY, 'still holding the milk');
+  assertEqual(crateAt(s, cx, cy).qty, CRATE_CAPACITY, 'the full crate is untouched');
+  const barn = s.buildings.find((b) => b.type === 'barn');
+  const near = Math.abs(hand.x - barn.x) <= barn.w + 1 && Math.abs(hand.y - barn.y) <= barn.h + 1;
+  assert(near, 'and waiting by the barn for you');
+});
+
+test('gathering beats stowing: a hand with room milks the cow first', () => {
+  const { s, hand, cx, cy } = farmWithCrate(9957);
+  hand.carrying = { egg: 2 };
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 1, s.farmer.y + 1);
+  cow.stock = 2;
+
+  for (let i = 0; i < 120; i++) tick(s);
+
+  assert(cow.stock < 2, 'the cow was seen to before the errand');
+});
+
+test('tapping a crate empties it into your bag', () => {
+  const { s, cx, cy } = farmWithCrate(9958);
+  depositInto(s, cx, cy, { egg: 40 });
+
+  const spec = taskForTile(s, cx, cy, 'auto');
+  assertEqual(spec.type, 'unload', 'tapping it offers to empty it');
+  addTask(s, spec);
+
+  let n = 0;
+  while (s.tasks.length && n < 3000) { tick(s); n++; }
+
+  assertEqual(countItem(s, 'egg'), 40, 'the eggs are yours');
+  assertEqual(crateAt(s, cx, cy).qty, 0, 'and the crate is empty');
+});
+
+test('an empty crate is not worth walking over to', () => {
+  const { s, cx, cy } = farmWithCrate(9959);
+  const spec = taskForTile(s, cx, cy, 'auto');
+  assert(!spec || spec.type !== 'unload', 'nothing in it to take');
+});
+
+test('taking a crate down hands back its contents as well as its timber', () => {
+  const { s, cx, cy } = farmWithCrate(9960);
+  depositInto(s, cx, cy, { milk: 12 });
+  const before = countItem(s, 'wood');
+
+  addTask(s, taskForTile(s, cx, cy, 'clear'));
+  let n = 0;
+  while (s.tasks.length && n < 3000) { tick(s); n++; }
+
+  assertEqual(countItem(s, 'milk'), 12, 'the milk was not burnt with the box');
+  assert(countItem(s, 'wood') > before, 'and some timber came back');
+  assertEqual(crateAt(s, cx, cy), null, 'the crate is gone');
+  assertEqual(s.grid.getObject(cx, cy), OBJ.NONE, 'and so is its mark');
+});
+
+test('crates survive a save round trip, contents and all', () => {
+  const { s, cx, cy } = farmWithCrate(9961);
+  depositInto(s, cx, cy, { wool: 33 });
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual(crateAt(back, cx, cy), { item: 'wool', qty: 33 }, 'still a wool crate');
+  assertEqual(back.grid.getObject(cx, cy), OBJ.CRATE, 'still standing there');
+});
+
+test('a farm saved before crates existed loads without any', () => {
+  const s = farmWithMaterials(9962);
+  const data = JSON.parse(JSON.stringify(serialize(s)));
+  delete data.crates;                       // exactly what an older save looks like
+
+  const back = deserialize(data);
+  assertEqual(back.crates, {}, 'no crates, and nothing broken');
+  assertEqual(crateAt(back, 5, 5), null, 'looking one up is simply nothing');
+});
+
+test('crate records and grid marks are put back in step on load', () => {
+  const { s, cx, cy } = farmWithCrate(9963);
+  depositInto(s, cx, cy, { egg: 4 });
+
+  // A record whose tile is no longer a crate, and a mark with no record.
+  s.crates['3,3'] = { item: 'milk', qty: 9 };
+  s.grid.setObject(cx + 2, cy, OBJ.CRATE);
+
+  const fixed = reconcileCrates(s);
+  assertEqual(fixed.dropped, 1, 'the record standing on nothing was dropped');
+  assertEqual(fixed.adopted, 1, 'and the unrecorded crate adopted');
+  assertEqual(crateAt(s, 3, 3), null, 'gone');
+  assertEqual(crateAt(s, cx + 2, cy), { item: null, qty: 0 }, 'and the new one is empty');
+  assertEqual(crateAt(s, cx, cy).qty, 4, 'the real crate was left alone');
+});
+
+test('the nearest crate that will take it is the one chosen', () => {
+  const { s, cx, cy } = farmWithCrate(9964);
+  completeBuild(s, { buildKind: 'crate', x: s.farmer.x + 6, y: s.farmer.y });
+  depositInto(s, cx, cy, { milk: 1 });          // near, but it is a milk crate
+
+  const spot = findCrateFor(s, { egg: 3 }, { x: s.farmer.x, y: s.farmer.y });
+  assertEqual(spot, { x: s.farmer.x + 6, y: s.farmer.y }, 'walked past the one that would not take eggs');
+
+  assertEqual(findCrateFor(s, {}, { x: s.farmer.x, y: s.farmer.y }), null, 'carrying nothing, no errand');
+  assertEqual(findCrateFor(s, { egg: 0 }, { x: s.farmer.x, y: s.farmer.y }), null, 'nor for nothing');
+});
+
+test('a crate holds more than a farmhand, which is the point of it', () => {
+  assert(CRATE_CAPACITY > HAND_CAPACITY, 'otherwise it would not be worth the walk');
 });
 
 test('farmhands survive a save round trip, cargo and all', () => {

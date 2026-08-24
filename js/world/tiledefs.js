@@ -42,6 +42,7 @@ export const OBJ = {
   EGG: 13,
   MUSHROOM: 14,
   FLOWER: 15,
+  CRATE: 16,
 };
 
 export const OBJ_DEFS = {
@@ -84,6 +85,11 @@ export const OBJ_DEFS = {
     name: 'mushroom', blocks: false, clearable: true,
     task: 'forage', work: 4,
   },
+  // A crate the farmhands stow goods in. What's inside lives in state.crates,
+  // keyed by tile, for the same reason as mushrooms and flowers: the grid has
+  // one byte per tile and a crate has both a kind of goods and a count. It
+  // blocks, so a row of them reads as a wall you have to path around.
+  [OBJ.CRATE]: { name: 'crate', blocks: true },
 };
 
 export function objDef(id) { return OBJ_DEFS[id] || OBJ_DEFS[OBJ.NONE]; }

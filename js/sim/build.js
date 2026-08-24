@@ -15,6 +15,7 @@ import { OBJ, GROUND, isTilled, isWater, objDef } from '../world/tiledefs.js';
 import { countItem, removeItem, itemName } from './inventory.js';
 import { cropAt } from './crops.js';
 import { emitUnlessSuspended } from '../engine/events.js';
+import { emptyCrate } from './crates.js';
 
 /**
  * size is [width, height] in tiles. Troughs are the first two-tile structures
@@ -59,6 +60,12 @@ export const BUILDABLES = {
   feedTrough: {
     name: 'Feed trough', obj: OBJ.TROUGH_FOOD, cost: { wood: 8 }, work: 14,
     size: [2, 1], trough: 'food', hint: 'Two tiles wide',
+  },
+  // Wood only: a crate is boards, and it wants to be something the player puts
+  // down freely wherever the hands are walking, not a considered purchase.
+  crate: {
+    name: 'Crate', obj: OBJ.CRATE, cost: { wood: 12 }, work: 10, size: [1, 1],
+    hint: 'Farmhands stow one kind of goods here',
   },
   barn: {
     name: 'Barn', obj: OBJ.BUILDING, cost: barnCost(3, 2), work: barnWork(3, 2),
@@ -396,6 +403,12 @@ export function placeStructure(state, kind, x, y, size) {
   if (def.trough) {
     state.troughs[`${x},${y}`] = { kind: def.trough, level: 0, foodType: null };
   }
+  // Same for a crate: it starts with no type at all, and takes one from
+  // whatever a farmhand puts in it first.
+  if (def.obj === OBJ.CRATE) {
+    state.crates = state.crates || {};
+    state.crates[`${x},${y}`] = { item: null, qty: 0 };
+  }
   // Same idea one size up: the building record is the source of truth, the grid
   // marks are just an index so collision and taps keep working.
   if (def.building) {
@@ -543,12 +556,21 @@ export function demolish(state, x, y) {
     if (def.ground != null) state.grid.setGround(t.x, t.y, GROUND.GRASS);
   }
   if (def.trough) delete state.troughs[`${found.x},${found.y}`];
+  // Taking a crate down hands its contents back rather than burning them. The
+  // rule everywhere else on this farm is that nothing the player has already
+  // gathered is ever destroyed by running out of room, and a crate being
+  // dismantled is the same situation from the other end.
+  let contents = null;
+  if (def.obj === OBJ.CRATE) {
+    contents = emptyCrate(state, found.x, found.y);
+    delete state.crates?.[`${found.x},${found.y}`];
+  }
   if (def.building) {
     state.buildings = state.buildings.filter((b) => !(b.x === found.x && b.y === found.y));
   }
 
   emitUnlessSuspended('world:changed', { x: found.x, y: found.y });
-  return { ok: true, refund: refundFor(found.kind, size) };
+  return { ok: true, refund: refundFor(found.kind, size), contents };
 }
 
 /** Which trough (if any) covers this tile — troughs are two tiles wide. */

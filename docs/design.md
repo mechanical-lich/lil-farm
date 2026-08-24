@@ -241,10 +241,21 @@ Tilled land has a dry and a wet version in the tilesheet, and each crop has a ye
 ## Construction
 You can build things like farms, fences, barrels, water/feed troughs, and roads.  
 
-- The build tool offers fence, gate, two kinds of road, water trough and feed trough, each showing its material cost.  Materials come from chopping trees and clearing rocks, or from the shop.
+- The build tool offers fence, gate, two kinds of road, water trough, feed trough and crate, each showing its material cost.  Materials come from chopping trees and clearing rocks, or from the shop.
 - **Materials are reserved when work is queued and spent when it's finished.**  You can't queue more building than you have materials for, but cancelling a build costs nothing.
 - Fences block everyone.  Gates block animals but the farmer opens them, so a pen needs exactly one gate to be usable and secure.
 - Troughs are **two tiles wide** and need two clear tiles side by side.
+
+### Crates
+A crate is somewhere for the farmhands to put things down — **12 wood**, one tile, and it holds **100 of one kind of goods**.
+
+- **A crate takes its type from the first thing put in it** and holds that until it's emptied, when it goes back to being anything.  That's what keeps a crate something you site deliberately — by the coop, by the pasture — rather than one box that swallows the whole farm.
+- **A full hand stows its load and gets straight back to work** instead of standing by the barn holding eight eggs.  Gathering still comes first: a hand with room in its pockets milks the waiting cow before it walks an errand.
+- **It takes what fits and never destroys the rest.**  A hand carrying eggs and milk unloads its eggs into an egg crate and walks on still holding the milk, looking for somewhere to put that.  Same when a crate has four spaces left and the hand has ten.
+- **A full crate sends the hand looking for another**, and if there isn't one that will take what it's holding it waits by the barn exactly as it always did.  A farm with no crates on it behaves precisely as it did before crates existed.
+- **Tap a crate to empty it into your bag**, the same gesture as taking a load off a farmhand.  An empty one isn't worth walking to, so the tap falls through to whatever else is on that tile.
+- **What's inside is drawn on the lid** — egg, milk or wool — with a fill bar that goes amber when the crate is full, so a row of them can be read from across the farm without tapping any of them.
+- **Taking a crate down hands back its contents** along with half its timber.  Nothing the player has already gathered is ever destroyed by running out of room, and a crate being dismantled is that same rule from the other end.
 
 ### Barns
 Barns are the answer to "what are the farm tiles for" — they're what lets you keep animals.
@@ -380,7 +391,7 @@ A hired NPC ($1,200 from the shop's Animals tab) who walks the farm **milking, s
 
 They are deliberately **not a second farmer**.  They never clear, till, plant or build; they only gather what the animals have already produced.  A farm big enough to be worth having is a farm where tapping every hen individually stops being a pleasure — that's the problem they solve, and nothing else.
 
-- **What they gather goes into their own pockets**, not yours.  They carry **24 items**, and when they fill up they walk to the nearest barn and wait for you to come and take it off them.  Tap them and the farmer fetches it into your bag.
+- **What they gather goes into their own pockets**, not yours.  They carry **24 items**, and when they fill up they walk to the nearest barn and wait for you to come and take it off them.  Tap them and the farmer fetches it into your bag.  Build **crates** and they stow their load there instead and carry on working — see Construction.
 - That's the point of the design: the help is a multiplier on your farm, not a replacement for visiting it.  You still have to turn up.
 - **They never destroy a surplus.**  A hand with room for one more and a cow holding four takes one and leaves three on the cow.
 - **One farmhand per barn** — somewhere to bring things to, and another reason to build.
