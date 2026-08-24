@@ -49,6 +49,7 @@ import { DECOR, decorList, salvageValue, canPlaceDecor, placeDecor } from '../js
 import { movableAt, canMoveTo, moveTo } from '../js/sim/moving.js';
 import {
   ANIMALS, TROUGH_CAPACITY, FEED_COST, FOOD_DURATION, WATER_DURATION, SEEK_THRESHOLD,
+  foodRate, waterRate,
   makeAnimal, collectFrom, isNeglected, fillWaterTrough, fillFeedTrough, pickFeed, animalDef,
   petAnimal, pickEmote, currentEmote, animalAt, isReady, PRODUCE_CAP,
   setAnimalVariants, animalVariantCount, variantOf, isThirsty, SWIMMERS, canLayAt,
@@ -4014,6 +4015,112 @@ test('an egg is never laid where it could never be collected', () => {
   s.grid.owned.delete(plotIndex(0, 0, s.grid.w));
   assert(!s.grid.isOwned(outside.x, outside.y), 'the test tile is off the farm');
   assert(!canLayAt(s, outside.x, outside.y), 'nor on land you do not own');
+});
+
+test('a species eats and drinks at its own rate', () => {
+  const { s, animal: hen } = farmWithAnimal('chicken', 8300);
+  const duck = makeAnimal(s, 'duck', hen.x + 2, hen.y);
+
+  assertEqual(foodRate(hen), 1, 'a hen eats at the going rate');
+  assertEqual(foodRate(duck), 1.5, 'a duck eats half again as much');
+  assertEqual(waterRate(duck), waterRate(hen), 'but is no thirstier');
+});
+
+test('a hungrier species really does empty its trough sooner', () => {
+  // Measured against the clock rather than trusted from the table: a duck's
+  // helping has to actually run out earlier than a hen's.
+  const s = farmWithMaterials(8301);
+  const hen = makeAnimal(s, 'chicken', s.farmer.x + 2, s.farmer.y + 2);
+  const duck = makeAnimal(s, 'duck', s.farmer.x + 4, s.farmer.y + 2);
+  hen.water = 1e9;
+  duck.water = 1e9;
+  hen.food = FOOD_DURATION;
+  duck.food = FOOD_DURATION;
+
+  let duckEmpty = null;
+  let henEmpty = null;
+  for (let i = 1; i <= FOOD_DURATION + 10; i++) {
+    tick(s);
+    if (duckEmpty === null && duck.food <= 0) duckEmpty = i;
+    if (henEmpty === null && hen.food <= 0) henEmpty = i;
+  }
+
+  assert(duckEmpty !== null, 'the duck got through its helping');
+  assert(henEmpty !== null, 'and so did the hen');
+  assert(duckEmpty < henEmpty, `the duck should run out first (${duckEmpty} vs ${henEmpty})`);
+  // 1.5x the rate is 2/3 the time, give or take the rounding of a debt tick.
+  const ratio = duckEmpty / henEmpty;
+  assert(Math.abs(ratio - 2 / 3) < 0.02, `and by about a third — got ${ratio.toFixed(3)}`);
+});
+
+test('appetite is a multiplier on the affection discount, not a replacement', () => {
+  const { s, animal: duck } = farmWithAnimal('duck', 8302);
+  const hungry = foodRate(duck);
+
+  duck.affection = AFFECTION_MAX;
+  assertEqual(foodRate(duck), hungry * 0.6, 'a loved duck still eats 40% less than a stranger duck');
+  assert(foodRate(duck) > 0.6, 'but is still hungrier than a loved hen would be');
+});
+
+test('an animal whose species says nothing about appetite eats normally', () => {
+  // The default matters: it is what lets a new species be added to the table
+  // without having to think about upkeep at all.
+  const { s, animal } = farmWithAnimal('cow', 8303);
+  const def = ANIMALS.cow;
+  const saved = { eats: def.eats, drinks: def.drinks };
+  delete def.eats;
+  delete def.drinks;
+  try {
+    assertEqual(foodRate(animal), 1, 'unstated appetite is the going rate');
+    assertEqual(waterRate(animal), 1, 'for water too');
+  } finally {
+    Object.assign(def, saved);
+  }
+});
+
+test('a hungry duck still lives on the pond between meals', () => {
+  // The thing worth protecting: ducks drifting between ponds is emergent
+  // behaviour the player likes, and making them hungrier must not turn them
+  // into birds that live at the feed trough. Unlike the pinned-food test above,
+  // this one lets the duck get genuinely hungry and go and do something about
+  // it, with a stocked trough well away from the water.
+  const s = farmWithMaterials(8304);
+  completeBuild(s, { buildKind: 'barn', x: s.farmer.x - 1, y: s.farmer.y - 4 });
+  const px = s.farmer.x + 4;
+  for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) {
+    s.grid.setGround(px + dx, s.farmer.y + dy, GROUND.WATER);
+  }
+  completeBuild(s, { buildKind: 'feedTrough', x: s.farmer.x - 3, y: s.farmer.y + 2 });
+  s.troughs[`${s.farmer.x - 3},${s.farmer.y + 2}`].level = TROUGH_CAPACITY;
+
+  const duck = makeAnimal(s, 'duck', px + 1, s.farmer.y + 1);
+  duck.water = 1e9;
+
+  let wet = 0;
+  const ticks = FOOD_DURATION * 2;         // long enough to need feeding twice
+  for (let i = 0; i < ticks; i++) {
+    tick(s);
+    if (isWater(s.grid.getGround(duck.x, duck.y))) wet++;
+  }
+
+  // Measured at 99% with a stocked trough — it nips ashore to eat and goes
+  // straight back. The bar is 0.9 to match the pinned-food test: anything that
+  // drops a duck to nine tenths of its pond time has changed the behaviour,
+  // not merely jostled the dice.
+  const share = wet / ticks;
+  assert(share > 0.9, `a hungry duck still belongs on the water — only ${Math.round(share * 100)}%`);
+});
+
+test('a duck is a better layer per barn slot and a worse one per trough', () => {
+  // The trade the appetite is there to create. Before it, a duck was simply a
+  // better chicken.
+  const duck = ANIMALS.duck;
+  const hen = ANIMALS.chicken;
+  assert(duck.produceTicks < hen.produceTicks, 'the duck lays sooner');
+  assert(duck.eats > hen.eats, 'and eats more doing it');
+
+  const eggsPerFood = (d) => (FOOD_DURATION / d.eats) / d.produceTicks;
+  assert(eggsPerFood(duck) < eggsPerFood(hen), 'so a helping of feed goes further in a hen');
 });
 
 test('a duck lays faster than a hen, for a higher price', () => {

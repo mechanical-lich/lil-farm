@@ -34,16 +34,24 @@ import { emitUnlessSuspended } from '../engine/events.js';
  * time drops an egg where it stands, to be picked up like anything else lying
  * in the grass. Cows and sheep are milked and sheared directly, which is what
  * you'd expect. All of them need feeding to make any progress at all.
+ *
+ * `eats` and `drinks` are how fast it gets through a trough, as a multiple of
+ * the going rate — 1 being one helping per FOOD_DURATION ticks. They're two
+ * numbers rather than one upkeep figure because there's no reason a hungry
+ * animal should be a thirsty one, and each species that gets added wants to be
+ * able to say so. Both default to 1 if a species doesn't mention them.
  */
 export const ANIMALS = {
   chicken: {
     name: 'Chicken', price: 120, row: 2,
     produces: 'egg', produceTicks: 1200,          // 20 min
+    eats: 1, drinks: 1,
     laysOnGround: true,
   },
   cow: {
     name: 'Cow', price: 500, row: 1,
     produces: 'milk', produceTicks: 1800,         // 30 min
+    eats: 1, drinks: 1,
   },
   // The overnight animal. Wool is slower than milk and worth more, which makes
   // a sheep the better buy for someone who checks in twice a day and the worse
@@ -51,12 +59,18 @@ export const ANIMALS = {
   sheep: {
     name: 'Sheep', price: 800, row: 0,
     produces: 'wool', produceTicks: 4500,         // 75 min
+    eats: 1, drinks: 1,
   },
   // A better layer than a hen, and the only animal that can cross water. It
   // spends its day on the pond if there is one, and comes ashore to lay.
+  // A hungry bird. It lays a fifth faster than a hen, and eats half again as
+  // much to do it — so a duck is the better animal per barn slot and the worse
+  // one per trough refill, which is a choice rather than a strict upgrade. It
+  // was the latter before it ate anything extra.
   duck: {
     name: 'Duck', price: 200, row: 3,
     produces: 'egg', produceTicks: 1000,          // ~17 min
+    eats: 1.5, drinks: 1,
     laysOnGround: true,
     swims: true,
   },
@@ -126,9 +140,31 @@ export function affectionLevel(a) {
 /**
  * How fast food and water drain. A fully loved animal eats and drinks at 60%
  * of the going rate, which is worth roughly one extra trough refill a day.
+ *
+ * This is the affection discount alone — the species' own appetite multiplies
+ * it, see foodRate and waterRate.
  */
 export function upkeepRate(a) {
   return 1 - 0.4 * affectionLevel(a);
+}
+
+/**
+ * What one animal eats and drinks per tick.
+ *
+ * Food and water are separate numbers per species rather than one shared
+ * upkeep figure, because there's no reason an animal that eats a lot should
+ * drink a lot to match — a duck is hungry but no thirstier than a hen, and the
+ * next animal along may well be the other way round. Both default to 1, which
+ * is one helping per FOOD_DURATION (or WATER_DURATION) ticks, so a species that
+ * says nothing about its appetite behaves exactly as everything did before
+ * appetites existed.
+ */
+export function foodRate(a) {
+  return upkeepRate(a) * (animalDef(a.type)?.eats ?? 1);
+}
+
+export function waterRate(a) {
+  return upkeepRate(a) * (animalDef(a.type)?.drinks ?? 1);
 }
 
 /** How fast it works toward its next egg or milking: up to half as long again. */
@@ -381,11 +417,10 @@ export function updateAnimals(state) {
     a.px = a.x;
     a.py = a.y;
 
-    // Fractional drain, so affection can make upkeep genuinely cheaper without
-    // needing a separate clock. Stored rounded to keep saves tidy.
-    const rate = upkeepRate(a);
-    a.foodDebt = (a.foodDebt || 0) + rate;
-    a.waterDebt = (a.waterDebt || 0) + rate;
+    // Fractional drain, so affection and appetite can move upkeep by a fraction
+    // without needing a separate clock. Stored rounded to keep saves tidy.
+    a.foodDebt = (a.foodDebt || 0) + foodRate(a);
+    a.waterDebt = (a.waterDebt || 0) + waterRate(a);
     while (a.foodDebt >= 1) { a.foodDebt -= 1; a.food = Math.max(0, a.food - 1); }
     while (a.waterDebt >= 1) { a.waterDebt -= 1; a.water = Math.max(0, a.water - 1); }
 
