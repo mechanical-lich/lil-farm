@@ -17,6 +17,7 @@ import {
 import { drawBuilding } from './render/tilerender.js';
 import { flowerCanvas } from './render/flowerart.js';
 import { canPlantAt } from './sim/flowers.js';
+import { cropAt, isRipe } from './sim/crops.js';
 import { readSeedId, seedName } from './sim/flowergenes.js';
 import { drawAnimalSprite, drawHandSprite } from './render/entityrender.js';
 import { drawObjectSprite } from './render/tilerender.js';
@@ -682,7 +683,17 @@ function noWorkReason(state, tool, toolbar, x, y) {
     }
     case 'till': return 'Till needs clear, empty ground';
     case 'plant': return 'Plant on tilled soil — and pick a seed you own';
-    case 'water': return 'Only tilled soil can be watered';
+    case 'water': {
+      // Since watering skips tiles it would do nothing to, the commonest
+      // ignored tap is now a bed that simply doesn't need it — saying "only
+      // tilled soil" there would be answering a question nobody asked.
+      const crop = cropAt(state, x, y);
+      if (crop && !crop.dead) {
+        if (isRipe(crop)) return 'That one is ready to pick, not water';
+        if (crop.watered) return 'That bed is already growing nicely';
+      }
+      return 'Only tilled soil can be watered';
+    }
     case 'harvest': return 'Nothing ready to harvest there';
     case 'clear': return 'Nothing to clear there (harvest a bed before clearing it)';
     default: return 'Nothing to do there';

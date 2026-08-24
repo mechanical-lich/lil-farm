@@ -370,6 +370,23 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
       // Watering bare tilled soil is allowed: the player can prepare a bed.
       if (!isTilled(ground)) return null;
       if (crop && crop.dead) return null;
+
+      // Tiles a watering can would do nothing to are skipped, so a drag across
+      // a field queues only the work that's actually left. Without this a
+      // watering pass costs the same on a field that's half picked as it did
+      // on the day it was sown, and the player pays for the whole bed every
+      // time to reach the few tiles that still need it.
+      //
+      // A ripe crop has finished growing — water is no use to it. And a crop
+      // that's already growing on damp soil has everything it needs; watering
+      // is a one-way latch (see updateCrops), so there's nothing to top up.
+      //
+      // Bare wet soil is deliberately *not* skipped: re-wetting it extends the
+      // window in which a seed planted there starts out watered, which is the
+      // whole water-then-plant workflow.
+      if (crop && isRipe(crop)) return null;
+      if (crop && crop.watered && ground === GROUND.TILLED_WET) return null;
+
       return { type: 'water', x, y, work: WORK.water, detail: crop ? cropDef(crop.type).name : 'soil' };
     }
 

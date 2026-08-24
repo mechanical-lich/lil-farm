@@ -848,6 +848,107 @@ test('watering is only needed once, even after the soil dries out', () => {
   assert(crop.age > 0, 'and it really is still growing');
 });
 
+test('planting into damp soil starts the crop growing straight away', () => {
+  // The two-pass workflow: water the bed, then plant into it. Each seed grows
+  // from the moment it goes in, rather than waiting for a third pass.
+  const { s, x, y } = farmWithBed();
+  waterTile(s, x, y);
+  const crop = plantCrop(s, x, y, 'carrot');
+
+  assert(crop.watered, 'the water was already there');
+  assert(!isStalled(crop), 'so it is not waiting for anything');
+
+  for (let i = 0; i < 50; i++) tick(s);
+  assert(cropAt(s, x, y).age > 0, 'and it really is growing');
+});
+
+test('planting into dry soil still waits for the can, as it always did', () => {
+  const { s, x, y } = farmWithBed();
+  const crop = plantCrop(s, x, y, 'carrot');
+
+  assert(!crop.watered, 'dry soil plants a dry seed');
+  assert(isStalled(crop), 'which reports itself as waiting');
+
+  for (let i = 0; i < 200; i++) tick(s);
+  assertEqual(cropAt(s, x, y).age, 0, 'and it has not aged');
+
+  waterTile(s, x, y);
+  for (let i = 0; i < 50; i++) tick(s);
+  assert(cropAt(s, x, y).age > 0, 'watering later starts it, exactly as before');
+});
+
+test('soil that has dried out plants a dry seed again', () => {
+  const { s, x, y } = farmWithBed();
+  waterTile(s, x, y);
+  for (let i = 0; i < SOIL_DRY_TICKS + 5; i++) tick(s);
+  assertEqual(s.grid.getGround(x, y), GROUND.TILLED, 'the bed dried out');
+
+  assert(!plantCrop(s, x, y, 'carrot').watered, 'so there is no water to inherit');
+});
+
+test('watering skips beds that would gain nothing by it', () => {
+  const { s, x, y } = farmWithBed();
+
+  assert(taskForTile(s, x, y, 'water') !== null, 'a dry bed wants watering');
+  waterTile(s, x, y);
+  plantCrop(s, x, y, 'carrot');
+
+  assertEqual(taskForTile(s, x, y, 'water'), null, 'a growing crop on damp soil does not');
+
+  // Ripe: finished growing, so water is no use to it whatever the soil is like.
+  const ripe = farmWithBed(717);
+  plantCrop(ripe.s, ripe.x, ripe.y, 'carrot');
+  waterTile(ripe.s, ripe.x, ripe.y);
+  for (let i = 0; i < CROPS.carrot.growTicks + 5; i++) tick(ripe.s);
+  assert(isRipe(cropAt(ripe.s, ripe.x, ripe.y)), 'it ripened');
+  assertEqual(taskForTile(ripe.s, ripe.x, ripe.y, 'water'), null, 'and is not worth watering');
+});
+
+test('watering still reaches the beds that do need it', () => {
+  // The other half of skipping: the tiles that matter must survive the filter,
+  // or a drag across a field would queue nothing at all.
+  const { s, x, y } = farmWithBed();
+  plantCrop(s, x, y, 'carrot');          // dry soil, stalled seed
+  assert(taskForTile(s, x, y, 'water') !== null, 'a stalled seed still wants water');
+
+  // Bare wet soil is deliberately still waterable: topping it up extends the
+  // window in which planting starts a crop already watered.
+  const bed = farmWithBed(718);
+  waterTile(bed.s, bed.x, bed.y);
+  assert(taskForTile(bed.s, bed.x, bed.y, 'water') !== null, 'a damp empty bed can be topped up');
+});
+
+test('a watering drag over a ripening field shortens as it ripens', () => {
+  // The point of the whole change, measured: the same drag costs less work as
+  // more of the field comes good.
+  const s = farmWithMaterials(7788);
+  const y = s.farmer.y + 2;
+  const xs = [];
+  for (let i = 0; i < 8; i++) {
+    const x = s.farmer.x - 4 + i;
+    s.grid.setGround(x, y, GROUND.TILLED);
+    xs.push(x);
+  }
+  const waterable = () => xs.filter((x) => taskForTile(s, x, y, 'water') !== null).length;
+
+  assertEqual(waterable(), 8, 'a fresh bed needs the lot');
+
+  for (const x of xs) { waterTile(s, x, y); plantCrop(s, x, y, 'carrot'); }
+  assertEqual(waterable(), 0, 'once planted into damp soil, none of it needs a second pass');
+
+  for (let i = 0; i < CROPS.carrot.growTicks + 5; i++) tick(s);
+  assertEqual(waterable(), 0, 'and a ripe field needs none either');
+});
+
+test('the short crops are slow enough for a game you check on twice a day', () => {
+  // The frame in the balance note is a game checked on twice a day. A carrot
+  // that ripens in four minutes turns a field of any size into a treadmill.
+  assert(CROPS.carrot.growTicks >= 480, 'carrot is not a four-minute crop');
+  assert(CROPS.wheat.growTicks >= 600, 'nor is wheat a five-minute one');
+  assert(CROPS.carrot.growTicks < CROPS.corn.growTicks
+    || CROPS.carrot.growTicks < CROPS.tomato.growTicks, 'but they are still the quick ones');
+});
+
 test('watering darkens the soil and it dries back on schedule', () => {
   const { s, x, y } = farmWithBed();
   waterTile(s, x, y);

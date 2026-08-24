@@ -32,8 +32,8 @@ import { emitUnlessSuspended } from '../engine/events.js';
  * while profit per planting climbs from ~17 to ~180.
  */
 export const CROPS = {
-  carrot:   { name: 'Carrot',   growTicks: 240,  seedCost: 8,  yield: [2, 3] },   // 4 min
-  wheat:    { name: 'Wheat',    growTicks: 300,  seedCost: 6,  yield: [2, 3] },   // 5 min
+  carrot:   { name: 'Carrot',   growTicks: 480,  seedCost: 8,  yield: [2, 3] },   // 8 min
+  wheat:    { name: 'Wheat',    growTicks: 600,  seedCost: 6,  yield: [2, 3] },   // 10 min
   corn:     { name: 'Corn',     growTicks: 600,  seedCost: 14, yield: [3, 4] },   // 10 min
   tomato:   { name: 'Tomato',   growTicks: 1200, seedCost: 20, yield: [3, 5] },   // 20 min
   cabbage:  { name: 'Cabbage',  growTicks: 2400, seedCost: 30, yield: [3, 4] },   // 40 min
@@ -70,10 +70,20 @@ export function plantCrop(state, x, y, type) {
   const def = cropDef(type);
   if (!def) return null;
 
+  // A seed going into damp soil is already watered — the water is right there.
+  //
+  // This is what collapses planting from three passes to two. It used to be
+  // till, plant, then water, with the watering pass trailing a field's length
+  // behind the planting one and every seed sitting stalled until it arrived.
+  // Now the player waters the bed and plants into it, and each seed starts
+  // growing the moment it goes in, tile by tile. Planting into dry soil still
+  // works exactly as before — it just waits for the can, as it always did.
+  const wet = state.grid.getGround(x, y) === GROUND.TILLED_WET;
+
   const crop = {
     type,
     age: 0,
-    watered: false,   // gates growth entirely; see updateCrops
+    watered: wet,     // gates growth entirely; see updateCrops
     ripeAt: null,     // tick the crop finished growing, for spoilage
     dead: false,
   };
