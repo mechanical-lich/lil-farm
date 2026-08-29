@@ -123,6 +123,10 @@ Crosses are slow on purpose — around three an hour in a full bed, one an hour 
 
 The total ceiling on flowers sits well above the wild one. Wild flowers only ever fill a little of the valley, and the gap underneath is the room a garden has to keep crossing in — without it, a farm that had grown a few wild flowers would find its beds silently sterile.
 
+**The two ceilings count different things**, and that is what makes the gap real. The wild one counts only flowers that grew there on their own; the total counts every flower on the farm. They both used to count the total, which meant a hand-planted garden ate the wild allowance and the valley stopped spawning altogether — measured at zero new wild flowers over a full day of game time once nine daisies were planted on a starting farm. The player most interested in new colours was the one who stopped being sent any.
+
+Wild spawning still respects the total ceiling, so the valley takes its own allowance without ever crowding the garden past the point where breeding stops. Flowers in farms saved before origins were recorded are classified by their colour on load: the wild ring is 24 evenly spaced hues at one fixed saturation with all three tones equal, and breeding lands off that grid almost every time.
+
 **The journal is two halves.** The wheels are the collection — each kind showing how many of its 24 colours have been seen, with the unfound ones as question marks. The drawer below is the working stock, grouped by flower and sorted round the wheel, each packet showing the colour it will actually grow. Planting starts there: the packet's button steps the journal aside, sites the flower on the map with a ghost in its real colour, and brings the drawer back exactly as it was left — so filling a border with one colour is a few taps rather than a trip through the menus for each.
 
 ## The edge of the view

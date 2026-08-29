@@ -118,6 +118,21 @@ const migrations = {
     data.version = 9;
     return data;
   },
+
+  // Flowers record where they came from now, and the wild spawner's ceiling
+  // counts only the valley's own. Everything already in the ground is treated
+  // as the player's, which is the safe way round: the alternative is guessing
+  // from the genome, and a guess that calls a hand-planted flower wild eats the
+  // valley's allowance for ever with no way for the player to see why.
+  //
+  // What it costs is a one-off flush of wild flowers on an existing farm, as
+  // the valley finds its allowance unspent. That is bounded by the total
+  // ceiling, self-limiting, and looks like a good spring rather than a bug.
+  9: (data) => {
+    for (const flower of Object.values(data.flowers || {})) flower.wild = false;
+    data.version = 10;
+    return data;
+  },
 };
 
 /** The swing the old `split` flag applied to the middle tone. */

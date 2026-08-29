@@ -76,7 +76,7 @@ import {
 } from '../js/sim/flowergenes.js';
 import {
   plant as plantFlower, pick as pickFlower, flowerAt, canBloom, canPlantAt, pickedCount,
-  hasFound, seedGroups, FLOWER_INTERVAL, FLOWER_MAX_FRACTION,
+  hasFound, seedGroups, FLOWER_INTERVAL, FLOWER_MAX_FRACTION, wildCount,
   breedAt, totalCap, BREED_INTERVAL, water as waterFlower, isWatered, FLOWER_WET_TICKS,
 } from '../js/sim/flowers.js';
 import { palette, KEYS, flowerCanvas, cacheSize, CACHE_LIMIT } from '../js/render/flowerart.js';
@@ -1632,6 +1632,101 @@ test('flowers grow only on open ground you own, and stop at a cap', () => {
   assert(Object.keys(s.flowers).length > 0, 'but some did grow');
 });
 
+test("a player's garden does not stop the valley reseeding itself", () => {
+  // The bug this split fixes: both ceilings used to count every flower, so
+  // hand-planting up to the wild allowance switched wild spawning off for good
+  // — measured at zero new wild flowers across 400 spawn windows.
+  const s = weedableFarm(9440);
+  s.flowers = {};
+  const cap = Math.max(1, Math.floor(s.grid.owned.size * PLOT * PLOT * FLOWER_MAX_FRACTION));
+
+  let planted = 0;
+  for (let y = 0; y < s.grid.h && planted < cap; y++) {
+    for (let x = 0; x < s.grid.w && planted < cap; x++) {
+      if (!canPlantAt(s, x, y)) continue;
+      plantFlower(s, x, y, 'daisy', makeGenome(120));
+      planted++;
+    }
+  }
+  assertEqual(planted, cap, 'a garden the size of the whole wild allowance');
+  assertEqual(wildCount(s), 0, 'and none of it grew there on its own');
+
+  for (let i = 0; i < FLOWER_INTERVAL * 400; i++) tick(s);
+
+  assertEqual(wildCount(s), cap, 'the valley still grew its own full share');
+  assert(Object.keys(s.flowers).length > planted, 'on top of the garden, not instead of it');
+});
+
+test('the valley still keeps to its own allowance', () => {
+  const s = weedableFarm(9441);
+  s.flowers = {};
+  const cap = Math.max(1, Math.floor(s.grid.owned.size * PLOT * PLOT * FLOWER_MAX_FRACTION));
+
+  for (let i = 0; i < FLOWER_INTERVAL * 400; i++) tick(s);
+
+  assertEqual(wildCount(s), cap, 'it fills its share and stops');
+  assert(wildCount(s) > 0, 'but it really does grow some');
+});
+
+test('the valley never crowds the garden past the total ceiling', () => {
+  // Independent must not mean unbounded: if wild spawning could push a farm
+  // past totalCap it would silently stop the player's own beds from crossing,
+  // which is the very failure the two ceilings exist to avoid.
+  const s = weedableFarm(9442);
+  s.flowers = {};
+  const total = totalCap(s);
+
+  let planted = 0;
+  for (let y = 0; y < s.grid.h && planted < total - 1; y++) {
+    for (let x = 0; x < s.grid.w && planted < total - 1; x++) {
+      if (!canPlantAt(s, x, y)) continue;
+      plantFlower(s, x, y, 'daisy', makeGenome(120));
+      planted++;
+    }
+  }
+
+  for (let i = 0; i < FLOWER_INTERVAL * 400; i++) tick(s);
+
+  assertEqual(Object.keys(s.flowers).length, total, 'it took the one free slot');
+  assert(Object.keys(s.flowers).length <= total, 'and not a flower more');
+});
+
+test('where a flower came from is recorded, and planting is never wild', () => {
+  const s = weedableFarm(9443);
+  s.flowers = {};
+  const at = { x: s.farmer.x + 2, y: s.farmer.y + 2 };
+
+  // A wild *genome* planted by the player is still the player's garden: seeds
+  // picked off a wild flower and put back in are not the valley reseeding.
+  plantFlower(s, at.x, at.y, 'daisy', makeGenome(120));
+  assert(!isCross(flowerAt(s, at.x, at.y).genome), 'the colour is a wild one');
+  assertEqual(wildCount(s), 0, 'but the flower is not');
+});
+
+test('flowers in an older save all count as the player\'s', () => {
+  // Deliberately not guessed from the genome. A guess that calls a hand-planted
+  // flower wild would eat the valley's allowance for good, with nothing on
+  // screen to explain why the wild flowers stopped. Counting them all as the
+  // player's errs the other way: the valley finds its allowance unspent and has
+  // one good spring, which is bounded by the total ceiling and self-correcting.
+  const s = weedableFarm(9444);
+  s.flowers = {};
+  const wildAt = { x: s.farmer.x + 2, y: s.farmer.y + 2 };
+  const bredAt = { x: s.farmer.x + 3, y: s.farmer.y + 2 };
+  plantFlower(s, wildAt.x, wildAt.y, 'daisy', makeGenome(120));       // on the wild ring
+  plantFlower(s, bredAt.x, bredAt.y, 'daisy', makeGenome(127, 83));   // off it
+
+  // Exactly what a save written before origins existed looks like.
+  const data = JSON.parse(JSON.stringify(serialize(s)));
+  data.version = 9;
+  for (const f of Object.values(data.flowers)) delete f.wild;
+
+  const back = deserialize(migrate(data));
+  assertEqual(back.version, SAVE_VERSION, 'brought up to date');
+  assertEqual(back.flowers[`${wildAt.x},${wildAt.y}`].wild, false, 'a wild colour is still the player\'s');
+  assertEqual(back.flowers[`${bredAt.x},${bredAt.y}`].wild, false, 'and so is a bred one');
+  assertEqual(wildCount(back), 0, 'the valley has nothing to its name yet');
+});
 test('flowers and their journal survive a save round trip', () => {
   const s = weedableFarm(9404);
   plantFlower(s, s.farmer.x + 1, s.farmer.y, 'phlox', makeGenome(300, 85, true));

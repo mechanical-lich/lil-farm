@@ -58,9 +58,16 @@ export const BREED_CHANCE = 0.35;
  * Ceiling on flowers of every origin, as a fraction of the land you own.
  *
  * Higher than the wild one, and deliberately so: wild flowers only ever fill a
- * little of the valley, which leaves room underneath the ceiling for a garden
+ * little of the valley, which leaves room underneath this ceiling for a garden
  * the player made to keep crossing. Without the gap a farm that had grown a few
  * wild flowers would find its beds silently sterile.
+ *
+ * The two ceilings count different things, and that is the point. This one
+ * counts every flower on the farm; FLOWER_MAX_FRACTION counts only the ones
+ * that grew there on their own. They both used to count the total, which made
+ * the sentence above a description of what was intended rather than of what
+ * happened: a hand-planted garden ate the wild allowance and the valley stopped
+ * spawning entirely.
  */
 export const FLOWER_TOTAL_FRACTION = 0.018;
 
@@ -77,8 +84,21 @@ export function updateFlowers(state) {
   const plots = Array.from(state.grid.owned);
   if (plots.length === 0) return;
 
+  // Only the valley's own flowers count against this. Counting every flower
+  // meant a player who planted a garden switched off wild spawning for good:
+  // nine hand-planted daisies on a starting farm and the valley never grew
+  // another thing, which is precisely backwards — the player most interested in
+  // new colours was the one who stopped being sent any.
   const cap = Math.max(1, Math.floor(plots.length * PLOT * PLOT * FLOWER_MAX_FRACTION));
-  if (Object.keys(state.flowers || {}).length >= cap) return;
+  if (wildCount(state) >= cap) return;
+
+  // And never past the ceiling on greenery of every origin. Splitting the wild
+  // quota out of the total made the valley's spawning independent of the
+  // player's garden, which is the point — but independent must not mean
+  // unbounded, or the valley itself could push a farm past totalCap and
+  // silently stop the player's beds from crossing. The valley gets its own
+  // allowance, not the right to spend everyone's.
+  if (Object.keys(state.flowers || {}).length >= totalCap(state)) return;
 
   for (let i = 0; i < TRIES; i++) {
     const { px, py } = plotCoords(plots[state.rng.int(plots.length)], state.grid.w);
@@ -87,9 +107,23 @@ export function updateFlowers(state) {
     if (!canBloom(state, x, y)) continue;
 
     const kind = FLOWER_KINDS[state.rng.int(FLOWER_KINDS.length)];
-    plant(state, x, y, kind, rollWildGenome(state.rng));
+    plant(state, x, y, kind, rollWildGenome(state.rng), { wild: true });
     return;
   }
+}
+
+/**
+ * How many of the flowers standing about grew there on their own.
+ *
+ * Kept separate from the total on purpose. The two ceilings measure different
+ * things: this one is how much of the valley reseeds itself, and totalCap is
+ * how much greenery the farm carries all told. A garden fills the second
+ * without touching the first.
+ */
+export function wildCount(state) {
+  let n = 0;
+  for (const f of Object.values(state.flowers || {})) if (f.wild) n++;
+  return n;
 }
 
 /**
@@ -156,9 +190,18 @@ export function reconcileFlowers(state) {
 }
 
 /** Puts a flower in the world. Used by spawning, by planting, and by breeding. */
-export function plant(state, x, y, kind, genome) {
+/**
+ * Puts a flower on a tile.
+ *
+ * `wild` records where it came from, and only the valley's own spawner sets it.
+ * A flower the player planted is theirs even when it carries a wild genome —
+ * seeds picked off a wild flower and put back in the ground are a garden, not
+ * the valley reseeding itself. See wildCount for why the distinction is load
+ * bearing.
+ */
+export function plant(state, x, y, kind, genome, { wild = false } = {}) {
   state.flowers = state.flowers || {};
-  state.flowers[`${x},${y}`] = { kind, hues: [...genome.hues], sat: genome.sat };
+  state.flowers[`${x},${y}`] = { kind, hues: [...genome.hues], sat: genome.sat, wild };
   state.grid.setObject(x, y, OBJ.FLOWER);
   emitUnlessSuspended('flower:bloomed', { x, y, kind });
   return state.flowers[`${x},${y}`];
