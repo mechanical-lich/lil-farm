@@ -16,6 +16,8 @@ import { countItem, removeItem, itemName } from './inventory.js';
 import { cropAt } from './crops.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 import { emptyCrate } from './crates.js';
+import { HAY_HELPINGS } from './hay.js';
+import { toolAt, placeTool, removeTool } from './tools.js';
 
 /**
  * size is [width, height] in tiles. Troughs are the first two-tile structures
@@ -60,6 +62,57 @@ export const BUILDABLES = {
   feedTrough: {
     name: 'Feed trough', obj: OBJ.TROUGH_FOOD, cost: { wood: 8 }, work: 14,
     size: [2, 1], trough: 'food', hint: 'Two tiles wide',
+  },
+  // Paid for in wheat, because that is what it is. It gives the crop a use
+  // besides selling, and the price is deliberately poor next to a feed trough
+  // (3 crops for 24 helpings): a bale is convenience and scenery, not a cheaper
+  // way to feed a farm.
+  hayBale: {
+    name: 'Hay bale', obj: OBJ.HAY, cost: { wheat: 4 }, work: 8, size: [1, 1],
+    hint: 'Horses eat from it until it is gone',
+  },
+  // Ornaments. They cost real materials and do nothing at all, which is the
+  // point of them — the farm should have things on it that are not machines.
+  well: {
+    name: 'Well', obj: OBJ.WELL, cost: { stone: 20 }, work: 20, size: [1, 1],
+    hint: 'Just for the look of it',
+  },
+  wheelbarrow: {
+    name: 'Wheelbarrow', obj: OBJ.WHEELBARROW, cost: { wood: 6 }, work: 6, size: [1, 1],
+    hint: 'Just for the look of it',
+  },
+  // Cooperage, so both are paid for in boards. The bucket finally gives
+  // OBJ.BUCKET something that places it — it has had a definition and a draw
+  // case since the first commit and has never once appeared on a farm.
+  barrel: {
+    name: 'Barrel', obj: OBJ.BARREL, cost: { wood: 8 }, work: 6, size: [1, 1],
+    hint: 'Just for the look of it',
+  },
+  bucket: {
+    name: 'Bucket', obj: OBJ.BUCKET, cost: { wood: 4 }, work: 4, size: [1, 1],
+    hint: 'Just for the look of it',
+  },
+  // Tools, which hang on whatever is already there — see sim/tools.js. They
+  // are the only buildables that don't own their tile, which is what `overlay`
+  // means: no object mark, no blocking, and a placement check that lets them
+  // share a square with a barn wall or a fence post. Priced in stone as well as
+  // wood because they are half metal, which also gives stone something to do
+  // besides roads.
+  wateringCan: {
+    name: 'Watering can', overlay: true, cost: { stone: 3 }, work: 4, size: [1, 1],
+    hint: 'Hangs on anything, even a wall',
+  },
+  shovel: {
+    name: 'Shovel', overlay: true, cost: { wood: 2, stone: 2 }, work: 4, size: [1, 1],
+    hint: 'Hangs on anything, even a wall',
+  },
+  axe: {
+    name: 'Axe', overlay: true, cost: { wood: 2, stone: 3 }, work: 4, size: [1, 1],
+    hint: 'Hangs on anything, even a wall',
+  },
+  scythe: {
+    name: 'Scythe', overlay: true, cost: { wood: 3, stone: 3 }, work: 4, size: [1, 1],
+    hint: 'Hangs on anything, even a wall',
   },
   // Wood only: a crate is boards, and it wants to be something the player puts
   // down freely wherever the hands are walking, not a considered purchase.
@@ -198,6 +251,19 @@ export function placementProblem(state, kind, x, y, size) {
   if (!def) return 'unknown structure';
 
   const reserved = reservedTiles(state);
+
+  // An overlay doesn't own its tile, so nearly every objection below is about
+  // somebody else's business. It only needs its own land, dry ground, and a
+  // tile that isn't already holding one. Sharing with a barn, a fence or a
+  // crate is the entire point of it.
+  if (def.overlay) {
+    if (!state.grid.inBounds(x, y)) return 'off the edge of the world';
+    if (!state.grid.isOwned(x, y)) return "you don't own that land";
+    if (reserved.has(`${x},${y}`)) return 'something else is queued there';
+    if (isWater(state.grid.getGround(x, y))) return 'that would be in the water';
+    if (toolAt(state, x, y)) return 'something is hanging there already';
+    return null;
+  }
   for (const t of footprint(kind, x, y, size)) {
     if (!state.grid.inBounds(t.x, t.y)) return 'off the edge of the world';
     // A barn may not straddle the boundary onto land you don't own.
@@ -409,6 +475,12 @@ export function placeStructure(state, kind, x, y, size) {
     state.crates = state.crates || {};
     state.crates[`${x},${y}`] = { item: null, qty: 0 };
   }
+  if (def.overlay) placeTool(state, x, y, kind);
+  // A bale arrives full, and is gone once it has been eaten down.
+  if (def.obj === OBJ.HAY) {
+    state.hay = state.hay || {};
+    state.hay[`${x},${y}`] = { left: HAY_HELPINGS };
+  }
   // Same idea one size up: the building record is the source of truth, the grid
   // marks are just an index so collision and taps keep working.
   if (def.building) {
@@ -512,6 +584,12 @@ export function demolishWork(kind, size) {
 export function structureAt(state, x, y) {
   if (!state.grid.inBounds(x, y)) return null;
 
+  // A hung tool sits on top of whatever it shares its tile with, so it is what
+  // the player is pointing at and what a clear takes down first. Two taps to
+  // clear a tool off a fence, which is the order you see them in.
+  const tool = toolAt(state, x, y);
+  if (tool) return { kind: tool, x, y };
+
   // Buildings first: their footprint tiles all carry the same generic marker,
   // so only the record knows which building a tile belongs to.
   const building = buildingAt(state, x, y);
@@ -565,6 +643,8 @@ export function demolish(state, x, y) {
     contents = emptyCrate(state, found.x, found.y);
     delete state.crates?.[`${found.x},${found.y}`];
   }
+  if (def.obj === OBJ.HAY) delete state.hay?.[`${found.x},${found.y}`];
+  if (def.overlay) removeTool(state, found.x, found.y);
   if (def.building) {
     state.buildings = state.buildings.filter((b) => !(b.x === found.x && b.y === found.y));
   }

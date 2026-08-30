@@ -37,12 +37,16 @@ export const OBJ = {
   GATE: 8,
   TROUGH_WATER: 9,
   TROUGH_FOOD: 10,
-  BARREL: 11,
+  BUCKET: 11,
   BUILDING: 12,
   EGG: 13,
   MUSHROOM: 14,
   FLOWER: 15,
   CRATE: 16,
+  HAY: 17,
+  WELL: 18,
+  WHEELBARROW: 19,
+  BARREL: 20,
 };
 
 export const OBJ_DEFS = {
@@ -58,7 +62,7 @@ export const OBJ_DEFS = {
   [OBJ.GATE]: { name: 'gate', blocks: false, blocksAnimals: true },
   [OBJ.TROUGH_WATER]: { name: 'water trough', blocks: true },
   [OBJ.TROUGH_FOOD]: { name: 'feed trough', blocks: true },
-  [OBJ.BARREL]: { name: 'barrel', blocks: true },
+  [OBJ.BUCKET]: { name: 'bucket', blocks: true },
   // Every tile of a multi-tile building's footprint carries this marker so
   // walkability and tap handling work without knowing about buildings. The
   // building itself lives in state.buildings.
@@ -90,6 +94,16 @@ export const OBJ_DEFS = {
   // one byte per tile and a crate has both a kind of goods and a count. It
   // blocks, so a row of them reads as a wall you have to path around.
   [OBJ.CRATE]: { name: 'crate', blocks: true },
+  // A bale of hay a horse eats from. How much is left lives in state.hay,
+  // keyed by tile — same reason as a crate: the grid has one byte per tile.
+  // It blocks, so it's eaten from alongside the way a trough is.
+  [OBJ.HAY]: { name: 'hay bale', blocks: true },
+  // Ornaments. `tall` on the well is what draws its roof into the row above,
+  // exactly as a tree's canopy is drawn — the footprint is the one tile it
+  // stands on, and the roof overhangs something the farmer can still walk past.
+  [OBJ.WELL]: { name: 'well', blocks: true, tall: true },
+  [OBJ.WHEELBARROW]: { name: 'wheelbarrow', blocks: true },
+  [OBJ.BARREL]: { name: 'barrel', blocks: true },
 };
 
 export function objDef(id) { return OBJ_DEFS[id] || OBJ_DEFS[OBJ.NONE]; }

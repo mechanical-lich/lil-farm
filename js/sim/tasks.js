@@ -104,6 +104,12 @@ export function followTargets(state) {
  * @returns {object} items gained, in the same shape the task pipeline reports
  */
 export function clearBuildSite(state, task) {
+  // An overlay hangs on what is already there, so there is no site to clear.
+  // Without this a scythe hung on a well demolished the well on its way up —
+  // and would have foraged a mushroom or picked a flower it was hung over,
+  // which is the same bug wearing a different hat.
+  if (buildDef(task.buildKind)?.overlay) return {};
+
   const gained = {};
   const add = (items) => {
     for (const [id, n] of Object.entries(items || {})) gained[id] = (gained[id] || 0) + n;

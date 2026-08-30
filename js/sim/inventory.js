@@ -36,6 +36,9 @@ export const ITEMS = {
   eggplant: { name: 'Eggplant', sell: 45, group: 'crop' },
   egg: { name: 'Egg', sell: 25, group: 'produce' },
   milk: { name: 'Milk', sell: 60, group: 'produce' },
+  // A goat gives less than a cow and gives it sooner, so a goat pays for itself
+  // quicker and a cow earns more once it has. See the note in animals.js.
+  goat_milk: { name: "Goat's milk", sell: 45, group: 'produce' },
   wool: { name: 'Wool', sell: 100, group: 'produce' },
   // Foraged. Four kinds rather than sixteen: the journal remembers every
   // colour, the bag only needs to know what it's worth.

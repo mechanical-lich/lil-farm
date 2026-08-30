@@ -22,7 +22,7 @@ import {
 import {
   MUSHROOMS, MUSHROOMS_BY_ID, SPECIES, MUSHROOM_MAX_FRACTION, sprout, forage,
   mushroomAt, rollSpecies, journalCount, journalFound, journalRows,
-  canSprout as canSproutShroom, COLOURS_PER_SPECIES, rollColour, isRainbow,
+  canSprout as canSproutShroom, COLOURS_PER_SPECIES, rollColour, isRainbow, mushroomDef,
 } from '../js/sim/mushrooms.js';
 import {
   addTask, cancelTask, prioritizeTask, taskForTile, tillRow, queueTillRow, clearBuildSite,
@@ -35,7 +35,7 @@ import {
 import {
   ROTATION_TICKS, STAPLE_SEEDS, ROTATING_COUNT, ROTATING_TIERS, stockedSeedCrops, buyList, sellList,
   buy, sell, sellAll, buyAnimal, canBuyAnimal, canPlaceAnimal, MATERIALS,
-  hireHand, canHireHand, handRow, sellGroups, groupValue,
+  hireHand, canHireHand, handRow, sellGroups, groupValue, animalList,
 } from '../js/sim/shop.js';
 import { ITEMS, ITEM_GROUPS, itemGroup, countItem } from '../js/sim/inventory.js';
 import {
@@ -45,11 +45,13 @@ import {
   CRATE_CAPACITY, crateAt, crateAccepts, crateRoom, depositInto, emptyCrate,
   findCrateFor, reconcileCrates,
 } from '../js/sim/crates.js';
+import { HAY_HELPINGS, hayAt, hayLeft, reconcileHay } from '../js/sim/hay.js';
+import { toolAt, toolList } from '../js/sim/tools.js';
 import { DECOR, decorList, salvageValue, canPlaceDecor, placeDecor } from '../js/sim/decor.js';
 import { movableAt, canMoveTo, moveTo } from '../js/sim/moving.js';
 import {
   ANIMALS, TROUGH_CAPACITY, FEED_COST, FOOD_DURATION, WATER_DURATION, SEEK_THRESHOLD,
-  foodRate, waterRate,
+  foodRate, waterRate, canGraze,
   makeAnimal, collectFrom, isNeglected, fillWaterTrough, fillFeedTrough, pickFeed, animalDef,
   petAnimal, pickEmote, currentEmote, animalAt, isReady, PRODUCE_CAP,
   setAnimalVariants, animalVariantCount, variantOf, isThirsty, SWIMMERS, canLayAt,
@@ -63,9 +65,9 @@ import {
   barnCost, barnWork, barnCapacity, snapBarn, reservedTiles, refundFor, sizeOf,
   costLabel, placementProblem, reconcileBuildings,
 } from '../js/sim/build.js';
-import { TOWN, WATER, RIVER } from '../js/render/sprites.js';
+import { SPRITES, TOWN, WATER, RIVER } from '../js/render/sprites.js';
 import {
-  TRADED, PRICE_FLOOR, PRICE_CEILING, GLUT_RATIO, TICKS_PER_DAY, newMarket, priceOf,
+  TRADED, BASE_SHARE, PRICE_FLOOR, PRICE_CEILING, GLUT_RATIO, TICKS_PER_DAY, newMarket, priceOf,
   priceMultiplier, recordSale, updateMarket, basePrice, marketRows, multiplierFor,
   glutRatio,
 } from '../js/sim/market.js';
@@ -1148,7 +1150,9 @@ function farmWithMaterials(seed = 500) {
   s.buildings = [];
   s.troughs = {};
   s.animals = [];
-  s.inventory = { wood: 500, stone: 500 };
+  // Wheat because a hay bale is bought with it — this fixture means "has
+  // plenty of whatever a recipe asks for", not "has plenty of timber".
+  s.inventory = { wood: 500, stone: 500, wheat: 500 };
   return s;
 }
 
@@ -2499,11 +2503,266 @@ test('everything the player can build can also be taken down', () => {
     s.grid.ground.fill(GROUND.GRASS);
     s.grid.objects.fill(OBJ.NONE);
     s.troughs = {};
+    // Tools too, or the tile keeps whatever was hung on it last: structureAt
+    // answers with the tool before anything else, so a leftover scythe made
+    // every kind after it pass without being built at all.
+    s.tools = {};
 
     completeBuild(s, { buildKind: kind, x, y });
-    assert(structureAt(s, x, y) !== null, `${kind} should be recognised once built`);
+    const found = structureAt(s, x, y);
+    assert(found !== null, `${kind} should be recognised once built`);
+    // The kind, not merely "something" — that is what catches a stale answer.
+    assertEqual(found.kind, kind, `${kind} should be recognised as itself`);
     assert(taskForTile(s, x, y, 'clear') !== null, `${kind} must be removable`);
   }
+});
+
+test('a horse eats from a hay bale and eats it away to nothing', () => {
+  const s = farmWithMaterials(8500);
+  const bx = 6;
+  const by = 5;
+  completeBuild(s, { buildKind: 'hayBale', x: bx, y: by });
+  assertEqual(hayAt(s, bx, by).left, HAY_HELPINGS, 'a fresh bale is full');
+
+  const horse = makeAnimal(s, 'horse', bx + 1, by);
+  horse.water = 1e9;
+  horse.food = 1;                       // hungry enough to eat right now
+
+  for (let i = 0; i < 5; i++) tick(s);
+  assert(horse.food > 1, 'it ate');
+  assertEqual(hayAt(s, bx, by).left, HAY_HELPINGS - 1, 'and the bale is one down');
+
+  // Keep it hungry until the bale is finished.
+  for (let i = 0; i < HAY_HELPINGS * 40 && hayAt(s, bx, by); i++) {
+    horse.food = 1;
+    tick(s);
+  }
+
+  assertEqual(hayAt(s, bx, by), null, 'the bale is eaten away');
+  assertEqual(s.grid.getObject(bx, by), OBJ.NONE, 'and its mark goes with it');
+});
+
+test('only grazers eat hay', () => {
+  const s = farmWithMaterials(8501);
+  const bx = 6;
+  const by = 5;
+  completeBuild(s, { buildKind: 'hayBale', x: bx, y: by });
+
+  const cow = makeAnimal(s, 'cow', bx + 1, by);
+  cow.water = 1e9;
+  for (let i = 0; i < 200; i++) { cow.food = 1; tick(s); }
+
+  assertEqual(hayAt(s, bx, by).left, HAY_HELPINGS, 'a cow leaves it alone');
+  assert(canGraze(makeAnimal(s, 'horse', bx, by + 2)), 'a horse does not');
+});
+
+test('a hungry horse walks to a bale it can see', () => {
+  const s = farmWithMaterials(8502);
+  const bx = 12;
+  const by = 5;
+  completeBuild(s, { buildKind: 'hayBale', x: bx, y: by });
+
+  const horse = makeAnimal(s, 'horse', 4, 5);
+  horse.water = 1e9;
+  const startD = Math.abs(horse.x - bx) + Math.abs(horse.y - by);
+
+  for (let i = 0; i < 400; i++) { horse.food = Math.min(horse.food, 1); tick(s); }
+
+  const endD = Math.abs(horse.x - bx) + Math.abs(horse.y - by);
+  assert(endD < startD, `it should have closed the distance (${startD} -> ${endD})`);
+  assert(hayAt(s, bx, by) === null || hayAt(s, bx, by).left < HAY_HELPINGS,
+    'and got a meal out of it');
+});
+
+test('hay bales survive a save round trip, half eaten and all', () => {
+  const s = farmWithMaterials(8503);
+  completeBuild(s, { buildKind: 'hayBale', x: 6, y: 5 });
+  s.hay['6,5'].left = 4;
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual(hayAt(back, 6, 5), { left: 4 }, 'still four helpings in it');
+  assertEqual(back.grid.getObject(6, 5), OBJ.HAY, 'still standing there');
+});
+
+test('a farm saved before hay existed loads without any', () => {
+  const s = farmWithMaterials(8504);
+  const data = JSON.parse(JSON.stringify(serialize(s)));
+  delete data.hay;
+
+  const back = deserialize(data);
+  assertEqual(back.hay, {}, 'no bales, and nothing broken');
+});
+
+test('the ornaments are buildable, solid and removable', () => {
+  // They do nothing, which is the point — but they still have to behave like
+  // everything else the player puts down.
+  const s = farmWithMaterials(8505);
+  for (const [kind, obj] of [['well', OBJ.WELL], ['wheelbarrow', OBJ.WHEELBARROW],
+    ['barrel', OBJ.BARREL], ['bucket', OBJ.BUCKET]]) {
+    s.grid.objects.fill(OBJ.NONE);
+    assert(completeBuild(s, { buildKind: kind, x: 6, y: 6 }), `${kind} builds`);
+    assertEqual(s.grid.getObject(6, 6), obj, `${kind} leaves its mark`);
+    assert(!s.grid.isWalkable(6, 6, 'farmer'), `${kind} is solid`);
+    assert(structureAt(s, 6, 6) !== null, `${kind} is recognised`);
+    assert(demolish(s, 6, 6).ok, `${kind} comes down again`);
+    assertEqual(s.grid.getObject(6, 6), OBJ.NONE, `${kind} leaves nothing behind`);
+  }
+});
+
+test("a well's roof overhangs the row above without blocking it", () => {
+  // Drawn like a tree: two tiles of art on a one-tile footprint. If the tile
+  // above were solid the well would quietly cost twice the ground it looks
+  // like it costs.
+  const s = farmWithMaterials(8506);
+  completeBuild(s, { buildKind: 'well', x: 6, y: 6 });
+
+  assert(objDef(OBJ.WELL).tall, 'the well is a tall sprite');
+  assert(s.grid.isWalkable(6, 5, 'farmer'), 'and the row its roof covers is still walkable');
+});
+
+test('a hung tool shares its tile with whatever is already there', () => {
+  // The whole point of the overlay layer. Everything else on the farm owns its
+  // square; these sit on top of a fence, a barn wall or bare grass alike.
+  const s = farmWithMaterials(8600);
+  completeBuild(s, { buildKind: 'fence', x: 6, y: 6 });
+  completeBuild(s, { buildKind: 'barn', x: 10, y: 6 });
+
+  for (const [x, y, what] of [[6, 6, 'a fence'], [11, 7, 'a barn wall'], [4, 4, 'bare grass']]) {
+    assert(canPlaceAt(s, 'scythe', x, y, [1, 1]), `a scythe goes on ${what}`);
+  }
+
+  assert(completeBuild(s, { buildKind: 'axe', x: 6, y: 6 }), 'built on the fence');
+  assertEqual(toolAt(s, 6, 6), 'axe', 'the axe is there');
+  assertEqual(s.grid.getObject(6, 6), OBJ.FENCE, 'and so is the fence, untouched');
+});
+
+test('a hung tool blocks nothing and is blocked by nothing', () => {
+  const s = farmWithMaterials(8601);
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y;
+  assert(s.grid.isWalkable(x, y, 'farmer'), 'walkable before');
+
+  completeBuild(s, { buildKind: 'shovel', x, y });
+  assert(s.grid.isWalkable(x, y, 'farmer'), 'and still walkable with a shovel on it');
+  assertEqual(s.grid.getObject(x, y), OBJ.NONE, 'it leaves no mark on the object grid');
+});
+
+test('only one tool to a tile', () => {
+  const s = farmWithMaterials(8602);
+  completeBuild(s, { buildKind: 'axe', x: 5, y: 5 });
+  assert(!canPlaceAt(s, 'scythe', 5, 5, [1, 1]), 'no room for a second');
+  assertEqual(placementProblem(s, 'scythe', 5, 5, [1, 1]), 'something is hanging there already',
+    'and it says why');
+});
+
+test('tools refuse water and land you do not own', () => {
+  const s = farmWithMaterials(8603);
+  s.grid.setGround(7, 7, GROUND.WATER);
+  assertEqual(placementProblem(s, 'axe', 7, 7, [1, 1]), 'that would be in the water');
+
+  // Somewhere well outside the starting plot.
+  const far = { x: 2, y: 2 };
+  s.grid.disown?.(far.x, far.y);
+  if (!s.grid.isOwned(far.x, far.y)) {
+    assertEqual(placementProblem(s, 'axe', far.x, far.y, [1, 1]), "you don't own that land");
+  }
+});
+
+test('clearing takes the tool down first, then what it was hanging on', () => {
+  // Two taps, in the order you see them: the tool is on top, so it comes off
+  // first and the fence is still there underneath.
+  const s = farmWithMaterials(8604);
+  completeBuild(s, { buildKind: 'fence', x: 6, y: 6 });
+  completeBuild(s, { buildKind: 'scythe', x: 6, y: 6 });
+
+  assertEqual(structureAt(s, 6, 6).kind, 'scythe', 'the scythe is what you are pointing at');
+  assert(demolish(s, 6, 6).ok, 'and it comes down');
+  assertEqual(toolAt(s, 6, 6), null, 'gone');
+  assertEqual(s.grid.getObject(6, 6), OBJ.FENCE, 'the fence is untouched');
+
+  assertEqual(structureAt(s, 6, 6).kind, 'fence', 'now the fence is what you are pointing at');
+  assert(demolish(s, 6, 6).ok, 'and it comes down too');
+});
+
+test('taking a tool down refunds it like anything else built', () => {
+  const s = farmWithMaterials(8605);
+  const before = countItem(s, 'stone');
+  completeBuild(s, { buildKind: 'wateringCan', x: 5, y: 5 });
+  assertEqual(countItem(s, 'stone'), before - 3, 'it cost three stone');
+
+  const res = demolish(s, 5, 5);
+  assert(res.ok, 'taken down');
+  assertEqual(res.refund, { stone: 1 }, 'half of three, rounded down');
+});
+
+test('hung tools survive a save round trip', () => {
+  const s = farmWithMaterials(8606);
+  completeBuild(s, { buildKind: 'axe', x: 5, y: 5 });
+  completeBuild(s, { buildKind: 'scythe', x: 6, y: 5 });
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual(toolAt(back, 5, 5), 'axe', 'the axe is still up');
+  assertEqual(toolAt(back, 6, 5), 'scythe', 'and the scythe');
+});
+
+test('a farm saved before tools could be hung loads without any', () => {
+  const s = farmWithMaterials(8607);
+  const data = JSON.parse(JSON.stringify(serialize(s)));
+  delete data.tools;
+
+  const back = deserialize(data);
+  assertEqual(back.tools, {}, 'no tools, and nothing broken');
+  assertEqual(toolAt(back, 5, 5), null, 'looking one up is simply nothing');
+});
+
+test('every hung tool has a sprite to draw', () => {
+  // The layer looks a kind up in SPRITES by name, so a buildable added with
+  // `overlay: true` and no matching sprite would place fine and draw nothing.
+  for (const [kind, def] of Object.entries(BUILDABLES)) {
+    if (!def.overlay) continue;
+    assert(SPRITES[kind], `${kind} needs a sprite of its own name`);
+  }
+});
+
+test('hanging a tool through the real build queue destroys nothing under it', () => {
+  // Built through the task pipeline, not by calling completeBuild directly:
+  // the farmer clears a build site before raising anything on it, and that
+  // step is invisible to a test that skips straight to the placement. A scythe
+  // hung on a well demolished the well, and every direct-call test passed.
+  const s = farmWithMaterials(8610);
+  s.money = 99999;
+  const wx = s.farmer.x + 2;
+  const wy = s.farmer.y;
+  completeBuild(s, { buildKind: 'well', x: wx, y: wy });
+  assertEqual(s.grid.getObject(wx, wy), OBJ.WELL, 'a well to hang it on');
+
+  const spec = taskForTile(s, wx, wy, 'build', { buildKind: 'scythe' });
+  assert(spec, 'the scythe may be queued there');
+  addTask(s, spec);
+
+  let n = 0;
+  while (s.tasks.length && n < 4000) { tick(s); n++; }
+
+  assertEqual(toolAt(s, wx, wy), 'scythe', 'the scythe went up');
+  assertEqual(s.grid.getObject(wx, wy), OBJ.WELL, 'and the well is still standing');
+});
+
+test('hanging a tool over a mushroom neither picks nor buries it', () => {
+  // The same bug in its other form: clearing a build site forages what is on
+  // it, so hanging an axe over a mushroom would have quietly banked it.
+  const s = farmWithMaterials(8611);
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y + 1;
+  sprout(s, x, y, 'red_toadstool');
+  const before = countItem(s, 'mushroom_toadstool');
+
+  addTask(s, taskForTile(s, x, y, 'build', { buildKind: 'axe' }));
+  let n = 0;
+  while (s.tasks.length && n < 4000) { tick(s); n++; }
+
+  assertEqual(toolAt(s, x, y), 'axe', 'the axe went up');
+  assert(mushroomAt(s, x, y), 'the mushroom is still there to be found');
+  assertEqual(countItem(s, 'mushroom_toadstool'), before, 'and was not quietly banked');
 });
 
 test('demolishing refunds half the materials, rounded down', () => {
@@ -4218,6 +4477,111 @@ test('a duck is a better layer per barn slot and a worse one per trough', () => 
   assert(eggsPerFood(duck) < eggsPerFood(hen), 'so a helping of feed goes further in a hen');
 });
 
+test('a goat gives its own kind of milk, on its own clock', () => {
+  const { s, animal: goat } = farmWithAnimal('goat', 8400);
+  goat.food = 1e9;
+  goat.water = 1e9;
+
+  for (let i = 0; i < ANIMALS.goat.produceTicks + 5; i++) tick(s);
+
+  assert(isReady(goat), 'it is ready to milk');
+  const got = collectFrom(s, goat);
+  assertEqual(got, { goat_milk: 1 }, "and what comes out is goat's milk");
+  assertEqual(countItem(s, 'goat_milk'), 1, 'which lands in the bag');
+  assertEqual(countItem(s, 'milk'), 0, 'and is not the cow variety');
+});
+
+test('a goat pays for itself sooner than a cow and earns less per hour', () => {
+  // The trade that makes it worth having both: the early animal you replace,
+  // not the one you aspire to.
+  const goat = ANIMALS.goat;
+  const cow = ANIMALS.cow;
+  const payback = (d) => d.price / ITEMS[d.produces].sell * d.produceTicks;
+  const perHour = (d) => (3600 / d.produceTicks) * ITEMS[d.produces].sell;
+
+  assert(goat.price < cow.price, 'a goat is cheaper up front');
+  assert(payback(goat) < payback(cow), 'and pays for itself sooner');
+  assert(perHour(goat) < perHour(cow), 'but a cow earns more per hour once it has');
+});
+
+test('a horse produces nothing, ever', () => {
+  const { s, animal: horse } = farmWithAnimal('horse', 8401);
+  horse.food = 1e9;
+  horse.water = 1e9;
+
+  // Far longer than the slowest animal on the farm takes to make anything.
+  for (let i = 0; i < ANIMALS.sheep.produceTicks * 2; i++) tick(s);
+
+  assert(!isReady(horse), 'nothing to collect');
+  assertEqual(horse.stock || 0, 0, 'nothing banked');
+  assertEqual(horse.progress || 0, 0, 'and no progress toward anything');
+  assertEqual(collectFrom(s, horse), null, 'and nothing comes of trying');
+});
+
+test('a horse is still an animal: it eats, drinks and can be made a fuss of', () => {
+  // The point of it is that it lives on the farm, not that it is inert.
+  const { s, animal: horse } = farmWithAnimal('horse', 8402);
+  // Started full, not nearly empty: farmWithAnimal stands stocked troughs right
+  // next to the animal, so a horse below SEEK_THRESHOLD walks over and tops
+  // itself up — and its food goes up over the run rather than down.
+  horse.food = FOOD_DURATION;
+  horse.water = WATER_DURATION;
+  const food = horse.food;
+  const water = horse.water;
+
+  for (let i = 0; i < 50; i++) tick(s);
+
+  assert(horse.food < food, 'it gets through its feed');
+  assert(horse.water < water, 'and its water');
+  assertEqual(petAnimal(s, horse).gained, PET_GAIN, 'and it likes being petted');
+});
+
+test('a farmhand has no errand at a horse', () => {
+  // isReady is what gates the hands, so a horse should simply never come up.
+  const { s, hand } = farmWithHand(8403);
+  makeAnimal(s, 'horse', hand.x + 2, hand.y);
+
+  for (let i = 0; i < 400; i++) tick(s);
+
+  assertEqual(carriedTotal(hand), 0, 'nothing was collected from it');
+});
+
+test('the shop sells both, and says which one gives nothing', () => {
+  const s = farmWithMaterials(8404);
+  s.money = 99999;
+  completeBuild(s, { buildKind: 'barn', x: s.farmer.x - 1, y: s.farmer.y - 5 });
+
+  const rows = animalList(s);
+  const goat = rows.find((r) => r.type === 'goat');
+  const horse = rows.find((r) => r.type === 'horse');
+
+  assert(goat, 'a goat is for sale');
+  assertEqual(goat.produces, "Goat's milk", 'and says what it gives');
+  assert(horse, 'so is a horse');
+  assertEqual(horse.produces, null, 'which gives nothing, and says so rather than crashing');
+});
+
+test('both new animals can actually be bought and placed', () => {
+  const s = farmWithMaterials(8405);
+  s.money = 99999;
+  completeBuild(s, { buildKind: 'barn', x: s.farmer.x - 1, y: s.farmer.y - 5 });
+
+  const bought = buyAnimal(s, 'goat', s.farmer.x + 2, s.farmer.y);
+  assert(bought.ok, `goat: ${bought.reason || ''}`);
+  const horse = buyAnimal(s, 'horse', s.farmer.x + 3, s.farmer.y);
+  assert(horse.ok, `horse: ${horse.reason || ''}`);
+  assertEqual(s.animals.length, 2, 'both are on the farm');
+});
+
+test("goat's milk is priced by the market like anything else you sell", () => {
+  const s = farmWithMaterials(8406);
+  assert(TRADED.includes('goat_milk'), 'the market knows about it');
+  assert(BASE_SHARE.goat_milk > 0, 'and what a normal farm brings of it');
+
+  const rows = marketRows(s);
+  assert(rows.some((r) => r.id === 'goat_milk'), 'so it has a row in the panel');
+});
+
 test('a duck lays faster than a hen, for a higher price', () => {
   assert(ANIMALS.duck.produceTicks < ANIMALS.chicken.produceTicks, 'ducks lay sooner');
   assert(ANIMALS.duck.price > ANIMALS.chicken.price, 'and cost more up front');
@@ -5113,7 +5477,80 @@ test('adding colours did not rename anything already found', () => {
   assertEqual(toadstools.slice(0, 4),
     ['red_toadstool', 'green_toadstool', 'pink_toadstool', 'navy_toadstool'],
     'in the order they have always been in');
-  assertEqual(toadstools[4], 'rainbow_toadstool', 'with the new one appended');
+
+  // Rainbow is *last*, whatever the count — checked by position from the end
+  // rather than a fixed index. This assertion used to read `toadstools[4]`,
+  // which was the same thing only while there were five colours, and broke the
+  // moment three more were added before it.
+  assertEqual(toadstools[toadstools.length - 1], 'rainbow_toadstool', 'and rainbow last');
+  for (const species of Object.keys(SPECIES)) {
+    const ids = MUSHROOMS.filter((m) => m.species === species).map((m) => m.id);
+    assertEqual(ids.length, COLOURS_PER_SPECIES, `${species} has every colour`);
+    assert(isRainbow(ids[ids.length - 1]), `${species}'s rainbow is last`);
+    assert(!ids.slice(0, -1).some(isRainbow), `${species} has only the one rainbow`);
+  }
+
+  // Every id unique: the ids are built from the colour words, so naming the new
+  // green "Green" would have collided with the toadstool that is already Green
+  // and quietly merged two journal entries into one.
+  const ids = MUSHROOMS.map((m) => m.id);
+  assertEqual(new Set(ids).size, ids.length, 'no two mushrooms share an id');
+});
+
+test('a farm that found mushrooms before the new colours still has them', () => {
+  // The thing that makes this safe: a save stores the *id*, never the sprite
+  // index. Widening the sheet re-points every existing id at its new column on
+  // load, so nothing already found is renamed, lost, or turned into a
+  // different mushroom.
+  const s = farmWithMaterials(9450);
+  s.mushrooms = {};
+  s.journal = {};
+
+  // Exactly what an older save holds: ids from before the new colours existed.
+  const known = ['red_toadstool', 'rainbow_toadstool', 'tan_button', 'ash_morel'];
+  known.forEach((id, i) => { s.journal[id] = i + 1; });
+  sprout(s, s.farmer.x + 2, s.farmer.y, 'rainbow_toadstool');
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  for (const id of known) {
+    assert(mushroomDef(id), `${id} still exists`);
+    assertEqual(back.journal[id], known.indexOf(id) + 1, `${id} kept its count`);
+  }
+  const standing = mushroomAt(back, s.farmer.x + 2, s.farmer.y);
+  assertEqual(standing.id, 'rainbow_toadstool', 'the one in the ground is unchanged');
+
+  // And it points at the rainbow column of the wider sheet, not the old one.
+  const toadstool = SPECIES.toadstool.sprites;
+  assertEqual(standing.sprite, toadstool[toadstool.length - 1], 'now the eighth column');
+  assertEqual(standing.sprite, 7, 'which is sprite 7, where it used to be sprite 4');
+});
+
+test('the journal css agrees with how many mushrooms there are', () => {
+  // The journal draws its art by sliding one background image, so the CSS has
+  // to name the *whole* sheet's width. Add a colour and that number is wrong,
+  // and nothing complains — every entry just quietly shows a slice of the
+  // neighbouring mushroom. It said 1680px (35 sprites) when the sheet grew to
+  // 56, which is precisely the failure this guards.
+  const css = readFileSync('css/style.css', 'utf8');
+  const cell = 48;
+  const match = css.match(/\.shroom-art\s*\{[^}]*background-size:\s*(\d+)px\s+(\d+)px/);
+  assert(match, 'the journal art still sets a background-size');
+  assertEqual(+match[1], MUSHROOMS.length * cell, 'sheet width matches the mushroom count');
+  assertEqual(+match[2], cell, 'and one row tall');
+});
+
+test('the mushroom sheet has a column for every mushroom', () => {
+  // Art and data drift apart silently: an id whose sprite runs off the end of
+  // the sheet draws nothing at all, and there is no canvas here to notice.
+  const { w, h } = pngSize('assets/flora/mushrooms.png');
+  assertEqual(h, TILE, 'the sheet is one row tall');
+  const columns = w / TILE;
+  assertEqual(columns, Object.keys(SPECIES).length * COLOURS_PER_SPECIES,
+    'a column for every kind in every colour');
+  for (const m of MUSHROOMS) {
+    assert(m.sprite >= 0 && m.sprite < columns,
+      `${m.id} wants column ${m.sprite}, the sheet has ${columns}`);
+  }
 });
 
 test('a new farm has mushrooms already up, near the farmhouse', () => {

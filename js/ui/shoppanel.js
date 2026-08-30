@@ -245,7 +245,7 @@ export function initShopPanel(state, {
     const rows = animalList(state).map((row) => `
       <li>
         <span class="shop-name">${esc(row.name)}
-          <em>gives ${esc(row.produces)}${row.owned ? ` · have ${row.owned}` : ''}</em>
+          <em>${row.produces ? `gives ${esc(row.produces)}` : 'just for the look of it'}${row.owned ? ` · have ${row.owned}` : ''}</em>
         </span>
         <span class="shop-price">$${row.price}</span>
         <button data-act="animal" data-id="${row.type}" ${row.affordable ? '' : 'disabled'}>Buy</button>

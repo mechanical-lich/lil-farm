@@ -66,7 +66,9 @@ Only the part of the stock bar that **overhangs the notch** is red. Colouring th
 Materials are deliberately not traded: a barn whose price wandered would be a nuisance rather than a decision. Nor are mushrooms — that is the foraging fantasy, and haggling over a morel cheapens finding one.
 
 ## Foraging
-Seven kinds of mushroom, each in five colours: thirty-five to find and keep in the journal. The fifth colour of every kind is a rainbow one, and it is deliberately rare — around one find in twenty-five. Picking colours evenly would have made the rarest-looking thing on the sheet the most ordinary thing in the journal.
+Seven kinds of mushroom, each in eight colours: fifty-six to find and keep in the journal. The last colour of every kind is a rainbow one, and it is deliberately rare — one find in twenty-five. Picking colours evenly would have made the rarest-looking thing on the sheet the most ordinary thing in the journal.
+
+**Nothing stores a sprite index**, only the mushroom's id, and the sheet columns are derived from how many colours there are. That is what let three colours be added to every kind as a one-number change, with every mushroom anyone had already found re-pointing itself at the right column of the wider sheet — a rainbow toadstool was column 4 and is now column 7, and no journal entry moved.  The one thing that *doesn't* follow automatically is the journal's CSS, which slides a single background image and so has to name the whole sheet's width; there is a test holding that number to the mushroom count, because getting it wrong draws the neighbouring mushroom rather than failing.
 
 The journal is keyed by colour and species, which is why the four original colours of each kind keep their ids and their order: reordering them would quietly rename every mushroom anybody had already collected. New colours go on the end.
 
@@ -250,6 +252,24 @@ You can build things like farms, fences, barrels, water/feed troughs, and roads.
 - Fences block everyone.  Gates block animals but the farmer opens them, so a pen needs exactly one gate to be usable and secure.
 - Troughs are **two tiles wide** and need two clear tiles side by side.
 
+### Hay bales
+A bale is the only feed on the farm that runs out for good.  A trough is a fixture — fill it, empty it, fill it again, and it stands there either way.  A bale arrives full, is eaten down and then is gone, which makes it the thing you drop in a paddock rather than the thing you plumb in.
+
+- **12 helpings, bought with 4 wheat.**  Half a trough (24) and a worse deal than one (3 crops), deliberately: a bale is convenience and scenery, not a cheaper way to feed a farm.  It also gives wheat a use besides selling.
+- **Only grazers eat from one**, which today means horses.  That's a flag on the species rather than a check for the word "horse", so the next animal that ought to graze can just say so.
+- **Hay before the trough.**  A grazer standing between the two eats the bale, because the bale is the thing that would otherwise sit there for ever — and a paddock with a bale in it is a paddock you put a bale in on purpose.
+- A half-eaten bale **shows what's left**; a fresh one looks like plain scenery.  When the last helping goes, the bale and the ground it blocked go with it.
+
+### Hung tools
+A **watering can**, **shovel**, **axe** and **scythe** hang on whatever is already there.  They're the only buildables that don't own their tile: no mark on the object grid, no blocking, and a placement check short enough to let them share a square with a barn wall, a fence post or bare grass alike.  Making them fight the barn for the square would mean never being able to hang anything anywhere you'd want it.
+
+- **Drawn last and cleared first** — the topmost thing on a tile in both senses.  Last because a barn is drawn whole when its bottom row comes up, so a tool on an upper wall row would otherwise be buried under the building.  First because the tool is what you're pointing at: clearing a scythe off a fence takes two taps, in the order you see them.
+- A tile somebody is standing on **yields the tool** rather than drawing a scythe over the farmer's head.
+- **Nothing under them is disturbed.**  The farmer clears a build site before raising anything on it, which for an overlay must do nothing at all — a scythe hung on a well demolished the well until that was fixed, and would have foraged a mushroom it was hung over.
+
+### Ornaments
+A **well** (20 stone), a **wheelbarrow** (6 wood), a **barrel** (8 wood) and a **bucket** (4 wood) do nothing at all, which is the point of them — a farm should have things on it that aren't machines.  These are built with materials and a farmer's time, unlike the **decorations** in the shop, which are bought with money and simply appear.  The well is drawn like a tree: two tiles of art on a one-tile footprint, so its roof overhangs the row above and the farmer walks past rather than round it.
+
 ### Crates
 A crate is somewhere for the farmhands to put things down — **12 wood**, one tile, and it holds **100 of one kind of goods**.
 
@@ -331,7 +351,9 @@ There are tasks to fill food and water troughs.  Water is infinite, but food mus
 Animals can not open gates.
 
 ### How animals work
-- Four animals, in order of patience: a **chicken** ($120) drops an **egg** every 20 minutes, a **duck** ($200) drops one every 17, a **cow** ($500) is ready to **milk** after 30 minutes, and a **sheep** ($800) grows a **fleece** over 75 minutes.  All of them need food and water to make progress; the clock only runs while they have both.
+- Six animals, in order of patience: a **chicken** ($120) drops an **egg** every 20 minutes, a **duck** ($200) drops one every 17, a **goat** ($350) is ready for **goat's milk** after 25, a **cow** ($500) to **milk** after 30, and a **sheep** ($800) grows a **fleece** over 75 minutes.  A **horse** ($3600) produces nothing at all.  All of them need food and water to make progress; the clock only runs while they have both.
+- **A goat is the cheap way into milk.**  It costs less than a cow, is ready sooner and is worth less each time — so it pays for itself faster and earns less per hour once it has.  The early animal you replace, not the one you aspire to.  Its milk is its own good, which also gives the market a fourth kind of produce to price.
+- **A horse is bought to be looked at**, and priced like it: at $3600 it costs more than four cows and never earns a penny back.  It produces nothing and still wants feeding, which is the point: the first thing on the farm that's purely yours rather than a machine for making money.  It still gets hungry, still shows how it feels, and can still be made a fuss of.  Everything that asks an animal what it makes has to cope with the answer being "nothing".
 - **Each species eats and drinks at its own rate**, as two separate numbers — there's no reason a hungry animal should be a thirsty one, and every animal added from here can say what it needs.  A **duck eats half again as much as a hen** while laying a fifth faster, which makes it the better bird per barn slot and the worse one per trough refill.  Before it had an appetite of its own it was simply a better chicken.  Measured over three hours: a duck gets through 5 helpings where a hen gets through 3, and still spends 99% of its time on the pond — it nips ashore to eat and goes straight back.
 - **Wool is the slow, valuable one.**  A fleece sells for $100 against milk's $60, so a sheep is the animal for someone who looks in twice a day and the wrong one for someone watching the farm — the same shape as the slow crops being the seed you plant before bed.
 - **Milked and sheared animals bank up to 4 units** and then wait.  Without that a cow produced one thing and stood idle however long you were away, which made the animals you pay the most for far worse than chickens overnight.  A full cow fills in 2 hours and a sheep in 5, so the cow is the animal to own if you're watching and the sheep if you're not:

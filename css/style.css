@@ -553,14 +553,17 @@ li.market.glut .market-top small { color: #a33d2e; }
   line-height: 1.2;
 }
 
-/* The sheet is one row of 16 at 16px; 48px cells are a clean 3x. */
+/* The sheet is one row at 16px; 48px cells are a clean 3x. background-size has
+   to name the whole sheet's width, so it moves every time a colour is added —
+   there's a test that checks this number against the sprite count, because
+   getting it wrong doesn't fail loudly, it just draws the wrong mushroom. */
 .shroom-art {
   width: 48px;
   height: 48px;
   margin: 0 auto 2px;
   image-rendering: pixelated;
   background-image: url(../assets/flora/mushrooms.png);
-  background-size: 1680px 48px;   /* 35 sprites at 48px */
+  background-size: 2688px 48px;   /* 56 sprites at 48px */
   background-color: rgba(132, 198, 105, 0.45);
   border: 2px solid var(--panel-edge);
   border-radius: 8px;

@@ -126,6 +126,13 @@ export const TOWN = {
   bushRound: [5, 0, 'town'],
   mushrooms: [5, 2, 'town'],
   signPost: [11, 6, 'town'],
+
+  // A well, drawn like a tree: the roof lives in the row above the tile it
+  // stands on. Its stone rim and the water in it are the bottom half.
+  wellTop: [8, 7, 'town'],
+  wellBottom: [8, 8, 'town'],
+  // A barrow parked in the yard. One tile, no overhang.
+  wheelbarrow: [9, 4, 'town'],
 };
 
 export const SPRITES = {
@@ -175,16 +182,29 @@ export const SPRITES = {
   },
 
   // Props / containers
-  barrel: [0, 6],
-  barrelWater: [1, 6],
+  // Buckets, not barrels: both have a handle arcing over an open top, and the
+  // same art appears on the town sheet at [10,10]/[11,10]. They were called
+  // `barrel`/`barrelWater` from the first commit and never drawn, so nothing
+  // ever put the name next to the picture.
+  bucket: [0, 6],
+  bucketWater: [1, 6],
   sack: [2, 6],
   chair: [3, 6],
   crateEmpty: [4, 6],
-  hayBale: [1, 7],
+  // The actual barrel: hooped staves, no handle. Called `hayBale` from the
+  // first commit and never drawn, so the name went unchallenged until a horse
+  // needed feeding and it turned out to be cooperage.
+  barrel: [1, 7],
+  // The hay. `hayBale` is the bound one, which is what a bale reads as at this
+  // size; `hayBlock` is the plain stack beside it.
+  hayBale: [1, 8],
   hayBlock: [0, 8],
-  toolA: [2, 7],
-  toolB: [3, 7],
-  mystery: [4, 7],
+  // The tool rack. `toolA`/`toolB`/`mystery` were placeholders for these —
+  // another three names from the first commit that nothing ever drew.
+  wateringCan: [0, 7],
+  shovel: [2, 7],
+  axe: [3, 7],
+  scythe: [4, 7],
 
   // Troughs are two tiles wide (left half, right half).
   troughWoodEmptyL: [2, 8], troughWoodEmptyR: [3, 8],
@@ -211,6 +231,7 @@ export const SPRITES = {
   goods: {
     egg: [5, 10],
     milk: [4, 10],
+    goat_milk: [4, 10],   // the same pail; the crate says whose milk it is
     wool: [3, 10],
   },
 

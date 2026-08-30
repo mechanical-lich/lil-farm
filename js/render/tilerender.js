@@ -9,6 +9,8 @@ import { GROUND, OBJ, isTilled, isWater } from '../world/tiledefs.js';
 import { SPRITES, TOWN, WATER, RIVER, BARN, CAPSULES, srcRect, sheetFor } from './sprites.js';
 import { mushroomAt } from '../sim/mushrooms.js';
 import { crateAt, CRATE_CAPACITY } from '../sim/crates.js';
+import { hayAt, hayLeft, HAY_HELPINGS } from '../sim/hay.js';
+import { toolList } from '../sim/tools.js';
 import { flowerAt, isWatered } from '../sim/flowers.js';
 import { flowerCanvas } from './flowerart.js';
 import { pendingGroundTiles } from '../sim/build.js';
@@ -340,6 +342,30 @@ export function drawObjects(ctx, sheets, state, view, entityRows = null) {
   }
 
   drawTroughs(ctx, sheets, state, view);
+  drawTools(ctx, sheets, state, view);
+}
+
+/**
+ * Hung tools, drawn after everything else on the map.
+ *
+ * A pass of their own rather than a case in drawObject, because a tool can be
+ * on a barn wall and a barn is drawn whole when its *bottom* row comes up — a
+ * tool on an upper wall row would be painted first and then buried under the
+ * building. Last means last.
+ *
+ * The exception is a tile somebody is standing on: rather than drawing a scythe
+ * over the farmer's head, the tool simply yields for as long as he's there,
+ * which reads as him standing in front of it.
+ */
+function drawTools(ctx, sheets, state, view) {
+  for (const { x, y, kind } of toolList(state)) {
+    if (x < view.x0 || x > view.x1 || y < view.y0 || y > view.y1) continue;
+    const sprite = SPRITES[kind];
+    if (!sprite) continue;
+    if (state.farmer.x === x && state.farmer.y === y) continue;
+    if ((state.animals || []).some((a) => a.x === x && a.y === y)) continue;
+    blit(ctx, sheets, sprite, x * TILE, y * TILE);
+  }
 }
 
 /**
@@ -617,14 +643,29 @@ function drawObject(ctx, sheets, state, objId, x, y) {
     case OBJ.TROUGH_WATER:
     case OBJ.TROUGH_FOOD:
       break;   // troughs are two tiles wide; drawn from their anchors instead
-    case OBJ.BARREL:
-      blit(ctx, sheets, SPRITES.barrel, px, py);
+    case OBJ.BUCKET:
+      blit(ctx, sheets, SPRITES.bucket, px, py);
       break;
     case OBJ.EGG:
       blit(ctx, sheets, SPRITES.egg, px, py);
       break;
     case OBJ.CRATE:
       drawCrate(ctx, sheets, state, x, y, px, py);
+      break;
+    case OBJ.HAY:
+      drawHay(ctx, sheets, state, x, y, px, py);
+      break;
+    case OBJ.WELL:
+      // Two tiles of art on a one-tile footprint, the same as a tree: the roof
+      // overhangs the row above, which the farmer walks past rather than round.
+      blit(ctx, sheets, TOWN.wellTop, px, py - TILE);
+      blit(ctx, sheets, TOWN.wellBottom, px, py);
+      break;
+    case OBJ.WHEELBARROW:
+      blit(ctx, sheets, TOWN.wheelbarrow, px, py);
+      break;
+    case OBJ.BARREL:
+      blit(ctx, sheets, SPRITES.barrel, px, py);
       break;
     case OBJ.MUSHROOM: {
       // Which one grew here is state, not a hash of the tile — a mushroom is a
@@ -698,6 +739,27 @@ function drawCrate(ctx, sheets, state, x, y, px, py) {
   ctx.fillRect(px + 2, py + TILE - 3, TILE - 4, 2);
   ctx.fillStyle = frac >= 1 ? '#f2a33c' : '#8fd36b';
   ctx.fillRect(px + 2, py + TILE - 3, Math.round((TILE - 4) * frac), 2);
+}
+
+/**
+ * A hay bale, with a bite taken out of it as it goes.
+ *
+ * The bar only appears once a bale has been eaten from, so a fresh one looks
+ * like scenery and a half-eaten one reads as something running out. Without it
+ * the only way to know a bale was nearly gone would be to watch it vanish.
+ */
+function drawHay(ctx, sheets, state, x, y, px, py) {
+  blit(ctx, sheets, SPRITES.hayBale, px, py);
+
+  const bale = hayAt(state, x, y);
+  const left = hayLeft(bale);
+  if (!bale || left >= HAY_HELPINGS) return;
+
+  const frac = left / HAY_HELPINGS;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+  ctx.fillRect(px + 2, py + TILE - 3, TILE - 4, 2);
+  ctx.fillStyle = frac <= 0.25 ? '#f2a33c' : '#d8b45a';
+  ctx.fillRect(px + 2, py + TILE - 3, Math.max(1, Math.round((TILE - 4) * frac)), 2);
 }
 
 export function blitTurned(ctx, sheets, sprite, dx, dy, turns = 0) {

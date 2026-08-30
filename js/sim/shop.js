@@ -253,7 +253,9 @@ export function animalList(state) {
     type,
     name: def.name,
     price: def.price,
-    produces: itemName(def.produces),
+    // A horse gives nothing, and the shop row has to say so rather than
+    // asking itemName what undefined is called.
+    produces: def.produces ? itemName(def.produces) : null,
     owned: state.animals.filter((a) => a.type === type).length,
     affordable: state.money >= def.price && state.animals.length < capacity,
   }));

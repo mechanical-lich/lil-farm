@@ -23,7 +23,7 @@ import { addItem } from './inventory.js';
 import { isReserved } from './build.js';
 
 /**
- * Seven kinds, each in five colours — the sheet is one row of thirty-five,
+ * Seven kinds, each in eight colours — the sheet is one row of fifty-six,
  * grouped by shape, with the sprites of a kind running consecutively.
  *
  * Rarity is a spawn weight rather than a percentage, so adding a kind means
@@ -32,13 +32,16 @@ import { isReserved } from './build.js';
  * nothing depends on that.
  *
  * `sprites` is derived rather than written out: the sheet is laid out in
- * species order, five to a kind, and typing thirty-five indices by hand is an
- * invitation to get one wrong in a way nothing would catch.
+ * species order, eight to a kind, and typing fifty-six indices by hand is an
+ * invitation to get one wrong in a way nothing would catch. Deriving them is
+ * also what made adding three colours a one-number change — nothing stores a
+ * sprite index, so every mushroom anyone has ever found re-points itself at the
+ * right column of the wider sheet on load.
  */
 const SHEET_ORDER = ['toadstool', 'bolete', 'morel', 'button', 'chestnut', 'portobello', 'parasol'];
 
-/** How many colours each kind comes in. The fifth is always the rainbow one. */
-export const COLOURS_PER_SPECIES = 5;
+/** How many colours each kind comes in. The last is always the rainbow one. */
+export const COLOURS_PER_SPECIES = 8;
 
 const spritesFor = (species) => {
   const first = SHEET_ORDER.indexOf(species) * COLOURS_PER_SPECIES;
@@ -82,35 +85,51 @@ export const SPECIES = {
  * The first four of each are the colours that have always been there, in the
  * order they have always been in, because a journal entry is keyed by colour
  * and species — reordering these would quietly rename every mushroom anybody
- * has ever found. The rainbow one is new, and goes last for the same reason.
+ * has ever found. The rainbow one stays last for the same reason, which is why
+ * the three new colours are inserted *before* it rather than appended.
+ *
+ * Lime, Cyan and Frost are the same three across every kind, because they are
+ * the same three on the sheet: (153,229,80), (95,205,228) and (203,219,252) in
+ * every row. Lime rather than Green because a toadstool is already Green, and
+ * two colours of one name would collide into a single journal entry — the ids
+ * are built from these words.
  */
+const NEW_COLOURS = ['Lime', 'Cyan', 'Frost'];
+
 const COLOURS = {
-  button: ['Tan', 'Orange', 'Blue', 'Spotted', 'Rainbow'],
-  toadstool: ['Red', 'Green', 'Pink', 'Navy', 'Rainbow'],
-  bolete: ['Umber', 'Tan', 'Orange', 'Violet', 'Rainbow'],
-  morel: ['Orange', 'Brown', 'Pink', 'Ash', 'Rainbow'],
-  chestnut: ['Tan', 'Orange', 'Blue', 'Spotted', 'Rainbow'],
-  portobello: ['Tan', 'Orange', 'Blue', 'Spotted', 'Rainbow'],
-  parasol: ['Tan', 'Orange', 'Blue', 'Spotted', 'Rainbow'],
+  button: ['Tan', 'Orange', 'Blue', 'Spotted', ...NEW_COLOURS, 'Rainbow'],
+  toadstool: ['Red', 'Green', 'Pink', 'Navy', ...NEW_COLOURS, 'Rainbow'],
+  bolete: ['Umber', 'Tan', 'Orange', 'Violet', ...NEW_COLOURS, 'Rainbow'],
+  morel: ['Orange', 'Brown', 'Pink', 'Ash', ...NEW_COLOURS, 'Rainbow'],
+  chestnut: ['Tan', 'Orange', 'Blue', 'Spotted', ...NEW_COLOURS, 'Rainbow'],
+  portobello: ['Tan', 'Orange', 'Blue', 'Spotted', ...NEW_COLOURS, 'Rainbow'],
+  parasol: ['Tan', 'Orange', 'Blue', 'Spotted', ...NEW_COLOURS, 'Rainbow'],
 };
 
 /**
  * How a colour is picked: the weight of the rainbow one against each of the
- * four ordinary ones.
+ * seven ordinary ones.
  *
- * Picking evenly would make a fifth of every find a rainbow, which would leave
- * the rarest-looking thing on the sheet the most ordinary thing in the journal.
- * At one against six it comes out around one find in twenty-five — often enough
- * to happen, rare enough to be worth showing somebody.
+ * Picking evenly would make an eighth of every find a rainbow, which would
+ * leave the rarest-looking thing on the sheet among the most ordinary things in
+ * the journal. Seven against twenty-four puts it at exactly one find in
+ * twenty-five — often enough to happen, rare enough to be worth showing
+ * somebody.
+ *
+ * These are 6:1 rescaled. When three colours were added, leaving 6:1 alone
+ * would have quietly taken the rainbow from one find in twenty-five to one in
+ * forty-three, because the ordinary side of the scale grew and the rainbow side
+ * didn't. The ratio is the thing being tuned, not the numbers.
  */
-export const COLOUR_WEIGHT = { ordinary: 6, rainbow: 1 };
+export const COLOUR_WEIGHT = { ordinary: 24, rainbow: 7 };
 
 /** The rainbow one is always the last colour of its kind. */
 export const isRainbow = (id) => id.startsWith('rainbow_');
 
 /**
- * All sixteen, flat. This is the journal's running order and the thing spawning
- * picks from, so it's built once rather than derived at every call site.
+ * All fifty-six, flat. This is the journal's running order and the thing
+ * spawning picks from, so it's built once rather than derived at every call
+ * site.
  */
 export const MUSHROOMS = Object.entries(SPECIES).flatMap(([species, def]) =>
   def.sprites.map((sprite, i) => ({

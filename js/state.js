@@ -6,6 +6,7 @@ import { Grid } from './world/grid.js';
 import { generateWorld, startingBarnAnchor } from './world/worldgen.js';
 import { placeStructure, reconcileBuildings } from './sim/build.js';
 import { reconcileCrates } from './sim/crates.js';
+import { reconcileHay } from './sim/hay.js';
 import { seedStartingMushrooms } from './sim/mushrooms.js';
 import { newMarket } from './sim/market.js';
 import { reconcileFlowers } from './sim/flowers.js';
@@ -41,6 +42,8 @@ export function newGame(seed = (Date.now() ^ 0x5f3759df) >>> 0) {
     nextBuildingId: 1,
     troughs: {},
     crates: {},     // tile key -> {item, qty}; see sim/crates.js
+    hay: {},        // tile key -> {left}; see sim/hay.js
+    tools: {},      // tile key -> buildable kind; see sim/tools.js
     tasks: [],
     nextTaskId: 1,
     // See TESTING in config.js — a real farm starts with just a few seeds.
@@ -87,6 +90,8 @@ export function serialize(state) {
     nextBuildingId: state.nextBuildingId,
     troughs: state.troughs,
     crates: state.crates,
+    hay: state.hay,
+    tools: state.tools,
     tasks: state.tasks,
     nextTaskId: state.nextTaskId,
     inventory: state.inventory,
@@ -135,6 +140,10 @@ export function deserialize(data) {
     troughs: data.troughs || {},
     // Farms saved before crates existed simply have none.
     crates: data.crates || {},
+    // Farms saved before hay bales existed simply have none.
+    hay: data.hay || {},
+    // Farms saved before tools could be hung up simply have none.
+    tools: data.tools || {},
     tasks: data.tasks || [],
     nextTaskId: data.nextTaskId || 1,
     inventory: data.inventory || {},
@@ -152,6 +161,10 @@ export function deserialize(data) {
   const crates = reconcileCrates(state);
   if (crates.adopted || crates.dropped) {
     console.warn(`crate records repaired on load: ${crates.adopted} adopted, ${crates.dropped} dropped`);
+  }
+  const bales = reconcileHay(state);
+  if (bales.adopted || bales.dropped) {
+    console.warn(`hay records repaired on load: ${bales.adopted} adopted, ${bales.dropped} dropped`);
   }
   return state;
 }

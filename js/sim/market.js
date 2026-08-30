@@ -53,7 +53,7 @@ export const MARKET_INTERVAL = 60;
  * mushrooms: those are the foraging fantasy, and haggling over a morel cheapens
  * finding one.
  */
-export const TRADED = [...Object.keys(CROPS), 'egg', 'milk', 'wool'];
+export const TRADED = [...Object.keys(CROPS), 'egg', 'milk', 'goat_milk', 'wool'];
 
 /**
  * What share of the market each good normally accounts for.
@@ -73,7 +73,7 @@ export const TRADED = [...Object.keys(CROPS), 'egg', 'milk', 'wool'];
  */
 export const BASE_SHARE = {
   carrot: 3, wheat: 4, corn: 7, tomato: 10, cabbage: 16, eggplant: 24,
-  egg: 10, milk: 14, wool: 12,
+  egg: 10, milk: 14, goat_milk: 12, wool: 12,
 };
 
 export const PRICE_FLOOR = 0.5;

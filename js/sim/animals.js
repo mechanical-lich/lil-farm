@@ -19,6 +19,7 @@ import { OBJ } from '../world/tiledefs.js';
 import { addItem, countItem, removeItem, ITEMS } from './inventory.js';
 import { CROPS } from './crops.js';
 import { emitUnlessSuspended } from '../engine/events.js';
+import { hayList, hayLeft, eatFrom } from './hay.js';
 
 /**
  * `swims` is what lets an animal onto water, via SWIMMERS below. A duck spends
@@ -52,6 +53,29 @@ export const ANIMALS = {
     name: 'Cow', price: 500, row: 1,
     produces: 'milk', produceTicks: 1800,         // 30 min
     eats: 1, drinks: 1,
+  },
+  // The cheap way into milk. A goat costs less than a cow, is ready sooner and
+  // is worth less each time, so it pays for itself faster and earns less per
+  // hour once it has — the early animal you replace rather than the one you
+  // aspire to. Its milk is its own good, which also gives the market a fourth
+  // kind of produce to price.
+  goat: {
+    name: 'Goat', price: 350, row: 4,
+    produces: 'goat_milk', produceTicks: 1500,    // 25 min
+    eats: 1, drinks: 1,
+  },
+  // Bought to be looked at. A horse produces nothing and still wants feeding,
+  // which is the whole joke: it is the first thing on the farm that is purely
+  // yours rather than a machine for making money. Everything that asks what an
+  // animal makes has to cope with the answer being "nothing" — see the
+  // production guard in updateAnimals.
+  horse: {
+    name: 'Horse', price: 3600, row: 5,
+    eats: 1, drinks: 1,
+    // Eats from hay bales as well as feed troughs. A flag rather than a check
+    // for the string 'horse', so the next animal that ought to graze can just
+    // say so — see sim/hay.js.
+    grazes: true,
   },
   // The overnight animal. Wool is slower than milk and worth more, which makes
   // a sheep the better buy for someone who checks in twice a day and the worse
@@ -430,7 +454,11 @@ export function updateAnimals(state) {
     // A hen has nowhere to bank anything — her eggs go on the ground — so the
     // cap only applies to animals you collect from directly.
     const full = !def?.laysOnGround && (a.stock || 0) >= PRODUCE_CAP;
-    if (def && !full && !isNeglected(a)) {
+    // An animal that makes nothing simply never runs this. It would fall out
+    // anyway — every comparison against an undefined produceTicks is false —
+    // but only by accident, and a horse standing about is a case worth saying
+    // out loud rather than one that happens to work.
+    if (def && def.produces && !full && !isNeglected(a)) {
       if (a.progress < def.produceTicks) {
         a.workDebt = (a.workDebt || 0) + productionRate(a);
         while (a.workDebt >= 1 && a.progress < def.produceTicks) { a.workDebt -= 1; a.progress++; }
@@ -524,6 +552,15 @@ function moveAnimal(state, a) {
   if (wantsToLay(state, a) && !layableNearby(state, a) && seekDryLand(state, a)) return;
 
   if (wants) {
+    // Hay before the trough. A bale is the thing that runs out, so a grazer
+    // standing between the two should eat the one that will otherwise sit
+    // there for ever — and a paddock with a bale in it is a paddock the player
+    // put a bale in on purpose.
+    if (wants === 'food' && canGraze(a)) {
+      const bale = hayBeside(state, a);
+      if (bale) { eatHay(state, a, bale); return; }
+    }
+
     const trough = troughBeside(state, a, wants);
     if (trough) { drinkOrEat(state, a, trough, wants); return; }
 
@@ -533,6 +570,7 @@ function moveAnimal(state, a) {
     if (wants === 'water' && waterBeside(state, a)) { drinkFromWild(state, a); return; }
 
     if (wants === 'water' && seekWater(state, a)) return;
+    if (wants === 'food' && canGraze(a) && seekHay(state, a)) return;
     if (seekTrough(state, a, wants)) return;
   }
 
@@ -545,6 +583,43 @@ function moveAnimal(state, a) {
   }
 
   wander(state, a);
+}
+
+/** Does this animal eat hay? Read off the table above. */
+export function canGraze(a) { return !!animalDef(a?.type)?.grazes; }
+
+/** A bale with something left in it that the animal is standing next to. */
+function hayBeside(state, a) {
+  for (const bale of hayList(state)) {
+    if (hayLeft(bale) <= 0) continue;
+    if (Math.abs(bale.x - a.x) + Math.abs(bale.y - a.y) === 1) return bale;
+  }
+  return null;
+}
+
+function eatHay(state, a, bale) {
+  if (eatFrom(state, bale.x, bale.y)) a.food = FOOD_DURATION;
+}
+
+/**
+ * Walk to the nearest bale worth walking to.
+ *
+ * Same shape as seekTrough, including the closest-few cap: an animal fenced
+ * away from every bale shouldn't scan the whole farm every tick.
+ */
+function seekHay(state, a) {
+  const bales = hayList(state)
+    .filter((b) => hayLeft(b) > 0)
+    .sort((p, q) => (Math.abs(p.x - a.x) + Math.abs(p.y - a.y))
+                  - (Math.abs(q.x - a.x) + Math.abs(q.y - a.y)));
+
+  for (const b of bales.slice(0, 3)) {
+    const path = findPath(state.grid, { x: a.x, y: a.y }, { x: b.x, y: b.y },
+      { actor: actorFor(a), adjacent: true });
+    if (path && path.length > 0) { a.path = path; return true; }
+    if (path && path.length === 0) return false;   // already there
+  }
+  return false;
 }
 
 /** A stocked trough of the right kind that the animal is standing next to. */
