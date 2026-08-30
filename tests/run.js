@@ -63,15 +63,16 @@ import {
   placeStructure, buildDef, kindForGround, isReserved, canCompleteBuild,
   pendingWaterTiles, pendingGroundTiles, footprint as buildFootprint,
   barnCost, barnWork, barnCapacity, snapBarn, reservedTiles, refundFor, sizeOf,
+  BARN_LIMITS, HOUSE_LIMITS, houseCost, houseWork, BUILD_GROUPS, buildGroup,
   costLabel, placementProblem, reconcileBuildings,
 } from '../js/sim/build.js';
-import { SPRITES, TOWN, WATER, RIVER } from '../js/render/sprites.js';
+import { SPRITES, TOWN, WATER, RIVER, HOUSE } from '../js/render/sprites.js';
 import {
   TRADED, BASE_SHARE, PRICE_FLOOR, PRICE_CEILING, GLUT_RATIO, TICKS_PER_DAY, newMarket, priceOf,
   priceMultiplier, recordSale, updateMarket, basePrice, marketRows, multiplierFor,
   glutRatio,
 } from '../js/sim/market.js';
-import { barnGrid } from '../js/render/tilerender.js';
+import { barnGrid, houseGrid } from '../js/render/tilerender.js';
 import {
   FLOWER_KINDS, WILD_HUES, HUE_STEP, makeGenome, rollWildGenome, readSeedId, isFlowerSeed,
   seedIdFor as flowerSeedId, blendHue, crossGenomes, isCross, seedName, petalHue, toneCount,
@@ -2507,6 +2508,11 @@ test('everything the player can build can also be taken down', () => {
     // answers with the tool before anything else, so a leftover scythe made
     // every kind after it pass without being built at all.
     s.tools = {};
+    // And buildings, for the same reason one layer down: structureAt answers
+    // from the building *record*, so a house left over from the previous turn
+    // of the loop made the next building type report itself as a house. This
+    // was invisible while barn was the only building there was.
+    s.buildings = [];
 
     completeBuild(s, { buildKind: kind, x, y });
     const found = structureAt(s, x, y);
@@ -2763,6 +2769,184 @@ test('hanging a tool over a mushroom neither picks nor buries it', () => {
   assertEqual(toolAt(s, x, y), 'axe', 'the axe went up');
   assert(mushroomAt(s, x, y), 'the mushroom is still there to be found');
   assertEqual(countItem(s, 'mushroom_toadstool'), before, 'and was not quietly banked');
+});
+
+test('a house is built and sized like a barn, and is nothing like one otherwise', () => {
+  const s = farmWithMaterials(8700);
+  s.inventory = { wood: 500, stone: 500, wheat: 500 };
+  assert(completeBuild(s, { buildKind: 'house', x: 6, y: 6, w: 5, h: 3 }), 'built');
+
+  const house = s.buildings.find((b) => b.type === 'house');
+  assert(house, 'it went into the building records');
+  assertEqual([house.w, house.h], [5, 3], 'at the size asked for');
+  for (let y = 6; y < 9; y++) {
+    for (let x = 6; x < 11; x++) {
+      assertEqual(s.grid.getObject(x, y), OBJ.BUILDING, `${x},${y} is marked`);
+    }
+  }
+
+  // The things that make a barn a barn must not follow it.
+  assertEqual(animalCapacity(s), 0, 'a house houses no animals');
+  assert(!canHireHand(s).ok, 'and gives a farmhand nowhere to bring things');
+});
+
+test('houses may be even-width where barns may not', () => {
+  // A barn's roof is chamfered around a centre ridge board, so an even width
+  // leaves it half a tile off centre. A house roof is flat rows with no centre
+  // to miss, so the rule does not apply and the limits say so separately.
+  assert(BARN_LIMITS.oddWidth, 'a barn still insists');
+  assert(!HOUSE_LIMITS.oddWidth, 'a house does not');
+  assertEqual(snapBarn(0, 0, 3, 1, HOUSE_LIMITS), { x: 0, y: 0, w: 4, h: 2 },
+    'four wide is a legal house');
+  assertEqual(snapBarn(0, 0, 3, 1, BARN_LIMITS), { x: 0, y: 0, w: 3, h: 2 },
+    'and rounds down to three for a barn');
+});
+
+test('both colourways build, and stay told apart', () => {
+  const s = farmWithMaterials(8701);
+  s.inventory = { wood: 500, stone: 500 };
+  completeBuild(s, { buildKind: 'house', x: 4, y: 6, w: 3, h: 2 });
+  completeBuild(s, { buildKind: 'stoneHouse', x: 10, y: 6, w: 3, h: 2 });
+
+  assertEqual(structureAt(s, 4, 6).kind, 'house', 'the brick one');
+  assertEqual(structureAt(s, 10, 6).kind, 'stoneHouse', 'and the stone one');
+});
+
+test('a house is laid out with a roof over it, a door, and windows', () => {
+  const grid = houseGrid(5, 3, 'tan');
+  assertEqual(grid.above, 2, 'two rows of roof overhang the footprint');
+  assertEqual(grid.rows.length, 2, 'a ridge row and an eave row');
+  assertEqual(grid.wall.length, 3, 'and a wall row per row of footprint');
+  for (const row of [...grid.rows, ...grid.wall]) {
+    assertEqual(row.length, 5, 'every row spans the house');
+  }
+
+  const front = grid.wall[grid.wall.length - 1];
+  assertEqual(front[2], HOUSE.tan.door, 'the door is in the middle of the front');
+  assert(grid.wall[1].some((t) => t === HOUSE.tan.window), 'with windows above it');
+  assertEqual(grid.rows[0][2], HOUSE.tan.dormer, 'and a dormer in a wide roof');
+});
+
+test('a narrow house gets no dormer, which would crowd its own roof edges', () => {
+  const grid = houseGrid(3, 2, 'tan');
+  assert(!grid.rows[0].includes(HOUSE.tan.dormer), 'no dormer at three wide');
+  assertEqual(grid.rows[0], [HOUSE.tan.roofTopL, HOUSE.tan.roofTopM, HOUSE.tan.roofTopR],
+    'just the three roof pieces');
+});
+
+test('the two colourways draw from different columns of the sheet', () => {
+  // They are the same tileset four columns apart, so a mix-up would be silent:
+  // a stone house would simply draw as a brick one.
+  const tan = houseGrid(4, 2, 'tan');
+  const grey = houseGrid(4, 2, 'grey');
+  assert(tan.wall[0][0] !== grey.wall[0][0], 'the walls differ');
+  assert(tan.rows[0][0] !== grey.rows[0][0], 'and the roofs');
+  for (const piece of Object.keys(HOUSE.tan)) {
+    assertEqual(HOUSE.grey[piece][0], HOUSE.tan[piece][0] + 4, `${piece} sits four columns right`);
+    assertEqual(HOUSE.grey[piece][1], HOUSE.tan[piece][1], `${piece} on the same row`);
+  }
+});
+
+test('every house sprite is on the town sheet', () => {
+  const { w, h } = pngSize('assets/town_tilemap_packed.png');
+  for (const [way, set] of Object.entries(HOUSE)) {
+    for (const [piece, [cx, cy, sheet]] of Object.entries(set)) {
+      assertEqual(sheet, 'town', `${way}.${piece} comes off the town sheet`);
+      assert(cx >= 0 && cx < w / TILE, `${way}.${piece} column ${cx} is on the sheet`);
+      assert(cy >= 0 && cy < h / TILE, `${way}.${piece} row ${cy} is on the sheet`);
+    }
+  }
+});
+
+test('houses survive a save round trip at the size they were built', () => {
+  const s = farmWithMaterials(8702);
+  s.inventory = { wood: 500, stone: 500 };
+  completeBuild(s, { buildKind: 'stoneHouse', x: 5, y: 5, w: 7, h: 4 });
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  const house = back.buildings.find((b) => b.type === 'stoneHouse');
+  assert(house, 'still standing');
+  assertEqual([house.w, house.h], [7, 4], 'and still that size');
+  assertEqual(back.grid.getObject(8, 6), OBJ.BUILDING, 'with its footprint still marked');
+});
+
+test('every buildable is in exactly one build group', () => {
+  // The menu is built from the groups, not from BUILDABLES, so a recipe that
+  // isn't in a group is not in the menu at all: invisible, unbuildable, and
+  // impossible to spot by reading either file on its own.
+  const listed = BUILD_GROUPS.flatMap((g) => g.kinds);
+  const all = Object.keys(BUILDABLES);
+
+  for (const kind of all) {
+    const times = listed.filter((k) => k === kind).length;
+    assertEqual(times, 1, `${kind} should appear in exactly one group`);
+  }
+  for (const kind of listed) {
+    assert(BUILDABLES[kind], `${kind} is in a group but is not a buildable`);
+  }
+  assertEqual(listed.length, all.length, 'and the two lists are the same size');
+});
+
+test('the build groups are named and non-empty', () => {
+  const ids = BUILD_GROUPS.map((g) => g.id);
+  assertEqual(new Set(ids).size, ids.length, 'no two groups share an id');
+  for (const g of BUILD_GROUPS) {
+    assert(g.name && g.name.length > 0, `${g.id} has a name to put on the button`);
+    assert(g.kinds.length > 0, `${g.id} has something in it`);
+    assertEqual(buildGroup(g.id), g, 'and can be looked up by id');
+  }
+  assertEqual(buildGroup('nonsense'), null, 'an unknown group is simply nothing');
+});
+
+test('the things a farm is made of come before the ornaments', () => {
+  // The point of grouping: the barn was the twenty-first of twenty-one entries
+  // in a row nearly nine screens wide. Whatever else moves, it opens the menu.
+  const buildings = buildGroup('buildings');
+  assertEqual(buildings.kinds[0], 'barn', 'the barn is first');
+  assert(buildings.kinds.includes('house'), 'houses are buildings');
+  assert(!buildings.kinds.includes('scythe'), 'a scythe is not');
+
+  const decor = buildGroup('decor');
+  for (const kind of ['well', 'wheelbarrow', 'barrel', 'bucket']) {
+    assert(decor.kinds.includes(kind), `${kind} is an ornament`);
+  }
+  // Every hung tool is decoration, and none of them is anywhere else.
+  for (const [kind, def] of Object.entries(BUILDABLES)) {
+    if (def.overlay) assert(decor.kinds.includes(kind), `${kind} belongs with the ornaments`);
+  }
+});
+
+test('what an animal eats and drinks is filed under Animals, not Buildings', () => {
+  // Where a thing is *made* is not how it is *found*: someone hunting for a
+  // trough is thinking about a hungry cow, not about carpentry.
+  const animals = buildGroup('animals');
+  assertEqual(animals.kinds, ['waterTrough', 'feedTrough', 'hayBale'],
+    'both troughs and the hay');
+
+  const buildings = buildGroup('buildings');
+  for (const kind of animals.kinds) {
+    assert(!buildings.kinds.includes(kind), `${kind} has left the buildings`);
+  }
+});
+
+test('the group buttons fit a phone without scrolling', () => {
+  // Four groups at 393px is close: 'Decorations' pushed the row 35px past the
+  // 377 it has, which put the last shelf behind a swipe — the exact thing
+  // grouping removed. Names are a budget, so this holds them to one.
+  const budget = 46;      // characters across every group button, counts aside
+  const spent = BUILD_GROUPS.reduce((n, g) => n + g.name.length, 0);
+  assert(spent <= budget, `group names total ${spent} characters, budget is ${budget}`);
+  for (const g of BUILD_GROUPS) {
+    assert(g.name.length <= 12, `"${g.name}" is too long for the row`);
+  }
+});
+
+test('no group is long enough to bury what is at the end of it', () => {
+  // The flat list held twenty-one. The whole change is worth nothing if one
+  // group quietly grows back to that.
+  for (const g of BUILD_GROUPS) {
+    assert(g.kinds.length <= 12, `${g.name} has ${g.kinds.length} in it — split it`);
+  }
 });
 
 test('demolishing refunds half the materials, rounded down', () => {

@@ -34,7 +34,7 @@ Cost is a flat base plus a rate per tile, set so the smallest barn comes out at 
 ## The market
 Crops and animal produce sell at prices that move. The farm this was written for had seventy-two plots of eggplant and nothing else — and three hundred unplanted cabbage seeds in the bag.
 
-Eggplant does not win on price. Measured, it is the *worst* crop in the game per minute: wheat earns 4.80 a minute to eggplant's 2.00. It wins because nobody sows but the player, so the only crop worth growing is the one that survives being left alone for eight hours. Price alone cannot fix that, and this does not try to. What it fixes is the choice *between* the crops you can walk away from.
+Eggplant does not win on price. Measured, it is the *worst* crop in the game per minute, at 2.00 against corn's 4.20. It wins because nobody sows but the player, so the only crop worth growing is the one that survives being left alone for eight hours. Price alone cannot fix that, and this does not try to. What it fixes is the choice *between* the crops you can walk away from.
 
 **The town has no fixed appetite — only opinions about proportions.** A fixed one breaks: a farm selling a thousand eggplants a day would sit at the floor price for ever, in every good, which is a pay cut rather than a decision. So the market asks what *share* of your sales each good is, against the share it wanted. Doubling the size of the farm changes nothing; changing what you plant changes everything.
 
@@ -215,7 +215,8 @@ There is a shop where you can sell items in your inventory and buy new items suc
 - The rotation is derived from the game clock rather than stored, so coming back after days away shows the right stock with no bookkeeping to replay.
 - **The sell list is grouped under headings** — crops, what the animals gave you, foraged, materials, seeds — with what each group is worth beside its name.  It started as four things in alphabetical order and is now twenty-odd, which is long enough that "where's the milk?" became a real question.  The grouping is by **where a thing came from**, because that's how you think about your own bag.  A heading disappears with the last of its contents.
 - Seeds resell at half price — enough to undo a misbuy, never a money loop.
-- **Balance shape:** short crops pay better per minute, long crops pay far better per planting.  A 4-minute carrot is great while you're watching and wastes eleven hours while you're not, so the slow crops have to be the obvious choice for an overnight field.
+- **Balance shape:** long crops pay far better per planting, which is what makes them the obvious choice for an overnight field.  Profit per planting climbs from ~17 (carrot) to ~180 (eggplant).
+- **Per minute no longer slides with length**, and that is accepted rather than overlooked.  Carrot and wheat were slowed to 8 and 10 minutes so a field of them stops being a treadmill; doubling the time halves the rate, so they fell to ~2.1 and ~2.4 while corn stayed at ~4.2.  **Corn is now the best crop in the game by rate**, and beats carrot and wheat on per-planting too — their remaining edge is cheap seed and a short cycle for someone actively watching.  Putting the old order back would have meant moving yields or prices, and the economy was judged not worth disturbing for it.
 
 ## Farming
 There is a task to prepare the land for farming which changes the tile to tilled.  You can then queue a task to add a seed from inventory to the tilled tile to plant it.   After some time it will start growing and eventually it'll be harvestable.  
@@ -245,6 +246,10 @@ Tilled land has a dry and a wet version in the tilesheet, and each crop has a ye
 **Why the pressure sits at the harvest end.**  An earlier version of this rule killed crops that went unwatered past the halfway point of their life.  That turned out to punish ambition badly: the farmer plants tiles one at a time, so a 30-tile field took longer to plant than the deadline allowed, and *the entire field* died before the farmer could get round to watering it — with bigger fields failing worse.  Gating growth on watering instead means planting is always safe no matter how much you queue, and the deadline that remains is one the player can actually see and act on: a ripe field sitting there waiting to be picked.
 
 ## Construction
+The build picker is **grouped**: Buildings, Animals, Land, Decor, with the things in a group one tap in.  Troughs and hay sit under Animals rather than Buildings, because where a thing is *made* is not how it is *found* — somebody hunting for a trough is thinking about a hungry cow, not about carpentry.  Flat, the list had reached twenty-one entries — measured at 3,308px of buttons in a 377px row on the phone this is played on, nearly nine screens of sideways swiping, with the barn at the far end of all of them.  Ornaments had arrived in bulk and buried the things a farm is actually made of.  Grouped, the entry point fits in one screen with no scrolling and the barn opens the Buildings shelf.
+
+Two taps to reach a fence instead of one, and the row stays a single line tall, which is the constraint the whole sub-picker exists under.  The group names are a budget as much as a label: at four groups, spelling the last one "Decorations" pushed the row 35px past the 377 a phone has and put that shelf behind a swipe, so it is "Decor" and there is a test holding the names to a width that fits.  Group membership is written out rather than derived from a field on each recipe, because the order inside a group is not the order the recipes happen to be declared in — and a buildable missing from every group would be missing from the menu entirely, so there is a test.
+
 You can build things like farms, fences, barrels, water/feed troughs, and roads.  
 
 - The build tool offers fence, gate, two kinds of road, water trough, feed trough and crate, each showing its material cost.  Materials come from chopping trees and clearing rocks, or from the shop.
@@ -259,6 +264,16 @@ A bale is the only feed on the farm that runs out for good.  A trough is a fixtu
 - **Only grazers eat from one**, which today means horses.  That's a flag on the species rather than a check for the word "horse", so the next animal that ought to graze can just say so.
 - **Hay before the trough.**  A grazer standing between the two eats the bale, because the bale is the thing that would otherwise sit there for ever — and a paddock with a bale in it is a paddock you put a bale in on purpose.
 - A half-eaten bale **shows what's left**; a fresh one looks like plain scenery.  When the last helping goes, the bale and the ground it blocked go with it.
+
+### Houses
+Two houses, from the town sheet: **House** (blue roof, brick walls) and **Stone house** (red roof, stone walls), both **from 38 wood and 28 stone** and dragged out by their corners exactly as a barn is.
+
+- **They are scenery, not infrastructure.**  A house holds nothing, houses nobody and draws no farmhands — `animalCapacity` and the hands' rest-spot picker both ask for barns by name, so a house is invisible to them.
+- **A house may be an even width where a barn may not.**  A barn's roof is chamfered around a centre ridge board, so an even width would leave it half a tile off centre; a house roof is flat rows of left/middle/right pieces with no centre to miss.  The two recipes carry their own limits rather than sharing one rule.
+- Two rows of roof overhang the footprint, the same trick the barn uses.  The door sits in the middle of the front, windows go in the row above it where there is one, and a house five or more wide gets a **dormer** in its ridge — any narrower and the dormer crowds the roof's own edges.
+- The art is a real tileset rather than one fixed picture, which is what makes sizing possible at all.  The second colourway is the first shifted four columns, so one function describes both.
+
+The loose fittings — a doorway, a hung door, a window, a dormer and a gable peak — are catalogued but not yet placeable.  Dropping them on a wall is the same job the overlay layer already does for hung tools.
 
 ### Hung tools
 A **watering can**, **shovel**, **axe** and **scythe** hang on whatever is already there.  They're the only buildables that don't own their tile: no mark on the object grid, no blocking, and a placement check short enough to let them share a square with a barn wall, a fence post or bare grass alike.  Making them fight the barn for the square would mean never being able to hang anything anywhere you'd want it.

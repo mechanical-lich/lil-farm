@@ -95,6 +95,34 @@ export const RIVER = {
   pool: [1, 2, 'battle'],          // junctions, and a river of one tile
 };
 
+/**
+ * Houses, from the town sheet — a proper tileset rather than one fixed picture,
+ * which is what makes a house sizable the way a barn is.
+ *
+ * Two colourways sit side by side, the second exactly four columns right of the
+ * first, so one function describes both: blue roof over tan brick, and red roof
+ * over grey stone.
+ *
+ * Each has a two-row roof (a ridge row and an eave row, in left/middle/right
+ * pieces), a wall row in the same three pieces, and a stone footing row. The
+ * loose fittings — a doorway, a hung door, a window, a dormer and a gable peak
+ * — are separate tiles meant to be dropped onto a wall, which is what the
+ * overlay layer in sim/tools.js already does for hung tools.
+ */
+const houseSet = (dx) => ({
+  roofTopL: [dx + 0, 4, 'town'], roofTopM: [dx + 1, 4, 'town'], roofTopR: [dx + 2, 4, 'town'],
+  eaveL: [dx + 0, 5, 'town'], eaveM: [dx + 1, 5, 'town'], eaveR: [dx + 2, 5, 'town'],
+  dormer: [dx + 3, 4, 'town'],
+  gable: [dx + 3, 5, 'town'],
+  wallL: [dx + 0, 6, 'town'], wallM: [dx + 1, 6, 'town'], wallR: [dx + 3, 6, 'town'],
+  doorway: [dx + 2, 6, 'town'],
+  window: [dx + 0, 7, 'town'],
+  door: [dx + 2, 7, 'town'],
+  footingL: [dx + 0, 8, 'town'], footingM: [dx + 1, 8, 'town'], footingR: [dx + 2, 8, 'town'],
+});
+
+export const HOUSE = { tan: houseSet(0), grey: houseSet(4) };
+
 export const TOWN = {
   grass: [0, 0, 'town'],
   grassClump: [1, 0, 'town'],

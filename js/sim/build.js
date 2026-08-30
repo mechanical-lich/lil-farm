@@ -23,6 +23,65 @@ import { toolAt, placeTool, removeTool } from './tools.js';
  * size is [width, height] in tiles. Troughs are the first two-tile structures
  * in the game; their anchor is the left-hand tile.
  */
+/**
+ * The build menu, in groups.
+ *
+ * Flat, the list had grown to twenty-one entries — measured at 3,308px of
+ * buttons in a 377px row on the phone this is played on, which is nearly nine
+ * screens of sideways swiping with the barn at the far end. Ornaments arrived
+ * in bulk and buried the things a farm is actually made of.
+ *
+ * Membership is written out rather than derived from a field on each recipe,
+ * because the order inside a group matters and is not the order the recipes
+ * happen to be declared in: the barn and the houses come first here, being what
+ * a player opens this menu for, while a bucket can wait at the end.
+ *
+ * Every buildable must appear in exactly one group or it simply isn't in the
+ * menu — invisible, unbuyable, and impossible to notice from the code. There's
+ * a test.
+ */
+export const BUILD_GROUPS = [
+  {
+    id: 'buildings',
+    name: 'Buildings',
+    kinds: ['barn', 'house', 'stoneHouse', 'crate', 'fence', 'gate'],
+  },
+  // Everything an animal eats or drinks from. These were among the buildings,
+  // which is true of how they are made and useless for how they are found: a
+  // player looking for a trough is thinking about a hungry cow, not about
+  // carpentry.
+  {
+    id: 'animals',
+    name: 'Animals',
+    kinds: ['waterTrough', 'feedTrough', 'hayBale'],
+  },
+  {
+    id: 'land',
+    name: 'Land',
+    kinds: ['dirtRoad', 'road', 'pond', 'river'],
+  },
+  {
+    id: 'decor',
+    // 'Decor', not 'Decorations': with four groups the longer word pushed the
+    // row 35px past the phone's 377, which put the last shelf behind a swipe —
+    // the exact thing grouping was done to remove.
+    name: 'Decor',
+    kinds: ['well', 'wheelbarrow', 'barrel', 'bucket',
+      'wateringCan', 'shovel', 'axe', 'scythe'],
+  },
+];
+
+export function buildGroup(id) { return BUILD_GROUPS.find((g) => g.id === id) || null; }
+
+/**
+ * How big a house may be.
+ *
+ * No odd-width rule, unlike a barn. A barn's roof is chamfered around a centre
+ * ridge board, which an even width would leave half a tile off centre; a house
+ * roof is flat rows of left/middle/right pieces with no centre to miss.
+ */
+export const HOUSE_LIMITS = { minW: 3, maxW: 9, minH: 2, maxH: 5 };
+
 export const BUILDABLES = {
   fence: {
     name: 'Fence', obj: OBJ.FENCE, cost: { wood: 2 }, work: 6, size: [1, 1],
@@ -120,6 +179,20 @@ export const BUILDABLES = {
     name: 'Crate', obj: OBJ.CRATE, cost: { wood: 12 }, work: 10, size: [1, 1],
     hint: 'Farmhands stow one kind of goods here',
   },
+  // Houses. Scenery rather than infrastructure: they hold nothing, house
+  // nobody and draw no farmhands — animalCapacity and the hands' rest-spot
+  // picker both ask for barns by name, so a house is invisible to them. Two
+  // colourways as two recipes, which is the whole of "chosen at build time".
+  house: {
+    name: 'House', obj: OBJ.BUILDING, cost: houseCost(3, 2), work: houseWork(3, 2),
+    size: [3, 2], building: 'house', sizable: true, limits: HOUSE_LIMITS,
+    hint: 'Blue roof, brick walls — drag out its corners',
+  },
+  stoneHouse: {
+    name: 'Stone house', obj: OBJ.BUILDING, cost: houseCost(3, 2), work: houseWork(3, 2),
+    size: [3, 2], building: 'stoneHouse', sizable: true, limits: HOUSE_LIMITS,
+    hint: 'Red roof, stone walls — drag out its corners',
+  },
   barn: {
     name: 'Barn', obj: OBJ.BUILDING, cost: barnCost(3, 2), work: barnWork(3, 2),
     // Footprint is the ground it stands on; the roof draws two rows higher,
@@ -140,6 +213,18 @@ export const BUILDABLES = {
  * put on a farm, and the art keeps working past it.
  */
 export const BARN_LIMITS = { minW: 3, maxW: 9, minH: 2, maxH: 5, oddWidth: true };
+
+/**
+ * What a house costs. Same shape as a barn — a flat base plus a rate per tile —
+ * but it buys you nothing but the look of it, so it is priced a shade under the
+ * barn that would house your animals.
+ */
+export function houseCost(w, h) {
+  const tiles = w * h;
+  return { wood: 20 + 3 * tiles, stone: 10 + 3 * tiles };
+}
+
+export function houseWork(w, h) { return 40 + 8 * w * h; }
 
 /**
  * What a barn of this size costs, and what it can do.

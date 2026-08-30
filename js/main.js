@@ -420,6 +420,12 @@ function buildingPlacement(state, kind, size) {
  */
 function barnPlacement(state, kind) {
   const def = buildDef(kind);
+  // Barns and houses are both dragged out, and they don't agree on what a legal
+  // rectangle is — a barn insists on an odd width for its ridge board, a house
+  // has no ridge to miss. The recipe carries its own limits, and the label says
+  // whichever thing is actually being built.
+  const limits = def.limits || BARN_LIMITS;
+  const noun = def.name.toLowerCase();
   let anchor = null;
 
   return {
@@ -427,34 +433,34 @@ function barnPlacement(state, kind) {
     h: 1,
     // The ghost draws itself at whatever size the two corners currently imply.
     draw: (ctx, sheets, at) => {
-      if (at.w < BARN_LIMITS.minW || at.h < BARN_LIMITS.minH) return;
-      drawBuilding(ctx, sheets, { ...at, type: kind });
+      if (at.w < limits.minW || at.h < limits.minH) return;
+      drawBuilding(ctx, sheets, { ...at, type: def.building });
     },
     pick: (x, y) => {
       if (!anchor) {
         anchor = { x, y };
         return {
           x, y, w: 1, h: 1, valid: false,
-          label: '✓ Build barn', hint: 'Now tap the opposite corner',
+          label: `✓ Build ${noun}`, hint: 'Now tap the opposite corner',
         };
       }
 
-      const box = snapBarn(anchor.x, anchor.y, x, y);
+      const box = snapBarn(anchor.x, anchor.y, x, y, limits);
       if (!box) {
         // Show the rectangle they actually drew, so it is obvious how short it
         // falls rather than the ghost silently refusing to appear.
         return {
           x: Math.min(anchor.x, x), y: Math.min(anchor.y, y),
           w: Math.abs(x - anchor.x) + 1, h: Math.abs(y - anchor.y) + 1,
-          valid: false, label: '✓ Build barn',
-          hint: `A barn is at least ${BARN_LIMITS.minW} by ${BARN_LIMITS.minH}`,
+          valid: false, label: `✓ Build ${noun}`,
+          hint: `A ${noun} is at least ${limits.minW} by ${limits.minH}`,
         };
       }
 
       const size = [box.w, box.h];
       const problem = placementProblem(state, kind, box.x, box.y, size);
       const afford = canAfford(state, kind, size);
-      const label = `✓ Build ${box.w}×${box.h} barn`;
+      const label = `✓ Build ${box.w}×${box.h} ${noun}`;
       if (problem) {
         // Say which rule was broken. "Something is in the way" covered running
         // off the edge of the player's own land too, and sent them hunting for

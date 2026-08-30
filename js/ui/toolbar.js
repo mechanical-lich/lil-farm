@@ -8,7 +8,7 @@
 // never grows by more than a single row.
 
 import { CROPS, seedIdFor } from '../sim/crops.js';
-import { BUILDABLES, canAfford, costLabel } from '../sim/build.js';
+import { BUILDABLES, BUILD_GROUPS, buildGroup, canAfford, costLabel } from '../sim/build.js';
 import { getPref } from '../engine/prefs.js';
 import { countItem } from '../sim/inventory.js';
 import { on } from '../engine/events.js';
@@ -33,7 +33,7 @@ export const TOOLS = [
   { id: 'plant', icon: '🌱', name: 'Plant', hint: 'Sow the selected seed' },
   { id: 'clear', icon: '🪓', name: 'Clear', hint: 'Chop, clear, and take down what you built' },
   { id: 'till', icon: '🚜', name: 'Till', hint: 'Tap both ends of a row to plough it' },
-  { id: 'build', icon: '🔨', name: 'Build', hint: 'Fences, gates, roads, troughs and crates' },
+  { id: 'build', icon: '🔨', name: 'Build', hint: 'Buildings, land and decorations' },
 ];
 
 export function initToolbar(state, { onToolChange } = {}) {
@@ -43,6 +43,10 @@ export function initToolbar(state, { onToolChange } = {}) {
   let tool = 'auto';
   let cropType = 'carrot';
   let buildKind = 'fence';
+  // Which group of buildables the row is showing, or null for the group list
+  // itself. Kept between visits: someone laying a row of fences should not have
+  // to walk back in through the menu for every one.
+  let openGroup = null;
 
   /**
    * Draws the bar. Icon-only is a preference because the bar scrolls sideways
@@ -78,6 +82,8 @@ export function initToolbar(state, { onToolChange } = {}) {
   subRow.addEventListener('click', (e) => {
     const crop = e.target.closest('button[data-crop]');
     if (crop) { cropType = crop.dataset.crop; render(); return; }
+    const group = e.target.closest('button[data-buildgroup]');
+    if (group) { openGroup = group.dataset.buildgroup || null; renderBuildables(); return; }
     const build = e.target.closest('button[data-build]');
     if (build) { buildKind = build.dataset.build; render(); }
   });
@@ -101,8 +107,31 @@ export function initToolbar(state, { onToolChange } = {}) {
     )).join('');
   }
 
+  /**
+   * The build picker: groups first, then the things in one group.
+   *
+   * Two taps to reach a fence instead of one, which buys back nearly nine
+   * screens of sideways swiping — the flat list had grown to twenty-one entries
+   * and put the barn at the far end of all of them. The row stays one line tall
+   * either way, which is the constraint the whole sub-picker exists under.
+   */
   function renderBuildables() {
-    subRow.innerHTML = Object.entries(BUILDABLES).map(([kind, def]) => {
+    const group = buildGroup(openGroup);
+    if (!group) {
+      subRow.innerHTML = BUILD_GROUPS.map((g) => {
+        // Say how many are in there, so the groups read as shelves rather than
+        // as three buttons that might do anything.
+        const n = g.kinds.length;
+        return `<button data-buildgroup="${g.id}" title="${g.name}">` +
+          `${g.name} <b>${n}</b></button>`;
+      }).join('');
+      return;
+    }
+
+    const back = '<button class="sub-back" data-buildgroup="" title="Back to the groups">‹</button>';
+    subRow.innerHTML = back + group.kinds.map((kind) => {
+      const def = BUILDABLES[kind];
+      if (!def) return '';
       // Greyed out rather than hidden: the player should see what exists and
       // what it would cost, even when they can't afford it yet.
       const afford = canAfford(state, kind).ok;

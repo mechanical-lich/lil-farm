@@ -199,6 +199,15 @@ body {
   white-space: nowrap;
 }
 
+/* The back arrow out of a build group. Narrow on purpose — it is a way out,
+   not a choice, and every pixel it takes is one the buildables don't get. */
+#sub-row button.sub-back {
+  padding: 6px 10px;
+  font-weight: 700;
+  font-size: 18px;
+  line-height: 1;
+}
+
 #toolbar button.on,
 #sub-row button.on {
   background: var(--accent);

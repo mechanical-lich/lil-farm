@@ -6,7 +6,7 @@ import { TILE } from '../config.js';
 /** Half a tile: autotiling works a quarter of a tile at a time. */
 const HALF = TILE / 2;
 import { GROUND, OBJ, isTilled, isWater } from '../world/tiledefs.js';
-import { SPRITES, TOWN, WATER, RIVER, BARN, CAPSULES, srcRect, sheetFor } from './sprites.js';
+import { SPRITES, TOWN, WATER, RIVER, BARN, HOUSE, CAPSULES, srcRect, sheetFor } from './sprites.js';
 import { mushroomAt } from '../sim/mushrooms.js';
 import { crateAt, CRATE_CAPACITY } from '../sim/crates.js';
 import { hayAt, hayLeft, HAY_HELPINGS } from '../sim/hay.js';
@@ -511,7 +511,10 @@ function doorRow(w) {
  */
 export function drawBuilding(ctx, sheets, building) {
   const [w, h] = building.w > 0 ? [building.w, building.h] : [3, 2];
-  const { rows, wall, above } = barnGrid(w, h);
+  const colourway = HOUSE_COLOURWAYS[building.type];
+  const { rows, wall, above } = colourway
+    ? houseGrid(w, h, colourway)
+    : barnGrid(w, h);
   const px = building.x * TILE;
 
   rows.forEach((row, i) => row.forEach((sprite, j) => {
@@ -520,6 +523,65 @@ export function drawBuilding(ctx, sheets, building) {
   wall.forEach((row, i) => row.forEach((sprite, j) => {
     if (sprite) blit(ctx, sheets, sprite, px + j * TILE, (building.y + i) * TILE);
   }));
+}
+
+/** Which set of house art each building type draws with. */
+const HOUSE_COLOURWAYS = { house: 'tan', stoneHouse: 'grey' };
+
+const HOUSE_GRIDS = new Map();
+
+/**
+ * A house of this size, in the same shape barnGrid returns.
+ *
+ * Memoised for the same reason: houses are drawn every frame they are on
+ * screen and there are only so many legal sizes.
+ */
+export function houseGrid(w, h, colourway = 'tan') {
+  const key = `${colourway}:${w}x${h}`;
+  const cached = HOUSE_GRIDS.get(key);
+  if (cached) return cached;
+
+  const grid = layOutHouse(w, h, colourway);
+  HOUSE_GRIDS.set(key, grid);
+  return grid;
+}
+
+/**
+ * Two rows of roof over the walls, and a stone footing under them.
+ *
+ * Much simpler than the barn, and deliberately: the barn's roof is chamfered
+ * because it is the thing you look at, while a house is scenery you put a row
+ * of. Flat rows also mean an even width works, which is why a house has no
+ * odd-width rule where a barn does — there is no centre ridge to sit off.
+ *
+ * The bottom wall row carries the door, and the row above it takes windows if
+ * the house is tall enough to have one. A wide house gets a dormer in its ridge
+ * — it needs the width or the dormer crowds the roof's own edges.
+ */
+function layOutHouse(w, h, colourway) {
+  const A = HOUSE[colourway] || HOUSE.tan;
+  const pick = (j, L, M, R) => (j === 0 ? L : j === w - 1 ? R : M);
+
+  const ridge = Array.from({ length: w }, (_, j) => pick(j, A.roofTopL, A.roofTopM, A.roofTopR));
+  if (w >= 5) ridge[Math.floor((w - 1) / 2)] = A.dormer;
+  const eave = Array.from({ length: w }, (_, j) => pick(j, A.eaveL, A.eaveM, A.eaveR));
+
+  const wall = [];
+  for (let i = 0; i < h; i++) {
+    wall.push(Array.from({ length: w }, (_, j) => pick(j, A.wallL, A.wallM, A.wallR)));
+  }
+
+  // The door goes in the middle of the front, and windows in the row above it
+  // where there is one — a blank wall three tiles high reads as a warehouse.
+  const door = Math.floor((w - 1) / 2);
+  wall[h - 1][door] = A.door;
+  if (h >= 2) {
+    for (let j = 1; j < w - 1; j += 2) {
+      if (j !== door) wall[h - 2][j] = A.window;
+    }
+  }
+
+  return { rows: [ridge, eave], wall, above: 2 };
 }
 
 function drawBuildingsEndingAt(ctx, sheets, state, y) {

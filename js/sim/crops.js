@@ -24,12 +24,22 @@ import { emitUnlessSuspended } from '../engine/events.js';
  * growTicks is the full seedling-to-ripe life cycle in seconds, counted only
  * while the crop is watered.
  *
- * Balance shape: short crops pay better *per minute*, long crops pay far better
- * *per planting*. That's deliberate for a game you check on twice a day — a
- * 4-minute carrot is great while you're watching and wastes eleven hours while
- * you're not, so the long crops have to be the obvious choice for an overnight
- * field. Profit per minute slides from ~4.3 (carrot) down to ~2.0 (eggplant),
- * while profit per planting climbs from ~17 to ~180.
+ * Balance shape: long crops pay far better *per planting*, which is what makes
+ * them the obvious choice for an overnight field in a game you check on twice a
+ * day. Profit per planting climbs from ~17 (carrot) to ~180 (eggplant).
+ *
+ * Profit per *minute* no longer slides cleanly with length, and that is a
+ * deliberate acceptance rather than an oversight. Carrot and wheat were slowed
+ * to 8 and 10 minutes so a field of them stops being a treadmill; doubling the
+ * time exactly halves the rate, so they fell from ~4.3 and ~4.8 to ~2.1 and
+ * ~2.4 while corn stayed at ~4.2. Corn is now the best crop in the game by
+ * rate, and carrot and wheat are beaten by it on both rate and per-planting —
+ * their remaining edge is cheap seed and a short cycle for someone actively
+ * watching. Restoring the old order would have meant moving yields or prices,
+ * which was judged not worth disturbing.
+ *
+ * Current rates, measured: corn 4.2, tomato 3.0, cabbage 2.8, wheat 2.4,
+ * carrot 2.1, eggplant 2.0 per minute.
  */
 export const CROPS = {
   carrot:   { name: 'Carrot',   growTicks: 480,  seedCost: 8,  yield: [2, 3] },   // 8 min
