@@ -15,6 +15,7 @@
 import { emitUnlessSuspended } from '../engine/events.js';
 import { GROUND, OBJ } from '../world/tiledefs.js';
 import { PLOT, plotCoords } from '../world/land.js';
+import { potAt } from './pots.js';
 import { cropAt } from './crops.js';
 import { addItem } from './inventory.js';
 import { isReserved } from './build.js';
@@ -138,7 +139,12 @@ function bareGround(state, x, y) {
   const grid = state.grid;
   if (!grid.inBounds(x, y)) return false;
   if (!grid.isOwned(x, y)) return false;
-  if (grid.getGround(x, y) !== GROUND.GRASS) return false;
+  // A pot is soil the player carried there, so it stands in for grass — which
+  // is the entire reason to own one. Without this a pot could only go where a
+  // flower would already have grown, and would be decoration around something
+  // you could have had anyway. With it, a row of pots down a stone path is a
+  // flower bed where no flower bed could exist.
+  if (grid.getGround(x, y) !== GROUND.GRASS && !potAt(state, x, y)) return false;
   if (grid.getObject(x, y) !== OBJ.NONE) return false;
   if ((state.flowers || {})[`${x},${y}`]) return false;
   if (cropAt(state, x, y)) return false;

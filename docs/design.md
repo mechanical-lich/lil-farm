@@ -175,6 +175,15 @@ Cleared land doesn't stay clear. Weeds sprout again on open grass you own, slowl
 
 The same shape — slow, capped, seeded scatter over open grass — is what the mushrooms will want later.
 
+## Calling work off
+The queue panel lists **every** task, uncapped. It used to stop at forty rows on the grounds that a queue is not a spreadsheet, which held right up until a fat-fingered drag queued two hundred tiles: everything past the cap could not be reached, and so could not be cancelled.  A list you cannot scroll to the end of is a list that traps work in it.  The half-second refresh now touches only the row being worked on, since that is the only progress figure that ticks — rebuilding a few hundred rows twice a second on a phone was affordable at forty and is not at two hundred.
+
+The **Cancel** tool calls work off by tapping it on the map, which is often quicker than hunting for it in the list.  It drags like the other tools, so a mis-drag is undone by the same gesture that made it.
+
+- A tap **anywhere on a queued building** finds it, not just its anchor tile — the outline you can see is the whole of it.
+- It runs **before every other tool** but **after** the panel and placement guards.  Before, because a queued build reserves its ground and reserved ground refuses everything — which is exactly where the thing you are trying to call off is standing.  After, because a tap meant to dismiss an open panel must not cancel work instead.
+- Where two jobs sit on one tile, the **later** one comes off first, so tapping repeatedly peels the stack off in the order it went on.
+
 ## Moving things about
 The **Move** tool sits next to Tap, since they're the two that act on what's already there rather than on the ground. It turns press-and-drag into picking something up. Press on the farmer, a farmhand or an animal, drag, and let go where you want it. Bare ground still pans the view, so the tool never traps you.
 
@@ -274,6 +283,16 @@ Two houses, from the town sheet: **House** (blue roof, brick walls) and **Stone 
 - The art is a real tileset rather than one fixed picture, which is what makes sizing possible at all.  The second colourway is the first shifted four columns, so one function describes both.
 
 The loose fittings — a doorway, a hung door, a window, a dormer and a gable peak — are catalogued but not yet placeable.  Dropping them on a wall is the same job the overlay layer already does for hung tools.
+
+### Flower pots
+A **flower pot** ($40, from the shop's decorations) is soil you can put down anywhere.
+
+- **A pot brings its own soil**, so it stands in for grass in the "may a flower grow here" test.  That is the entire reason to own one: a pot that only worked on grass would be a pot you never needed, because you could have planted there anyway.  With it, a row of pots down a stone road is a flower bed where no flower bed could exist.
+- **A potted flower is an ordinary flower.**  The pot lives in its own tile-keyed layer and never touches the object grid, so breeding, watering, picking, the journal and the spawn cap all work with no changes at all — "acts like it's planted in that tile" isn't implemented, it's simply true.  Had the pot owned the tile instead, every flower path would have needed to learn about pots, because the grid holds one object per tile and a planted pot has to be both.
+- Potted flowers **count against the flower ceiling** like any other, so a big collection of them will eventually stop the beds crossing.
+- **Drawn under, with the flower lifted out.**  The mouth is rows 6-8 of the sprite and every flower has its stem base on its own bottom row, so the lift is ten — at five the base landed on the pot's body front and read as a flower standing *behind* a pot.
+- A watered pot is **a second frame of art**, its soil going from pale to dark, rather than a wash drawn over the dry one.  Nothing is tinted on the ground, which matters because a pot may be standing on a stone road and darkening the road to say the soil in the pot is damp would be saying it about the wrong thing.  An **empty** pot is always the dry frame, and correctly so: wetness is asked of the flower, and a pot with nothing in it cannot be watered at all.
+- Clearing takes the **flower first, then the pot, then whatever it stands on**.  Taking a pot away refunds nothing: it was bought with money and there is no pot to put in the bag.
 
 ### Hung tools
 A **watering can**, **shovel**, **axe** and **scythe** hang on whatever is already there.  They're the only buildables that don't own their tile: no mark on the object grid, no blocking, and a placement check short enough to let them share a square with a barn wall, a fence post or bare grass alike.  Making them fight the barn for the square would mean never being able to hang anything anywhere you'd want it.

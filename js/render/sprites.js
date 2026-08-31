@@ -386,7 +386,7 @@ function loadImage(src) {
  *   flowers: HTMLImageElement}>}
  */
 export async function loadSheets() {
-  const [farm, town, emotes, shrooms, animals, battle, barn, flowers] = await Promise.all([
+  const [farm, town, emotes, shrooms, animals, battle, barn, flowers, decor] = await Promise.all([
     loadImage('assets/tilemap_packed.png'),
     loadImage('assets/town_tilemap_packed.png'),
     loadImage('assets/emotes.png'),
@@ -395,6 +395,7 @@ export async function loadSheets() {
     loadImage('assets/battle_tilemap_packed.png'),
     loadImage('assets/barn.png'),
     loadImage('assets/flora/flowers.png'),
+    loadImage('assets/decorations.png'),
   ]);
   buildCapsules(farm);
 
@@ -407,10 +408,21 @@ export async function loadSheets() {
   // handed to the palette cache rather than blitted from directly.
   useFlowerSheet(flowers);
 
-  return { farm, town, emotes, shrooms, animals, battle, barn, flowers };
+  return { farm, town, emotes, shrooms, animals, battle, barn, flowers, decor };
 }
 
 /** Resolves which sheet image a sprite reference belongs to. */
+/**
+ * Decorations that aren't on any of the packed sheets — their own small image,
+ * one sprite per column, so adding to it is appending rather than finding a gap.
+ */
+export const DECORATIONS = {
+  pot: [0, 0, 'decor'],
+  // The same pot with damp soil in it. Two frames of art rather than a wash
+  // drawn over one, which is both nicer and simpler — see drawPots.
+  potWatered: [1, 0, 'decor'],
+};
+
 export function sheetFor(sheets, sprite) {
   return sheets[sprite[2] || 'farm'];
 }

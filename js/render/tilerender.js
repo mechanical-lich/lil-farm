@@ -6,11 +6,12 @@ import { TILE } from '../config.js';
 /** Half a tile: autotiling works a quarter of a tile at a time. */
 const HALF = TILE / 2;
 import { GROUND, OBJ, isTilled, isWater } from '../world/tiledefs.js';
-import { SPRITES, TOWN, WATER, RIVER, BARN, HOUSE, CAPSULES, srcRect, sheetFor } from './sprites.js';
+import { SPRITES, TOWN, WATER, RIVER, BARN, HOUSE, DECORATIONS, CAPSULES, srcRect, sheetFor } from './sprites.js';
 import { mushroomAt } from '../sim/mushrooms.js';
 import { crateAt, CRATE_CAPACITY } from '../sim/crates.js';
 import { hayAt, hayLeft, HAY_HELPINGS } from '../sim/hay.js';
 import { toolList } from '../sim/tools.js';
+import { potAt, potList } from '../sim/pots.js';
 import { flowerAt, isWatered } from '../sim/flowers.js';
 import { flowerCanvas } from './flowerart.js';
 import { pendingGroundTiles } from '../sim/build.js';
@@ -312,6 +313,8 @@ export function drawObjects(ctx, sheets, state, view, entityRows = null) {
   const grid = state.grid;
   const drawn = new Set();
 
+  drawPots(ctx, sheets, state, view);
+
   for (let y = view.y0; y <= view.y1; y++) {
     for (let x = view.x0; x <= view.x1; x++) {
       const o = grid.getObject(x, y);
@@ -343,6 +346,41 @@ export function drawObjects(ctx, sheets, state, view, entityRows = null) {
 
   drawTroughs(ctx, sheets, state, view);
   drawTools(ctx, sheets, state, view);
+}
+
+/**
+ * How far up a potted flower sits, and where the soil in a pot is.
+ *
+ * Read off the sprite, row by row: the rim's lip is rows 4-5, the open mouth is
+ * the dark cavity at rows 6-8, and the body front is rows 9-13. Every flower on
+ * the sheet has its stem base on its own bottom row, 15.
+ *
+ * So the lift is 15 minus where the base should land. At five the base sat at
+ * row 10 — on the body front, with the pot drawn over it, which read as a
+ * flower standing behind a pot rather than growing out of one. At ten it sits
+ * on the lip, centred in the mouth.
+ *
+ * The soil sits at rows 6-7 in both frames, so a base at row 5 rests on it.
+ */
+const POT_LIFT = 9;
+
+/**
+ * Pots, drawn under everything.
+ *
+ * Their own pass and before the object loop, for two reasons: an empty pot has
+ * no object on its tile at all, so the loop would skip it entirely; and a
+ * planted pot must be painted before the flower that grows out of it. Being
+ * first also means the farmer walks in front of a pot rather than behind it.
+ */
+function drawPots(ctx, sheets, state, view) {
+  for (const { x, y } of potList(state)) {
+    if (x < view.x0 || x > view.x1 || y < view.y0 || y > view.y1) continue;
+    // Damp soil is a second frame of the pot rather than a wash drawn over the
+    // first. An empty pot is always the dry one, which is right: isWatered asks
+    // the flower, and a pot with nothing in it cannot be watered at all.
+    const art = isWatered(state, x, y) ? DECORATIONS.potWatered : DECORATIONS.pot;
+    blit(ctx, sheets, art, x * TILE, y * TILE);
+  }
 }
 
 /**
@@ -737,11 +775,18 @@ function drawObject(ctx, sheets, state, objId, x, y) {
       break;
     }
     case OBJ.FLOWER: {
+      const potted = potAt(state, x, y);
+
       // A watered flower is the one that will cross with its neighbours, so it
       // has to be possible to tell at a glance which ones are damp — otherwise
       // the player's only control over breeding is invisible. Grass has no wet
       // version the way soil does, so the ground under it is simply darkened.
-      if (isWatered(state, x, y)) {
+      //
+      // A pot says it for itself, in its own second frame — the soil in its
+      // mouth goes dark. Only a flower growing straight out of the grass needs
+      // the ground under it darkened, and doing that under a pot would tint
+      // whatever the pot happens to be standing on, which may be a stone road.
+      if (!potted && isWatered(state, x, y)) {
         ctx.fillStyle = 'rgba(46, 86, 140, 0.22)';
         ctx.fillRect(px, py + 4, TILE, TILE - 4);
       }
@@ -749,9 +794,13 @@ function drawObject(ctx, sheets, state, objId, x, y) {
       // Drawn from its own recoloured canvas rather than from a sheet — see
       // render/flowerart.js. By the time it reaches here it is an ordinary
       // image, and this is an ordinary blit.
+      //
+      // A potted one is lifted so its stem starts in the pot's mouth rather
+      // than at the pot's feet, which is the difference between a flower in a
+      // pot and a flower standing behind one.
       const f = flowerAt(state, x, y);
       const art = f && flowerCanvas(f.kind, f.genome);
-      if (art) ctx.drawImage(art, px, py);
+      if (art) ctx.drawImage(art, px, potted ? py - POT_LIFT : py);
       break;
     }
     default:

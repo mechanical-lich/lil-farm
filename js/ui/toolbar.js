@@ -34,6 +34,9 @@ export const TOOLS = [
   { id: 'clear', icon: '🪓', name: 'Clear', hint: 'Chop, clear, and take down what you built' },
   { id: 'till', icon: '🚜', name: 'Till', hint: 'Tap both ends of a row to plough it' },
   { id: 'build', icon: '🔨', name: 'Build', hint: 'Buildings, land and decorations' },
+  // Last, because calling work off is rarer than putting it on — but it drags
+  // like the others, so a mis-drag is undone the same way it was made.
+  { id: 'cancel', icon: '🚫', name: 'Cancel', hint: 'Tap queued work to call it off' },
 ];
 
 export function initToolbar(state, { onToolChange } = {}) {

@@ -8,7 +8,7 @@ import { GameLoop, runCatchup, discardSkipped } from './engine/loop.js';
 import { loadSave, clearSave, Autosaver } from './engine/save.js';
 import { newGame, serialize, deserialize } from './state.js';
 import { tick as simTick } from './sim/tick.js';
-import { addTask, taskForTile, taskLabel, queueTillRow } from './sim/tasks.js';
+import { addTask, taskForTile, taskLabel, queueTillRow, taskCovering, cancelTask } from './sim/tasks.js';
 import { itemName, addItem } from './sim/inventory.js';
 import {
   canAfford, buildDef, canPlaceAt, isReserved,
@@ -611,6 +611,25 @@ function queueTileTask(state, toolbar, x, y, { announce }) {
   // whatever the current tool would normally do.
   if (placement.pending) {
     if (announce) movePlacement(x, y);
+    return;
+  }
+
+  // Calling work off rather than adding any. It sits after the panel and
+  // placement guards — a tap meant to dismiss a panel must not cancel work
+  // instead — but before every tool below, because it is the one that wants
+  // tiles the others refuse: ground already spoken for by a queued build is
+  // exactly where the thing you are trying to call off is standing.
+  if (tool === 'cancel') {
+    const task = taskCovering(state, x, y);
+    if (!task) {
+      if (announce) toast('Nothing queued there');
+      return;
+    }
+    const what = taskLabel(task);
+    cancelTask(state, task.id);
+    // Drag-painting cancels a swathe, which is how a mis-drag is undone by the
+    // same gesture that made it — so only a deliberate tap says anything.
+    if (announce) toast(`Called off: ${what}`);
     return;
   }
 

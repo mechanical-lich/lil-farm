@@ -26,8 +26,9 @@ import {
 } from '../js/sim/mushrooms.js';
 import {
   addTask, cancelTask, prioritizeTask, taskForTile, tillRow, queueTillRow, clearBuildSite,
-  followTargets,
+  followTargets, taskCovering,
 } from '../js/sim/tasks.js';
+import { TOOLS } from '../js/ui/toolbar.js';
 import {
   CROPS, SOIL_DRY_TICKS, plantCrop, waterTile, harvestCrop,
   cropAt, isRipe, isStalled, spoilRemaining, SPOIL_TICKS, updateCrops, seedIdFor,
@@ -48,6 +49,7 @@ import {
 import { HAY_HELPINGS, hayAt, hayLeft, reconcileHay } from '../js/sim/hay.js';
 import { toolAt, toolList } from '../js/sim/tools.js';
 import { DECOR, decorList, salvageValue, canPlaceDecor, placeDecor } from '../js/sim/decor.js';
+import { potAt, potList, removePot } from '../js/sim/pots.js';
 import { movableAt, canMoveTo, moveTo } from '../js/sim/moving.js';
 import {
   ANIMALS, TROUGH_CAPACITY, FEED_COST, FOOD_DURATION, WATER_DURATION, SEEK_THRESHOLD,
@@ -66,7 +68,7 @@ import {
   BARN_LIMITS, HOUSE_LIMITS, houseCost, houseWork, BUILD_GROUPS, buildGroup,
   costLabel, placementProblem, reconcileBuildings,
 } from '../js/sim/build.js';
-import { SPRITES, TOWN, WATER, RIVER, HOUSE } from '../js/render/sprites.js';
+import { SPRITES, TOWN, WATER, RIVER, HOUSE, DECORATIONS } from '../js/render/sprites.js';
 import {
   TRADED, BASE_SHARE, PRICE_FLOOR, PRICE_CEILING, GLUT_RATIO, TICKS_PER_DAY, newMarket, priceOf,
   priceMultiplier, recordSale, updateMarket, basePrice, marketRows, multiplierFor,
@@ -2947,6 +2949,257 @@ test('no group is long enough to bury what is at the end of it', () => {
   for (const g of BUILD_GROUPS) {
     assert(g.kinds.length <= 12, `${g.name} has ${g.kinds.length} in it — split it`);
   }
+});
+
+test('a pot is bought from the shop and stands on its own layer', () => {
+  const s = farmWithMaterials(8800);
+  s.money = 500;
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y;
+
+  const res = placeDecor(s, 'pot', x, y);
+  assert(res.ok, res.reason || 'placed');
+  assertEqual(res.spent, DECOR.pot.price, 'and paid for');
+  assert(potAt(s, x, y), 'the pot is there');
+  // Not on the object grid: that is what lets it hold a flower as well.
+  assertEqual(s.grid.getObject(x, y), OBJ.NONE, 'and owns no object');
+  assert(s.grid.isWalkable(x, y, 'farmer'), 'nor blocks the way');
+});
+
+test('a pot makes ground plantable that flowers would refuse', () => {
+  // The reason to own one. Without this a pot could only stand where a flower
+  // would already have grown.
+  const s = farmWithMaterials(8801);
+  s.money = 500;
+  const x = s.farmer.x + 3;
+  const y = s.farmer.y;
+  s.grid.setGround(x, y, GROUND.ROAD);
+
+  assert(!canPlantAt(s, x, y), 'no flower grows on a stone road');
+  placeDecor(s, 'pot', x, y);
+  assert(canPlantAt(s, x, y), 'but one grows in a pot standing on it');
+});
+
+test('a flower in a pot is an ordinary flower in every way that matters', () => {
+  const s = farmWithMaterials(8802);
+  s.money = 500;
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y + 1;
+  s.grid.setGround(x, y, GROUND.DIRT);
+  placeDecor(s, 'pot', x, y);
+
+  plantFlower(s, x, y, 'daisy', makeGenome(120));
+  const found = flowerAt(s, x, y);
+  assert(found, 'the flower is found by the ordinary lookup');
+  assertEqual(found.kind, 'daisy', 'and is what was planted');
+  assertEqual(s.grid.getObject(x, y), OBJ.FLOWER, 'the grid says a flower is here');
+
+  // Watering, which is what gates breeding, works untouched.
+  waterFlower(s, x, y);
+  assert(isWatered(s, x, y), 'a potted flower waters like any other');
+});
+
+test('potted flowers breed with the ones in the ground beside them', () => {
+  // "Acts like it is planted in that tile" is the whole requirement, and this
+  // is the part of it that would be easiest to get wrong.
+  const s = farmWithMaterials(8803);
+  s.money = 500;
+  const y = s.farmer.y + 2;
+  const a = { x: s.farmer.x + 2, y };
+  const b = { x: s.farmer.x + 3, y };
+
+  s.grid.setGround(a.x, a.y, GROUND.ROAD);
+  placeDecor(s, 'pot', a.x, a.y);
+  plantFlower(s, a.x, a.y, 'poppy', makeGenome(30));
+  plantFlower(s, b.x, b.y, 'poppy', makeGenome(90));
+  waterFlower(s, a.x, a.y);
+  waterFlower(s, b.x, b.y);
+
+  let child = null;
+  for (let i = 0; i < BREED_INTERVAL * 60 && !child; i++) {
+    tick(s);
+    child = Object.keys(s.flowers).find((k) => k !== `${a.x},${a.y}` && k !== `${b.x},${b.y}`);
+  }
+  assert(child, 'the potted poppy crossed with the one in the ground');
+});
+
+test('picking a potted flower leaves the pot behind', () => {
+  const s = farmWithMaterials(8804);
+  s.money = 500;
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y;
+  placeDecor(s, 'pot', x, y);
+  plantFlower(s, x, y, 'daisy', makeGenome(120));
+
+  pickFlower(s, x, y);
+  assertEqual(flowerAt(s, x, y), null, 'the flower is picked');
+  assert(potAt(s, x, y), 'and the pot is still standing');
+  assert(canPlantAt(s, x, y), 'ready for the next one');
+});
+
+test('clearing takes the flower first, then the pot, then the road under it', () => {
+  const s = farmWithMaterials(8805);
+  s.money = 500;
+  const x = 6;
+  const y = 6;
+  completeBuild(s, { buildKind: 'road', x, y });
+  placeDecor(s, 'pot', x, y);
+  plantFlower(s, x, y, 'daisy', makeGenome(120));
+
+  assertEqual(taskForTile(s, x, y, 'clear').type, 'pick', 'the flower is on top');
+  pickFlower(s, x, y);
+
+  assertEqual(taskForTile(s, x, y, 'clear').type, 'liftpot', 'then the pot');
+  removePot(s, x, y);
+
+  assertEqual(taskForTile(s, x, y, 'clear').type, 'demolish', 'and only then the road');
+});
+
+test('a pot will not go in water, and only one to a tile', () => {
+  const s = farmWithMaterials(8806);
+  s.money = 500;
+  s.grid.setGround(8, 8, GROUND.WATER);
+  assert(!canPlaceDecor(s, 8, 8, 'pot'), 'not in the pond');
+
+  placeDecor(s, 'pot', 6, 4);
+  assert(!canPlaceDecor(s, 6, 4, 'pot'), 'and not two deep');
+});
+
+test('pots survive a save round trip, and older farms have none', () => {
+  const s = farmWithMaterials(8807);
+  s.money = 500;
+  placeDecor(s, 'pot', 5, 5);
+  plantFlower(s, 5, 5, 'crocus', makeGenome(180));
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assert(potAt(back, 5, 5), 'the pot is still there');
+  assertEqual(flowerAt(back, 5, 5).kind, 'crocus', 'with its flower still in it');
+
+  const older = JSON.parse(JSON.stringify(serialize(s)));
+  delete older.pots;
+  assertEqual(deserialize(older).pots, {}, 'a farm from before pots simply has none');
+});
+
+test('every decoration sprite is on the decorations sheet', () => {
+  // The sheet is meant to grow — it went from one frame to two the moment the
+  // pot needed a watered version. A name pointing past its right-hand edge
+  // draws nothing at all, and there is no canvas here to notice.
+  const { w, h } = pngSize('assets/decorations.png');
+  assertEqual(h, TILE, 'the sheet is one row tall');
+  const columns = w / TILE;
+  for (const [name, [cx, cy, sheet]] of Object.entries(DECORATIONS)) {
+    assertEqual(sheet, 'decor', `${name} comes off the decorations sheet`);
+    assertEqual(cy, 0, `${name} is on the only row there is`);
+    assert(cx >= 0 && cx < columns, `${name} wants column ${cx}, the sheet has ${columns}`);
+  }
+});
+
+test('a pot only looks watered when there is a watered flower in it', () => {
+  // The two frames are picked by isWatered, which asks the *flower*. An empty
+  // pot has no flower to ask, so it is always the dry frame — which is right,
+  // because an empty pot cannot be watered in the first place.
+  const s = farmWithMaterials(8810);
+  s.money = 500;
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y;
+  placeDecor(s, 'pot', x, y);
+
+  assert(!isWatered(s, x, y), 'an empty pot is never watered');
+  assertEqual(taskForTile(s, x, y, 'water'), null, 'and cannot be watered');
+
+  plantFlower(s, x, y, 'daisy', makeGenome(120));
+  assert(!isWatered(s, x, y), 'nor is a freshly planted one');
+  waterFlower(s, x, y);
+  assert(isWatered(s, x, y), 'until it is watered');
+
+  pickFlower(s, x, y);
+  assert(!isWatered(s, x, y), 'and it goes dry again when the flower is picked');
+  assert(potAt(s, x, y), 'with the pot still standing');
+});
+
+test('a tap finds the task queued on that tile', () => {
+  const s = farmWithMaterials(8900);
+  const x = s.farmer.x + 3;
+  const y = s.farmer.y;
+  s.grid.setObject(x, y, OBJ.TREE);
+
+  assertEqual(taskCovering(s, x, y), null, 'nothing queued yet');
+  const task = addTask(s, taskForTile(s, x, y, 'clear'));
+  assertEqual(taskCovering(s, x, y).id, task.id, 'and now the chop is found');
+
+  cancelTask(s, task.id);
+  assertEqual(taskCovering(s, x, y), null, 'called off');
+});
+
+test('a tap anywhere on a queued building finds it', () => {
+  // findTaskAt wants the exact anchor tile. A queued barn covers a rectangle,
+  // and the outline the player can see on the map is the whole of it — so
+  // tapping the middle of that outline has to reach the task.
+  const s = farmWithMaterials(8901);
+  s.inventory = { wood: 500, stone: 500 };
+  const x = 6;
+  const y = 6;
+  const task = addTask(s, taskForTile(s, x, y, 'build', { buildKind: 'barn', size: [5, 3] }));
+  assert(task, 'the barn is queued');
+
+  for (let dy = 0; dy < 3; dy++) {
+    for (let dx = 0; dx < 5; dx++) {
+      assertEqual(taskCovering(s, x + dx, y + dy)?.id, task.id,
+        `${x + dx},${y + dy} is part of the barn`);
+    }
+  }
+  assertEqual(taskCovering(s, x + 5, y), null, 'and the tile beyond it is not');
+});
+
+test('cancelling reaches work on ground no other tool would accept', () => {
+  // The reason cancel runs before the other tools: a queued build reserves its
+  // ground, and reserved ground refuses everything — including, before this,
+  // any way to reach the build standing on it.
+  const s = farmWithMaterials(8902);
+  s.inventory = { wood: 500, stone: 500 };
+  const task = addTask(s, taskForTile(s, 6, 6, 'build', { buildKind: 'barn', size: [3, 2] }));
+
+  assert(isReserved(s, 7, 6), 'the middle of it is spoken for');
+  assertEqual(taskForTile(s, 7, 6, 'clear'), null, 'so clear will not touch it');
+  assertEqual(taskCovering(s, 7, 6).id, task.id, 'but cancel finds it');
+});
+
+test('the later of two tasks on a tile is the one a tap peels off', () => {
+  const s = farmWithMaterials(8903);
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y + 1;
+  s.grid.setGround(x, y, GROUND.TILLED);
+
+  const first = addTask(s, taskForTile(s, x, y, 'water'));
+  const second = addTask(s, taskForTile(s, x, y, 'plant', { cropType: 'carrot' }));
+  assert(first && second && first.id !== second.id, 'two different jobs on one tile');
+
+  assertEqual(taskCovering(s, x, y).id, second.id, 'the newer one is on top');
+  cancelTask(s, second.id);
+  assertEqual(taskCovering(s, x, y).id, first.id, 'and the older is underneath');
+});
+
+test('cancel is a tool on the bar', () => {
+  const cancel = TOOLS.find((t) => t.id === 'cancel');
+  assert(cancel, 'the bar offers it');
+  assert(cancel.name && cancel.hint, 'with a name and a hint');
+});
+
+test('cancelling the job the farmer is doing stops him doing it', () => {
+  const s = farmWithMaterials(8904);
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y;
+  s.grid.setObject(x, y, OBJ.TREE);
+  const task = addTask(s, taskForTile(s, x, y, 'clear'));
+
+  let n = 0;
+  while (s.farmer.taskId !== task.id && n < 500) { tick(s); n++; }
+  assertEqual(s.farmer.taskId, task.id, 'he picked it up');
+
+  cancelTask(s, task.id);
+  assertEqual(s.farmer.taskId, null, 'and put it straight back down');
+  assertEqual(s.farmer.work, 0, 'with the work he had done dropped');
+  assertEqual(s.grid.getObject(x, y), OBJ.TREE, 'the tree is still standing');
 });
 
 test('demolishing refunds half the materials, rounded down', () => {

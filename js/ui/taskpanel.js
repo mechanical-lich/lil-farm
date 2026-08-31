@@ -4,8 +4,6 @@
 import { on, emit } from '../engine/events.js';
 import { cancelTask, prioritizeTask, taskLabel } from '../sim/tasks.js';
 
-const MAX_ROWS = 40;   // the list is a queue, not a spreadsheet
-
 export function initTaskPanel(state) {
   const root = document.getElementById('task-panel');
   const list = document.getElementById('task-list');
@@ -49,7 +47,12 @@ export function initTaskPanel(state) {
       return;
     }
 
-    const rows = tasks.slice(0, MAX_ROWS).map((t) => {
+    // Every task, uncapped. It used to stop at forty on the grounds that a
+    // queue is not a spreadsheet, which was true right up until you fat-finger
+    // a drag and queue two hundred tiles: the ones past the cap could not be
+    // reached, and so could not be cancelled. A list you cannot scroll to the
+    // end of is a list that traps work in it.
+    const rows = tasks.map((t) => {
       const active = t.id === state.farmer.taskId;
       const pct = t.work ? Math.round(((t.progress || 0) / t.work) * 100) : 0;
       // A percentage alone doesn't say whether to wait or go do something else;
@@ -65,10 +68,26 @@ export function initTaskPanel(state) {
         </li>`;
     });
 
-    if (tasks.length > MAX_ROWS) {
-      rows.push(`<li class="empty">+ ${tasks.length - MAX_ROWS} more…</li>`);
-    }
     list.innerHTML = rows.join('');
+  }
+
+  /**
+   * The half-second refresh, which only touches what actually changes.
+   *
+   * Rebuilding the whole list on a timer was affordable while it was capped at
+   * forty rows. Uncapped it is not — a few hundred tasks would rebuild a few
+   * hundred elements twice a second, on a phone, for the sake of one number
+   * moving. Only the task being worked on has a progress figure that ticks, so
+   * that is the only row worth touching.
+   */
+  function tick() {
+    const active = state.tasks.find((t) => t.id === state.farmer.taskId);
+    if (!active) return;
+    const row = list.querySelector('li.active .task-meta');
+    if (!row) { render(); return; }      // the active task moved; redraw properly
+    const pct = active.work ? Math.round(((active.progress || 0) / active.work) * 100) : 0;
+    const left = Math.max(0, (active.work || 0) - (active.progress || 0));
+    row.textContent = `${pct}% · ${formatSeconds(left)} left`;
   }
 
   on('tasks:changed', render);
@@ -76,7 +95,7 @@ export function initTaskPanel(state) {
 
   // Progress percentages change every tick; refresh only while the panel is
   // actually visible so a closed panel costs nothing.
-  setInterval(() => { if (open) render(); }, 500);
+  setInterval(() => { if (open) tick(); }, 500);
 
   return { render, setOpen: (v) => setOpen(v) };
 }

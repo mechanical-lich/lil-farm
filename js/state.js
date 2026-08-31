@@ -44,6 +44,7 @@ export function newGame(seed = (Date.now() ^ 0x5f3759df) >>> 0) {
     crates: {},     // tile key -> {item, qty}; see sim/crates.js
     hay: {},        // tile key -> {left}; see sim/hay.js
     tools: {},      // tile key -> buildable kind; see sim/tools.js
+    pots: {},       // tile key -> true; see sim/pots.js
     tasks: [],
     nextTaskId: 1,
     // See TESTING in config.js — a real farm starts with just a few seeds.
@@ -92,6 +93,7 @@ export function serialize(state) {
     crates: state.crates,
     hay: state.hay,
     tools: state.tools,
+    pots: state.pots,
     tasks: state.tasks,
     nextTaskId: state.nextTaskId,
     inventory: state.inventory,
@@ -144,6 +146,8 @@ export function deserialize(data) {
     hay: data.hay || {},
     // Farms saved before tools could be hung up simply have none.
     tools: data.tools || {},
+    // Farms saved before flower pots existed simply have none.
+    pots: data.pots || {},
     tasks: data.tasks || [],
     nextTaskId: data.nextTaskId || 1,
     inventory: data.inventory || {},

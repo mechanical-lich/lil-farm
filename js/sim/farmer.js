@@ -23,6 +23,7 @@ import {
 import { readSeedId } from './flowergenes.js';
 import { takeFromHand } from './farmhand.js';
 import { emptyCrate } from './crates.js';
+import { removePot } from './pots.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 
 const WANDER_CHANCE = 0.08;   // per idle tick
@@ -254,6 +255,14 @@ function applyTaskResult(state, task) {
         gained = takeFromHand(hand);
         addItems(state, gained);
       }
+      break;
+    }
+
+    case 'liftpot': {
+      // Nothing comes back. A pot is bought with money, and the farm has no
+      // pot to put in the bag — taking one away is undoing a purchase, which
+      // is worth saying out loud rather than quietly refunding.
+      removePot(state, task.x, task.y);
       break;
     }
 

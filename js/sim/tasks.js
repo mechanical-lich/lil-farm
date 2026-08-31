@@ -18,6 +18,7 @@ import { flowerAt, pick as pickFlower, canPlantAt } from './flowers.js';
 import { readSeedId, seedName } from './flowergenes.js';
 import { handAt, carriedTotal } from './farmhand.js';
 import { crateAt } from './crates.js';
+import { potAt } from './pots.js';
 
 /** Work is measured in ticks (1 tick = 1 second). */
 export const TASK_TYPES = {
@@ -33,6 +34,7 @@ export const TASK_TYPES = {
   collect: { label: 'Collect', verb: 'Collecting' },
   gather: { label: 'Take', verb: 'Taking' },
   unload: { label: 'Empty', verb: 'Emptying' },
+  liftpot: { label: 'Take', verb: 'Taking' },
   till: { label: 'Till', verb: 'Tilling' },
   plant: { label: 'Plant', verb: 'Planting' },
   water: { label: 'Water', verb: 'Watering' },
@@ -52,6 +54,7 @@ export const WORK = {
   collect: 6,
   gather: 5,
   unload: 5,
+  liftpot: 5,
 };
 
 /** A task the player cannot see the point of is a bug; keep labels concrete. */
@@ -223,6 +226,31 @@ export function findTaskAt(state, x, y, type) {
   return state.tasks.find((t) => t.x === x && t.y === y && (!type || t.type === type)) || null;
 }
 
+/**
+ * The queued task a tap on this tile is pointing at, if any.
+ *
+ * Not the same question as findTaskAt, which wants an exact tile: a queued barn
+ * covers a rectangle, and tapping the middle of the outline the player can see
+ * on the map should find it. Later tasks win ties, so tapping repeatedly peels
+ * a stack off in the order it went on.
+ *
+ * @returns {object|null}
+ */
+export function taskCovering(state, x, y) {
+  let found = null;
+  for (const task of state.tasks || []) {
+    if (task.type === 'build') {
+      const covers = footprint(task.buildKind, task.x, task.y, sizeOf(task))
+        .some((t) => t.x === x && t.y === y);
+      if (covers) found = task;
+      continue;
+    }
+    // Everything else is worked at one tile, whatever size it draws.
+    if (task.x === x && task.y === y) found = task;
+  }
+  return found;
+}
+
 export function cancelTask(state, id) {
   const i = state.tasks.findIndex((t) => t.id === id);
   if (i === -1) return false;
@@ -304,6 +332,15 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
     adjacent: !!def.blocks,
   } : null);
 
+  // Taking a pot away. Offered before demolishing, because a pot may be
+  // standing on a road and the pot is the thing on top — the same "clear what
+  // you can see first" order that takes a scythe off a fence before the fence.
+  // A flower in it is picked first of all, by clearTask above, since the flower
+  // is what the grid says is there.
+  const potTask = () => (potAt(state, x, y)
+    ? { type: 'liftpot', x, y, work: WORK.liftpot, detail: 'flower pot' }
+    : null);
+
   // Undoing a bed. Only offered when the bed is empty: a growing crop is worth
   // real waiting time, so it must be harvested or cleared deliberately rather
   // than destroyed by a stray tap of the clear tool.
@@ -335,7 +372,7 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
 
   switch (tool) {
     case 'clear':
-      return clearTask() || demolishTask() || untillTask();
+      return clearTask() || potTask() || demolishTask() || untillTask();
 
     case 'till':
       // Only bare, unplanted, unobstructed ground can be ploughed.
