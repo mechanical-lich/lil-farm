@@ -53,7 +53,7 @@ import { potAt, potList, removePot } from '../js/sim/pots.js';
 import { movableAt, canMoveTo, moveTo } from '../js/sim/moving.js';
 import {
   ANIMALS, TROUGH_CAPACITY, FEED_COST, FOOD_DURATION, WATER_DURATION, SEEK_THRESHOLD,
-  foodRate, waterRate, canGraze,
+  foodRate, waterRate, canGraze, TARGET_RECHECK,
   makeAnimal, collectFrom, isNeglected, fillWaterTrough, fillFeedTrough, pickFeed, animalDef,
   petAnimal, pickEmote, currentEmote, animalAt, isReady, PRODUCE_CAP,
   setAnimalVariants, animalVariantCount, variantOf, isThirsty, SWIMMERS, canLayAt,
@@ -5017,6 +5017,151 @@ test("goat's milk is priced by the market like anything else you sell", () => {
 
   const rows = marketRows(s);
   assert(rows.some((r) => r.id === 'goat_milk'), 'so it has a row in the panel');
+});
+
+/** A cleared farm with feed troughs where you ask for them. */
+function troughFarm(seed) {
+  const s = farmWithMaterials(seed);
+  s.grid.ground.fill(GROUND.GRASS);
+  s.grid.objects.fill(OBJ.NONE);
+  s.mushrooms = {};
+  s.flowers = {};
+  s.buildings = [];
+  s.troughs = {};
+  s.animals = [];
+  s.inventory = { wood: 4000, stone: 4000 };
+  return s;
+}
+function feedAt(s, x, y, level) {
+  completeBuild(s, { buildKind: 'feedTrough', x, y });
+  s.troughs[`${x},${y}`].level = level;
+}
+
+test('an animal walking to food switches when nearer food appears', () => {
+  // The whole point: an animal used to be locked to whatever it chose on the
+  // tick it got hungry, and would walk past a full trough put down in front of
+  // it on the way to a distant one.
+  const s = troughFarm(8950);
+  const cx = s.farmer.x;
+  const cy = s.farmer.y;
+  feedAt(s, cx + 16, cy, TROUGH_CAPACITY);        // the only food, far off
+
+  const cow = makeAnimal(s, 'cow', cx - 8, cy);
+  cow.water = 1e9;
+  cow.food = 1;
+  for (let i = 0; i < 6; i++) tick(s);
+  assertEqual(cow.goal.x, cx + 16, 'it set out for the far trough');
+
+  feedAt(s, cx - 6, cy + 1, TROUGH_CAPACITY);     // now put one right beside it
+  for (let i = 0; i < 15; i++) tick(s);
+
+  assert(cow.food > 100, 'it ate');
+  assert(s.troughs[`${cx - 6},${cy + 1}`].level < TROUGH_CAPACITY, 'from the near one');
+  assertEqual(s.troughs[`${cx + 16},${cy}`].level, TROUGH_CAPACITY, 'never reaching the far one');
+});
+
+test('an animal gives up on a trough somebody else has drained', () => {
+  const s = troughFarm(8951);
+  const cx = s.farmer.x;
+  const cy = s.farmer.y;
+  feedAt(s, cx + 14, cy, 1);                      // a single helping, far off
+
+  const cow = makeAnimal(s, 'cow', cx, cy);
+  cow.water = 1e9;
+  cow.food = 1;
+  for (let i = 0; i < 6; i++) tick(s);
+  assertEqual(cow.goal.x, cx + 14, 'walking to the only food there is');
+
+  s.troughs[`${cx + 14},${cy}`].level = 0;        // drained while it walks
+  for (let i = 0; i < TARGET_RECHECK + 2; i++) tick(s);
+  assertEqual(cow.goal, null, 'it stops walking to an empty trough');
+});
+
+test('an animal keeps going when its target is still the nearest', () => {
+  // The other half. Re-picking costs a tick standing still, so it must only
+  // happen when there is a reason — measured, dropping the route every time
+  // made a hungry herd slower to feed than leaving it alone.
+  const s = troughFarm(8952);
+  const cx = s.farmer.x;
+  const cy = s.farmer.y;
+  // Far enough that it is still walking when the rechecks happen — at one
+  // tile a tick, a nearer trough would simply have been reached and eaten.
+  feedAt(s, cx + 30, cy, TROUGH_CAPACITY);
+  feedAt(s, cx + 36, cy, TROUGH_CAPACITY);        // a second, always further away
+
+  const cow = makeAnimal(s, 'cow', cx, cy);
+  cow.water = 1e9;
+  cow.food = 1;
+  for (let i = 0; i < 6; i++) tick(s);
+  const chosen = { ...cow.goal };
+
+  for (let i = 0; i < TARGET_RECHECK * 2; i++) tick(s);
+  assert(cow.goal, 'still on an errand');
+  assertEqual(cow.goal.x, chosen.x, 'and still the same trough');
+});
+
+test('rechecking leaves alone the walks that are not about food', () => {
+  // A duck heading back to its pond and a hen crossing to dry land to lay both
+  // walk with no goal set, and must not have their routes second-guessed.
+  const s = troughFarm(8953);
+  const px = s.farmer.x + 5;
+  for (let dy = 0; dy < 3; dy++) {
+    for (let dx = 0; dx < 3; dx++) s.grid.setGround(px + dx, s.farmer.y + dy, GROUND.WATER);
+  }
+  // Within WATER_SCAN_RADIUS of the pond, or it never looks for it at all.
+  const duck = makeAnimal(s, 'duck', s.farmer.x, s.farmer.y + 1);
+  duck.water = 1e9;
+  duck.food = 1e9;                                 // wants nothing; just going home
+
+  let walked = false;
+  for (let i = 0; i < 60; i++) {
+    tick(s);
+    if (duck.path && duck.path.length > 0) walked = true;
+    assertEqual(duck.goal ?? null, null, 'a duck going home has no food errand');
+  }
+  assert(walked, 'and it really did set off');
+  assert(isWater(s.grid.getGround(duck.x, duck.y)), 'and got to the water');
+});
+
+test('filling nearer troughs turns a herd around', () => {
+  // The reported case, in the shape it was reported: the farmer walks faster
+  // than the animals, so he fills one trough, the whole hungry herd sets out
+  // for it, and then he fills two more that are far closer to them. They used
+  // to walk the whole way to the first one regardless — every animal, every
+  // time, however early the nearer ones were filled.
+  const s = troughFarm(8960);
+  const cx = s.farmer.x;
+  const cy = s.farmer.y;
+  const far = [cx, cy - 16];
+  const nearA = [cx - 4, cy + 3];
+  const nearB = [cx + 4, cy + 3];
+  for (const [x, y] of [far, nearA, nearB]) feedAt(s, x, y, 0);
+
+  const HERD = 8;
+  for (let i = 0; i < HERD; i++) {
+    const a = makeAnimal(s, 'cow', cx - 2 + (i % 5), cy + (i < 5 ? 0 : 1));
+    a.water = 1e9;
+    a.food = 1;
+  }
+
+  // He fills the far one first, and everyone sets out for it.
+  s.troughs[`${far[0]},${far[1]}`].level = TROUGH_CAPACITY;
+  tick(s);
+  assertEqual(s.animals.filter((a) => a.goal && a.goal.y === far[1]).length, HERD,
+    'the whole herd is walking to the far trough');
+
+  // Then he fills the two standing right among them.
+  s.troughs[`${nearA[0]},${nearA[1]}`].level = TROUGH_CAPACITY;
+  s.troughs[`${nearB[0]},${nearB[1]}`].level = TROUGH_CAPACITY;
+  for (let i = 0; i < 40; i++) tick(s);
+
+  const fromFar = TROUGH_CAPACITY - s.troughs[`${far[0]},${far[1]}`].level;
+  const fromNear = (TROUGH_CAPACITY - s.troughs[`${nearA[0]},${nearA[1]}`].level)
+    + (TROUGH_CAPACITY - s.troughs[`${nearB[0]},${nearB[1]}`].level);
+
+  assertEqual(s.animals.filter((a) => a.food > 100).length, HERD, 'everyone ate');
+  assertEqual(fromFar, 0, 'and nobody trailed all the way to the far one');
+  assertEqual(fromNear, HERD, 'they turned round and used what was beside them');
 });
 
 test('a duck lays faster than a hen, for a higher price', () => {

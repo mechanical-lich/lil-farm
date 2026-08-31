@@ -138,6 +138,20 @@ export function actorFor(animal) {
   return SWIMMERS.has(animal.type) ? 'swimmer' : 'animal';
 }
 
+/**
+ * How often an animal walking to food or water looks again for a nearer one.
+ *
+ * Every few ticks, because an animal locked to the target it chose on the tick
+ * it got hungry walks past food that was filled since and on to a trough that
+ * somebody else has drained in the meantime.
+ *
+ * Short is affordable because the check itself is cheap — straight-line
+ * distances over the troughs, no pathfinding. Only a genuine improvement makes
+ * it drop the route and re-path, which is the part that costs. Staggered by id
+ * so the whole herd doesn't re-path on the same tick.
+ */
+export const TARGET_RECHECK = 5;
+
 /** How far an animal will look for a drink, and how long before it looks again. */
 const WATER_SCAN_RADIUS = 10;
 const WATER_SCAN_COOLDOWN = 300;
@@ -530,6 +544,43 @@ function layEgg(state, a) {
 function moveAnimal(state, a) {
   const actor = actorFor(a);
 
+  // Drink first: thirst runs out sooner than hunger.
+  const wants = a.water <= SEEK_THRESHOLD ? 'water'
+    : a.food <= SEEK_THRESHOLD ? 'food'
+      : null;
+
+  // Eat or drink whatever is already within reach, before going anywhere.
+  //
+  // This is the whole of "stop walking past full troughs". The adjacency check
+  // used to live below the path-following block, which returns — so an animal
+  // with a route never asked the question, and would pass within a tile of a
+  // full trough on its way to the one it chose when it first got hungry. The
+  // periodic re-check further down does not cover this: it fires every few
+  // ticks and only when something is *nearer* than the target, while walking
+  // past takes a tick or two.
+  if (wants && consumeBeside(state, a, wants)) return;
+
+  // Heading for food or water: think again now and then. The target may have
+  // been drained by somebody else on the way, or a nearer one filled since —
+  // and an animal that never looks up walks to the first and past the second.
+  //
+  // Only give up the route when there is a reason to. Dropping it
+  // unconditionally and re-seeking costs a tick standing still every time,
+  // because the seek sets a path and returns without stepping — measured, that
+  // made a hungry herd *slower* to feed than leaving them alone. So the check
+  // is cheap and the re-path is rare: keep walking unless the target is gone or
+  // something is genuinely nearer now.
+  //
+  // `goal` is also what keeps this off the paths walked for other reasons — a
+  // duck going back to its pond, a hen crossing to dry land to lay — which must
+  // not be second-guessed.
+  if (a.goal && a.path && a.path.length > 0
+      && (state.tickCount + a.id) % TARGET_RECHECK === 0
+      && !worthContinuing(state, a)) {
+    a.path = [];
+    a.goal = null;
+  }
+
   // Already walking somewhere: keep going.
   if (a.path && a.path.length > 0) {
     const next = a.path.shift();
@@ -542,33 +593,11 @@ function moveAnimal(state, a) {
     a.path = [];   // something was built across the route
   }
 
-  // Drink first: thirst runs out sooner than hunger.
-  const wants = a.water <= SEEK_THRESHOLD ? 'water'
-    : a.food <= SEEK_THRESHOLD ? 'food'
-      : null;
-
   // Ready to lay but standing somewhere an egg can't go — on the pond, for a
   // duck. Head for dry land; the egg waits until it gets there.
   if (wantsToLay(state, a) && !layableNearby(state, a) && seekDryLand(state, a)) return;
 
   if (wants) {
-    // Hay before the trough. A bale is the thing that runs out, so a grazer
-    // standing between the two should eat the one that will otherwise sit
-    // there for ever — and a paddock with a bale in it is a paddock the player
-    // put a bale in on purpose.
-    if (wants === 'food' && canGraze(a)) {
-      const bale = hayBeside(state, a);
-      if (bale) { eatHay(state, a, bale); return; }
-    }
-
-    const trough = troughBeside(state, a, wants);
-    if (trough) { drinkOrEat(state, a, trough, wants); return; }
-
-    // A pond or a river is a drink like any other, and a better one: it never
-    // needs refilling. An animal that can reach water never troubles you for
-    // a trough again, which is most of the point of digging one.
-    if (wants === 'water' && waterBeside(state, a)) { drinkFromWild(state, a); return; }
-
     if (wants === 'water' && seekWater(state, a)) return;
     if (wants === 'food' && canGraze(a) && seekHay(state, a)) return;
     if (seekTrough(state, a, wants)) return;
@@ -598,7 +627,7 @@ function hayBeside(state, a) {
 }
 
 function eatHay(state, a, bale) {
-  if (eatFrom(state, bale.x, bale.y)) a.food = FOOD_DURATION;
+  if (eatFrom(state, bale.x, bale.y)) { a.food = FOOD_DURATION; a.goal = null; }
 }
 
 /**
@@ -616,10 +645,70 @@ function seekHay(state, a) {
   for (const b of bales.slice(0, 3)) {
     const path = findPath(state.grid, { x: a.x, y: a.y }, { x: b.x, y: b.y },
       { actor: actorFor(a), adjacent: true });
-    if (path && path.length > 0) { a.path = path; return true; }
+    if (path && path.length > 0) { a.path = path; a.goal = { want: 'hay', x: b.x, y: b.y }; return true; }
     if (path && path.length === 0) return false;   // already there
   }
   return false;
+}
+
+/**
+ * Takes whatever this animal needs from something it is already standing beside.
+ *
+ * Called before anything else it might do, so a walking animal notices the
+ * trough it is passing rather than completing a journey to a different one.
+ * Whatever it was walking toward is forgotten — the errand is over.
+ *
+ * Hay before the trough for a grazer. A bale is the thing that runs out, so an
+ * animal standing between the two should eat the one that would otherwise sit
+ * there for ever — and a paddock with a bale in it is a paddock the player put
+ * a bale in on purpose.
+ *
+ * @returns {boolean} whether it ate or drank, and so has used its turn
+ */
+function consumeBeside(state, a, wants) {
+  if (wants === 'food' && canGraze(a)) {
+    const bale = hayBeside(state, a);
+    if (bale) { eatHay(state, a, bale); a.path = []; a.goal = null; return true; }
+  }
+
+  const trough = troughBeside(state, a, wants);
+  if (trough) { drinkOrEat(state, a, trough, wants); a.path = []; a.goal = null; return true; }
+
+  // A pond or a river is a drink like any other, and a better one: it never
+  // needs refilling. An animal that can reach water never troubles you for a
+  // trough again, which is most of the point of digging one.
+  if (wants === 'water' && waterBeside(state, a)) {
+    drinkFromWild(state, a);
+    a.path = [];
+    a.goal = null;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Is the thing this animal set out for still the best thing to walk to?
+ *
+ * False on either count: the target has nothing left in it, or something of the
+ * same sort is closer than it now. Distance is straight-line tiles rather than
+ * a path length — this runs on a timer for every walking animal, and pathing to
+ * every trough on the farm to sort them properly would cost far more than the
+ * occasional imperfect answer it buys.
+ */
+function worthContinuing(state, a) {
+  const goal = a.goal;
+  if (!goal) return false;
+
+  const away = (t) => Math.abs(t.x - a.x) + Math.abs(t.y - a.y);
+  const candidates = goal.want === 'hay'
+    ? hayList(state).filter((b) => hayLeft(b) > 0)
+    : troughList(state).filter((t) => t.kind === goal.want && (t.level || 0) > 0);
+
+  const target = candidates.find((t) => t.x === goal.x && t.y === goal.y);
+  if (!target) return false;                       // drained, or taken away
+
+  const mine = away(target);
+  return !candidates.some((t) => away(t) < mine);  // nothing nearer has appeared
 }
 
 /** A stocked trough of the right kind that the animal is standing next to. */
@@ -636,6 +725,7 @@ function drinkOrEat(state, a, trough, kind) {
   if (!t || (t.level || 0) <= 0) return;
 
   t.level -= 1;
+  a.goal = null;
   if (kind === 'water') a.water = WATER_DURATION;
   else a.food = FOOD_DURATION;
 
@@ -726,7 +816,7 @@ function seekTrough(state, a, kind) {
   for (const t of candidates.slice(0, 3)) {
     const path = findPath(state.grid, { x: a.x, y: a.y }, { x: t.x, y: t.y },
       { actor: actorFor(a), adjacent: true, w: 2, h: 1 });
-    if (path && path.length > 0) { a.path = path; return true; }
+    if (path && path.length > 0) { a.path = path; a.goal = { want: kind, x: t.x, y: t.y }; return true; }
     if (path && path.length === 0) return false;   // already there
   }
   return false;

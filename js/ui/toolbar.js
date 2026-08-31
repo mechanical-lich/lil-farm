@@ -37,9 +37,17 @@ export const TOOLS = [
   // Last, because calling work off is rarer than putting it on — but it drags
   // like the others, so a mis-drag is undone the same way it was made.
   { id: 'cancel', icon: '🚫', name: 'Cancel', hint: 'Tap queued work to call it off' },
+  // Not a mode: it does its thing and leaves whichever tool you were holding
+  // selected. `action` is what says so — the bar is where a player's thumb
+  // already is, so a one-shot button belongs here even though nothing about it
+  // changes what a tap on the map does.
+  {
+    id: 'findFarmer', icon: '🧑‍🌾', name: 'Find', action: true,
+    hint: 'Bring the view back to your farmer',
+  },
 ];
 
-export function initToolbar(state, { onToolChange } = {}) {
+export function initToolbar(state, { onToolChange, onAction } = {}) {
   const bar = document.getElementById('toolbar');
   const subRow = document.getElementById('sub-row');
 
@@ -77,6 +85,10 @@ export function initToolbar(state, { onToolChange } = {}) {
   bar.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-tool]');
     if (!btn) return;
+    const chosen = TOOLS.find((t) => t.id === btn.dataset.tool);
+    // A one-shot button fires and changes nothing: the tool in hand stays in
+    // hand, so finding the farmer mid-job doesn't cost you your place.
+    if (chosen?.action) { if (onAction) onAction(chosen.id); return; }
     tool = btn.dataset.tool;
     render();
     if (onToolChange) onToolChange(tool);
@@ -148,7 +160,8 @@ export function initToolbar(state, { onToolChange } = {}) {
 
   function render() {
     for (const btn of bar.querySelectorAll('button[data-tool]')) {
-      btn.classList.toggle('on', btn.dataset.tool === tool);
+      const t = TOOLS.find((x) => x.id === btn.dataset.tool);
+      btn.classList.toggle('on', !t?.action && btn.dataset.tool === tool);
     }
 
     const needsSub = tool === 'plant' || tool === 'build';

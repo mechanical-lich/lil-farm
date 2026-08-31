@@ -85,7 +85,8 @@ async function boot() {
     // From the seed drawer straight out to the map: the journal steps aside,
     // the flower is sited, and the drawer comes back exactly as it was left.
     onPlantFlower: (seedId, reopen) => {
-      beginPlacement(flowerPlacement(state, seedId, reopen), state.farmer.x, state.farmer.y);
+      const at = camera.centreTile();
+      beginPlacement(flowerPlacement(state, seedId, reopen), at.x, at.y);
     },
   });
   initTaskPanel(state);
@@ -98,27 +99,39 @@ async function boot() {
       const b = plotBounds(px, py);
       camera.centerOnTile(b.x0 + PLOT / 2, b.y0 + PLOT / 2);
     },
+    // Every one of these starts its ghost in the middle of what is already on
+    // screen, and moves the camera nowhere.
+    //
+    // They used to start it on the farmer and centre on him, which was the
+    // wrong end of the problem: the farmer is usually off doing a job at the
+    // far side of the farm, so buying something threw the player away from the
+    // spot they had just navigated to in order to put it there. Where you are
+    // looking is where you meant to build.
     onPlaceDecor: (kind, reopenShop) => {
-      beginPlacement(decorPlacement(state, kind, reopenShop), state.farmer.x, state.farmer.y);
-      camera.centerOnTile(state.farmer.x, state.farmer.y);
+      const at = camera.centreTile();
+      beginPlacement(decorPlacement(state, kind, reopenShop), at.x, at.y);
       toast(`Tap where the ${decorDef(kind).name.toLowerCase()} should go`);
     },
     onPlaceHand: () => {
-      beginPlacement(handPlacement(state), state.farmer.x, state.farmer.y);
-      camera.centerOnTile(state.farmer.x, state.farmer.y);
+      const at = camera.centreTile();
+      beginPlacement(handPlacement(state), at.x, at.y);
       toast('Tap where your farmhand should start');
     },
     onPlaceAnimal: (type) => {
-      // Start the ghost on the farmer, so something is visible immediately and
-      // the player can see the animal before choosing where it goes.
-      beginPlacement(animalPlacement(state, type), state.farmer.x, state.farmer.y);
-      camera.centerOnTile(state.farmer.x, state.farmer.y);
+      const at = camera.centreTile();
+      beginPlacement(animalPlacement(state, type), at.x, at.y);
       toast(`Tap where your ${type} should go`);
     },
   });
   wireToastFeedback();
 
   const toolbar = initToolbar(state, {
+    // One-shot buttons on the bar, which do something and leave the tool alone.
+    onAction: (id) => {
+      if (id !== 'findFarmer') return;
+      camera.centerOnTile(state.farmer.x, state.farmer.y);
+      renderer.invalidate?.();
+    },
     onToolChange: (t) => {
       // Leaving the till tool mid-selection must not strand a dangling anchor.
       tillSelection.tillAnchor = null;

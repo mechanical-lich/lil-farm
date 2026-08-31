@@ -89,6 +89,18 @@ export class Camera {
     return { x: Math.floor(w.x / TILE), y: Math.floor(w.y / TILE) };
   }
 
+  /**
+   * The tile in the middle of what is on screen right now.
+   *
+   * Where a placement ghost starts. It used to start on the farmer and drag the
+   * camera along with it, which moved the player away from whatever they had
+   * navigated to in order to build there — the farmer is usually off doing a
+   * job somewhere else entirely.
+   */
+  centreTile() {
+    return this.screenToTile(this.viewW / 2, this.viewH / 2);
+  }
+
   /** Inclusive tile bounds currently visible, padded for tall sprites. */
   visibleTiles(pad = 1) {
     return {
