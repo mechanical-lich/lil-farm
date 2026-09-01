@@ -541,6 +541,32 @@ li.market.glut .market-top small { color: #a33d2e; }
   opacity: 0.4;
 }
 
+/* --- the fish journal --------------------------------------------------- */
+
+/* The aquatic sheet is a single column, so unlike the mushrooms this slides
+   *down* rather than across — background-size names the whole strip's height,
+   and there is a test holding that number to the number of fish. Getting it
+   wrong doesn't fail loudly, it just draws the wrong fish. */
+.fish-art {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 2px;
+  image-rendering: pixelated;
+  background-image: url(../assets/animals/aquatic.png);
+  background-size: 48px 672px;   /* 14 fish at 48px */
+  background-color: rgba(74, 142, 190, 0.5);
+  border: 2px solid var(--panel-edge);
+  border-radius: 8px;
+}
+
+.fish.uncaught .fish-art {
+  background-image: none;
+  border-style: dashed;
+  opacity: 0.6;
+}
+
+.fish.uncaught figcaption { color: #a08d78; }
+
 /* --- the mushroom journal ---------------------------------------------- */
 
 .panel li.journal {
@@ -549,12 +575,14 @@ li.market.glut .market-top small { color: #a33d2e; }
   padding: 4px 0;
 }
 
+.fish-grid,
 .shroom-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
 }
 
+.fish,
 .shroom {
   margin: 0;
   text-align: center;
@@ -578,7 +606,9 @@ li.market.glut .market-top small { color: #a33d2e; }
   border-radius: 8px;
 }
 
+.fish figcaption,
 .shroom figcaption { color: #7a604a; }
+.fish figcaption b,
 .shroom figcaption b { display: block; color: var(--ink); font-size: 13px; }
 
 /* An empty slot shows the frame and nothing in it, so the grid reads as a

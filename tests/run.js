@@ -50,6 +50,11 @@ import { HAY_HELPINGS, hayAt, hayLeft, reconcileHay } from '../js/sim/hay.js';
 import { toolAt, toolList } from '../js/sim/tools.js';
 import { DECOR, decorList, salvageValue, canPlaceDecor, placeDecor } from '../js/sim/decor.js';
 import { potAt, potList, removePot } from '../js/sim/pots.js';
+import {
+  FISH, FISH_IDS, FISH_INTERVAL, CAST_RANGE, fishAt, fishList, fishCap, waterTiles,
+  spawnFish, standFor, landFish, itemFor, caughtBefore, caughtCount, kindsCaught,
+  FISH_HARD_CAP,
+} from '../js/sim/fish.js';
 import { movableAt, canMoveTo, moveTo } from '../js/sim/moving.js';
 import {
   ANIMALS, TROUGH_CAPACITY, FEED_COST, FOOD_DURATION, WATER_DURATION, SEEK_THRESHOLD,
@@ -5162,6 +5167,284 @@ test('filling nearer troughs turns a herd around', () => {
   assertEqual(s.animals.filter((a) => a.food > 100).length, HERD, 'everyone ate');
   assertEqual(fromFar, 0, 'and nobody trailed all the way to the far one');
   assertEqual(fromNear, HERD, 'they turned round and used what was beside them');
+});
+
+// --- fishing ------------------------------------------------------------
+
+/** A cleared farm with a pond of the size you ask for, at a known spot. */
+function pondFarm(seed, w = 3, h = 3) {
+  const s = farmWithMaterials(seed);
+  s.grid.ground.fill(GROUND.GRASS);
+  s.grid.objects.fill(OBJ.NONE);
+  s.mushrooms = {};
+  s.flowers = {};
+  s.fish = {};
+  s.fishJournal = {};
+  const px = s.farmer.x + 4;
+  const py = s.farmer.y;
+  for (let dy = 0; dy < h; dy++) {
+    for (let dx = 0; dx < w; dx++) s.grid.setGround(px + dx, py + dy, GROUND.WATER);
+  }
+  return { s, px, py };
+}
+
+test('fish appear in owned water and nowhere else', () => {
+  const { s, px, py } = pondFarm(9000, 3, 3);
+  for (let i = 0; i < FISH_INTERVAL * 200; i++) tick(s);
+
+  const list = fishList(s);
+  assert(list.length > 0, 'the pond has something in it');
+  for (const f of list) {
+    assert(isWater(s.grid.getGround(f.x, f.y)), `${f.x},${f.y} is water`);
+    assert(s.grid.isOwned(f.x, f.y), 'and land the player owns');
+    assert(FISH[f.id], `${f.id} is a real species`);
+  }
+  assert(list.length <= fishCap(s), 'and never more than the pond holds');
+});
+
+test('the fish cap is measured against water, not land', () => {
+  // A farm with a puddle and a farm with a lake should not hold the same
+  // number of fish, which is what measuring against owned *land* would do.
+  const small = pondFarm(9001, 2, 2).s;
+  const big = pondFarm(9002, 6, 6).s;
+  assertEqual(waterTiles(small), 4, 'four tiles of water');
+  assertEqual(waterTiles(big), 36, 'and thirty-six');
+  assert(fishCap(big) > fishCap(small), 'the lake holds more');
+});
+
+test('a fish is fished from the bank, never from the water', () => {
+  const { s, px, py } = pondFarm(9003, 3, 3);
+  const mid = { x: px + 1, y: py + 1 };            // the middle, no bank beside it
+  spawnFish(s, mid.x, mid.y, 'bass');
+
+  const spec = taskForTile(s, mid.x, mid.y, 'harvest');
+  assert(spec, 'the harvest tool offers to fish it');
+  assertEqual(spec.type, 'fish', 'as a fishing job');
+  assert(spec.standX != null, 'and it says where to stand');
+  assert(!isWater(s.grid.getGround(spec.standX, spec.standY)), 'which is dry land');
+  assert(s.grid.isWalkable(spec.standX, spec.standY, 'farmer'), 'that he can stand on');
+
+  const away = Math.abs(spec.standX - mid.x) + Math.abs(spec.standY - mid.y);
+  assert(away > 1, 'genuinely at range — the middle of a pond has no bank beside it');
+  assert(away <= CAST_RANGE, `and within a cast (${away})`);
+});
+
+test('the farmer lands a fish without ever standing on water', () => {
+  const { s, px, py } = pondFarm(9004, 3, 3);
+  const mid = { x: px + 1, y: py + 1 };
+  spawnFish(s, mid.x, mid.y, 'big_carp');
+  addTask(s, taskForTile(s, mid.x, mid.y, 'harvest'));
+
+  let n = 0;
+  let everWet = false;
+  while (s.tasks.length && n < 3000) {
+    tick(s);
+    if (isWater(s.grid.getGround(s.farmer.x, s.farmer.y))) everWet = true;
+    n++;
+  }
+
+  assert(!everWet, 'he never set foot in the pond');
+  assertEqual(fishAt(s, mid.x, mid.y), null, 'the fish is out of the water');
+  assertEqual(countItem(s, itemFor('big_carp')), 1, 'and in the bag');
+  assertEqual(caughtCount(s, 'big_carp'), 1, 'and in the journal');
+});
+
+test('a fish out of casting reach is not offered at all', () => {
+  // Rather than queueing a job the farmer can never get to. A lake wider than
+  // twice the cast range has a middle nobody can fish.
+  const { s, px, py } = pondFarm(9005, 2 * CAST_RANGE + 5, 2 * CAST_RANGE + 5);
+  const mid = { x: px + CAST_RANGE + 2, y: py + CAST_RANGE + 2 };
+  spawnFish(s, mid.x, mid.y, 'bass');
+
+  assertEqual(standFor(s, mid.x, mid.y), null, 'no bank within a cast');
+  assertEqual(taskForTile(s, mid.x, mid.y, 'harvest'), null, 'so nothing to queue');
+});
+
+test('landing a fish is what fills the journal', () => {
+  const { s, px, py } = pondFarm(9006, 3, 3);
+  assertEqual(kindsCaught(s), 0, 'nothing caught yet');
+  assert(!caughtBefore(s, 'crab'), 'no crab');
+
+  spawnFish(s, px, py, 'crab');
+  const got = landFish(s, px, py);
+
+  assertEqual(got, { [itemFor('crab')]: 1 }, 'one crab, in the shape the tasks report');
+  assert(caughtBefore(s, 'crab'), 'the journal remembers it');
+  assertEqual(kindsCaught(s), 1, 'one kind so far');
+  assertEqual(fishAt(s, px, py), null, 'and the water is empty again');
+});
+
+test('the rare things are rare', () => {
+  // A shark in the duck pond should be a story, not a Tuesday.
+  const total = FISH_IDS.reduce((n, id) => n + FISH[id].weight, 0);
+  const share = (id) => FISH[id].weight / total;
+  for (const id of ['reef_shark', 'great_white', 'dolphin']) {
+    assert(share(id) < 0.02, `${id} turns up in under one cast in fifty`);
+    assert(FISH[id].sell > 300, `${id} is worth the story`);
+  }
+  assert(share('bass') > 0.1, 'and the everyday fish is everyday');
+});
+
+test('every fish has a sprite on the sheet and a price in the bag', () => {
+  // Two lists that must agree and live in different files: a fish with no item
+  // is uncatchable, and one whose sprite runs off the sheet draws nothing.
+  const { w, h } = pngSize('assets/animals/aquatic.png');
+  assertEqual(w, TILE, 'the sheet is one column wide');
+  const rows = h / TILE;
+
+  const used = new Set();
+  for (const id of FISH_IDS) {
+    const def = FISH[id];
+    assert(def.sprite >= 0 && def.sprite < rows,
+      `${id} wants row ${def.sprite}, the sheet has ${rows}`);
+    assert(!used.has(def.sprite), `${id} does not share a sprite`);
+    used.add(def.sprite);
+    assert(ITEMS[itemFor(id)], `${id} has something to put in the bag`);
+    assertEqual(ITEMS[itemFor(id)].group, 'fish', `${id} files under the water`);
+  }
+  assertEqual(used.size, rows, 'and every sprite on the sheet is used');
+});
+
+test('the fish journal css agrees with how many fish there are', () => {
+  // The journal slides one background image, so the CSS names the whole
+  // strip's height. Add a fish and that number is wrong, and every entry
+  // quietly shows a slice of its neighbour. The mushroom sheet did exactly
+  // this when it grew.
+  const css = readFileSync('css/style.css', 'utf8');
+  const cell = 48;
+  const m = css.match(/\.fish-art\s*\{[^}]*background-size:\s*(\d+)px\s+(\d+)px/);
+  assert(m, 'the journal art still sets a background-size');
+  assertEqual(+m[1], cell, 'one column wide');
+  assertEqual(+m[2], FISH_IDS.length * cell, 'and as tall as there are fish');
+});
+
+test('a farm saved before there were fish loads without any', () => {
+  const { s } = pondFarm(9007, 3, 3);
+  spawnFish(s, s.farmer.x + 4, s.farmer.y, 'bass');
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual(back.fish[`${s.farmer.x + 4},${s.farmer.y}`], 'bass', 'fish survive a round trip');
+
+  const older = JSON.parse(JSON.stringify(serialize(s)));
+  delete older.fish;
+  delete older.fishJournal;
+  const loaded = deserialize(older);
+  assertEqual(loaded.fish, {}, 'an older farm has no fish');
+  assertEqual(loaded.fishJournal, {}, 'and no journal');
+});
+
+test('a plain tap fishes, the same as the harvest tool does', () => {
+  // Nothing else competes for a water tile — it cannot be tilled, planted or
+  // cleared — so making the player change tools to do the only thing water
+  // offers would be a mode for the sake of one.
+  const { s, px, py } = pondFarm(9008, 3, 3);
+  const mid = { x: px + 1, y: py + 1 };
+  spawnFish(s, mid.x, mid.y, 'trout');
+
+  const tapped = taskForTile(s, mid.x, mid.y, 'auto');
+  const harvested = taskForTile(s, mid.x, mid.y, 'harvest');
+  assert(tapped, 'tapping it offers something');
+  assertEqual(tapped.type, 'fish', 'and that something is fishing');
+  assertEqual(tapped.detail, harvested.detail, 'the same job either way');
+  assertEqual(tapped.standX, harvested.standX, 'worked from the same bank');
+  assertEqual(tapped.standY, harvested.standY, 'exactly');
+});
+
+test('tapping bare water does nothing at all', () => {
+  const { s, px, py } = pondFarm(9009, 3, 3);
+  assertEqual(taskForTile(s, px + 1, py + 1, 'auto'), null, 'an empty pond is not a button');
+});
+
+test('a tap fishes through the queue, start to finish', () => {
+  const { s, px, py } = pondFarm(9010, 3, 3);
+  const mid = { x: px + 1, y: py + 1 };
+  spawnFish(s, mid.x, mid.y, 'bass');
+  addTask(s, taskForTile(s, mid.x, mid.y, 'auto'));
+
+  let n = 0;
+  while (s.tasks.length && n < 3000) { tick(s); n++; }
+
+  assertEqual(countItem(s, itemFor('bass')), 1, 'the bass is in the bag');
+  assertEqual(fishAt(s, mid.x, mid.y), null, 'and out of the pond');
+});
+
+test('a fish that no longer exists is cleared on load, not left in the water', () => {
+  // Renaming a species is one word in the table, and a farm saved before it
+  // keeps the old word. Left alone that is an invisible fish nobody can catch,
+  // sitting on a tile and counting against the cap — which is exactly what
+  // renaming perch to bass would have left behind.
+  const { s, px, py } = pondFarm(9011, 3, 3);
+  spawnFish(s, px, py, 'bass');
+  s.fish[`${px + 1},${py}`] = 'perch';        // a species that was renamed away
+  s.fishJournal = { bass: 3, perch: 7 };
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+
+  assertEqual(back.fish[`${px},${py}`], 'bass', 'the real fish is untouched');
+  assertEqual(back.fish[`${px + 1},${py}`], undefined, 'the ghost is gone');
+  assertEqual(back.fishJournal.bass, 3, 'and the journal keeps what it knows');
+  assertEqual(back.fishJournal.perch, undefined, 'and forgets what it does not');
+});
+
+test('a fish nobody has heard of never gets into the water', () => {
+  const { s, px, py } = pondFarm(9012, 3, 3);
+  assertEqual(spawnFish(s, px, py, 'kraken'), null, 'refused');
+  assertEqual(fishAt(s, px, py), null, 'and nothing is there');
+  assertEqual(spawnFish(s, px, py, 'bass'), 'bass', 'a real one is fine');
+});
+
+test('the fish names line up with the sprites they were given', () => {
+  // The pairs are by sprite: the smaller five and the larger five are the same
+  // five species. A rename that moved a name without its pair would show up
+  // here as a big something with no small something.
+  for (const id of ['bass', 'trout', 'salmon', 'catfish', 'carp']) {
+    const small = FISH[id];
+    const big = FISH[`big_${id}`];
+    assert(small && big, `${id} comes in both sizes`);
+    assertEqual(big.name, `Big ${small.name.toLowerCase()}`, `${id} names match`);
+    assertEqual(big.sprite, small.sprite - 5, `${id}'s big one is five rows up`);
+    assert(big.sell > small.sell, `a big ${id} is worth more`);
+    assert(big.weight < small.weight, `and harder to find`);
+  }
+});
+
+test('a week away never leaves more than a handful of fish waiting', () => {
+  // Nothing in the simulation queues work, so coming home can never mean a
+  // backlog of *jobs* — but a lake at a flat quarter-full is a backlog of a
+  // different kind. Measured before the ceiling: a 12x12 pond came back at
+  // thirty-six shadows, each of which looks like it wants tapping.
+  const s = farmWithMaterials(9013);
+  s.grid.ground.fill(GROUND.GRASS);
+  s.grid.objects.fill(OBJ.NONE);
+  s.mushrooms = {};
+  s.flowers = {};
+  s.fish = {};
+  s.tasks = [];
+  for (let dy = 0; dy < 12; dy++) {
+    for (let dx = 0; dx < 12; dx++) s.grid.setGround(s.farmer.x + 5 + dx, s.farmer.y + dy, GROUND.WATER);
+  }
+  assert(waterTiles(s) > 100, 'a proper lake');
+
+  suspend();
+  for (let i = 0; i < 60 * 60 * 24 * 7; i++) tick(s);
+  resume();
+
+  assertEqual(s.tasks.length, 0, 'and not one task queued by itself');
+  assert(Object.keys(s.fish).length <= FISH_HARD_CAP,
+    `${Object.keys(s.fish).length} fish is more than the ceiling of ${FISH_HARD_CAP}`);
+  assert(FISH_HARD_CAP < 10, 'the ceiling is under the point where a pond reads as a chore');
+});
+
+test('a puddle still holds less than a lake', () => {
+  // The ceiling caps the top end; the fraction is what keeps the bottom end
+  // honest, so a two-tile puddle is not as good as a pond.
+  const tiny = pondFarm(9014, 2, 2).s;
+  const small = pondFarm(9015, 4, 4).s;
+  const lake = pondFarm(9016, 12, 12).s;
+
+  assert(fishCap(tiny) < fishCap(small), 'a puddle holds less than a pond');
+  assertEqual(fishCap(lake), FISH_HARD_CAP, 'and a lake stops at the ceiling');
+  assert(fishCap(small) <= FISH_HARD_CAP, 'nothing exceeds it');
 });
 
 test('a duck lays faster than a hen, for a higher price', () => {

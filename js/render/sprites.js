@@ -23,6 +23,7 @@
 import { TILE } from '../config.js';
 import { setAnimalVariants } from '../sim/animals.js';
 import { useFlowerSheet } from './flowerart.js';
+import { useAquaticSheet } from './fishart.js';
 
 /**
  * The soil capsule set — the art tilling is actually drawn with.
@@ -386,7 +387,7 @@ function loadImage(src) {
  *   flowers: HTMLImageElement}>}
  */
 export async function loadSheets() {
-  const [farm, town, emotes, shrooms, animals, battle, barn, flowers, decor] = await Promise.all([
+  const [farm, town, emotes, shrooms, animals, battle, barn, flowers, decor, aquatic] = await Promise.all([
     loadImage('assets/tilemap_packed.png'),
     loadImage('assets/town_tilemap_packed.png'),
     loadImage('assets/emotes.png'),
@@ -396,6 +397,7 @@ export async function loadSheets() {
     loadImage('assets/barn.png'),
     loadImage('assets/flora/flowers.png'),
     loadImage('assets/decorations.png'),
+    loadImage('assets/animals/aquatic.png'),
   ]);
   buildCapsules(farm);
 
@@ -408,7 +410,12 @@ export async function loadSheets() {
   // handed to the palette cache rather than blitted from directly.
   useFlowerSheet(flowers);
 
-  return { farm, town, emotes, shrooms, animals, battle, barn, flowers, decor };
+  // Fish are drawn twice over: as themselves when one is landed, and as a flat
+  // silhouette while they are still under the water. The second is built once
+  // from the first — see render/fishart.js.
+  useAquaticSheet(aquatic);
+
+  return { farm, town, emotes, shrooms, animals, battle, barn, flowers, decor, aquatic };
 }
 
 /** Resolves which sheet image a sprite reference belongs to. */

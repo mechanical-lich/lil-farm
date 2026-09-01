@@ -469,6 +469,17 @@ They are deliberately **not a second farmer**.  They never clear, till, plant or
 - They walk **through** each other rather than round — a moment's overlap in passing is invisible, and refusing to pass meant a hand parked by the barn could block the only route to a job for ever.
 - An animal stands still for a farmhand exactly as it does for the farmer, rather than being chased around the field.
 
+## Fishing
+Water existed for ducks to swim on and animals to drink from.  Now it holds fish: **five species in two sizes**, a **crab**, and three things that have no business in a hand-dug pond at all.
+
+- A fish is a **shadow under the surface**, and the shadow is the fish's own sprite with the colour taken out.  Not the whole sprite, though — measured, between 62% and 67% of every fish on the sheet is a heavy dark outline, so silhouetting the lot gives a fat blob with a fish somewhere inside it.  The shadow is built from the body pixels only, which is the shape a shadow should be.
+- **The farmer fishes from the bank**, because nobody swims.  This is the first task in the game done at range: every other one is worked from the tile itself or the square beside it.  The task carries the bank tile to stand on, so the router and the arrival check still agree without either of them learning what water is — and a fish with no bank within a cast is simply never offered, rather than queueing a job that can't be reached.
+- **A line and a float** while he works, and on the catch the fish is **pulled out of the water to him** over about three-quarters of a second.  That runs on the wall clock rather than the tick — a tick is a whole second, and the frame key would happily skip every frame of it — so it keeps the renderer awake by itself.  Nothing about it is saved or replayed: a week away does not come back to a screenful of flying fish.
+- **The rare things are properly rare.**  A shark turns up in under one cast in a hundred and sells for $400.  It should be a story, not a Tuesday.
+- **Fishing queues nothing by itself.**  Nothing in the simulation adds a task — only the player's taps do — so however long she is away, she never comes home to a list of jobs.  Measured: a week away on a twelve-tile-square lake produced thirty-six fish and *zero* tasks.
+- But thirty-six shadows is its own kind of backlog, so there is a **hard ceiling of six fish** on the farm whatever the water.  The quarter-of-the-water fraction stays underneath it, so a puddle still holds one or two rather than always the same six as a lake.  Fish do go on appearing while the tab is closed, like everything else; the events are suppressed during catch-up, so nothing announces itself on return.
+- The **fish journal** is a third tab beside the mushrooms and the flowers, and shows the empty slots — a grid of question marks is what says there is more in the pond.
+
 ## Coming back
 The farm keeps running with the tab closed — and now also while the tab is merely *hidden*. Nothing runs in a backgrounded tab, so the simulation falls behind; it catches up quietly the moment you look at it again, rather than staying behind until the next reload. A real absence (ten minutes or more) still gets the welcome-back card; glancing at another tab doesn't.
 

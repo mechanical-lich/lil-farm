@@ -16,6 +16,7 @@ import { emitUnlessSuspended } from '../engine/events.js';
 export const ITEM_GROUPS = [
   { id: 'crop', name: 'Crops' },
   { id: 'produce', name: 'From the animals' },
+  { id: 'fish', name: 'From the water' },
   { id: 'foraged', name: 'Foraged' },
   { id: 'material', name: 'Materials' },
   { id: 'seed', name: 'Seeds' },
@@ -40,6 +41,24 @@ export const ITEMS = {
   // quicker and a cow earns more once it has. See the note in animals.js.
   goat_milk: { name: "Goat's milk", sell: 45, group: 'produce' },
   wool: { name: 'Wool', sell: 100, group: 'produce' },
+  // Out of the water. Prices climb with rarity rather than with size alone —
+  // the things that have no business in a farm pond are worth a fortune
+  // precisely because landing one is a story.
+  fish_bass: { name: 'Bass', sell: 18, group: 'fish' },
+  fish_trout: { name: 'Trout', sell: 22, group: 'fish' },
+  fish_salmon: { name: 'Salmon', sell: 26, group: 'fish' },
+  fish_catfish: { name: 'Catfish', sell: 30, group: 'fish' },
+  fish_carp: { name: 'Carp', sell: 34, group: 'fish' },
+  fish_big_bass: { name: 'Big bass', sell: 55, group: 'fish' },
+  fish_big_trout: { name: 'Big trout', sell: 65, group: 'fish' },
+  fish_big_salmon: { name: 'Big salmon', sell: 80, group: 'fish' },
+  fish_big_catfish: { name: 'Big catfish', sell: 95, group: 'fish' },
+  fish_big_carp: { name: 'Big carp', sell: 120, group: 'fish' },
+  fish_crab: { name: 'Crab', sell: 70, group: 'fish' },
+  fish_reef_shark: { name: 'Reef shark', sell: 400, group: 'fish' },
+  fish_great_white: { name: 'Great white', sell: 600, group: 'fish' },
+  fish_dolphin: { name: 'Dolphin', sell: 500, group: 'fish' },
+
   // Foraged. Four kinds rather than sixteen: the journal remembers every
   // colour, the bag only needs to know what it's worth.
   mushroom_button: { name: 'Button mushrooms', sell: 12, group: 'foraged' },

@@ -16,6 +16,7 @@ import {
 } from './sim/build.js';
 import { drawBuilding } from './render/tilerender.js';
 import { flowerCanvas } from './render/flowerart.js';
+import { addCatch } from './render/effects.js';
 import { canPlantAt } from './sim/flowers.js';
 import { cropAt, isRipe } from './sim/crops.js';
 import { readSeedId, seedName } from './sim/flowergenes.js';
@@ -123,6 +124,16 @@ async function boot() {
       toast(`Tap where your ${type} should go`);
     },
   });
+  // A landed fish flies from the water to whoever caught it. Started from the
+  // event rather than polled, and suppressed during catch-up like every other
+  // event, so a week away does not come back to a screenful of them.
+  events.on('fish:caught', ({ x, y, sprite, name, first }) => {
+    addCatch(performance.now(), {
+      fromX: x, fromY: y, toX: state.farmer.x, toY: state.farmer.y, sprite,
+    });
+    toast(first ? `A ${name.toLowerCase()} — your first!` : `Caught a ${name.toLowerCase()}`);
+  });
+
   wireToastFeedback();
 
   const toolbar = initToolbar(state, {

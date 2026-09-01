@@ -4,6 +4,7 @@ import { on, emit } from '../engine/events.js';
 import { inventoryList } from '../sim/inventory.js';
 import { journalRows, journalFound, MUSHROOMS } from '../sim/mushrooms.js';
 import { journalRows as flowerJournalRows, seedGroups } from '../sim/flowers.js';
+import { journalRows as fishJournalRows, kindsCaught, FISH_IDS } from '../sim/fish.js';
 import { makeGenome, hueName, isFlowerSeed, isCross, petalHue } from '../sim/flowergenes.js';
 import { flowerDataUrl } from '../render/flowerart.js';
 import { taskLabel } from '../sim/tasks.js';
@@ -49,10 +50,12 @@ export function initHud(state, { onPlantFlower } = {}) {
       btn.classList.toggle('on', btn.dataset.tab === invTab);
     }
     invTitle.textContent = invTab === 'bag' ? 'Bag'
-      : invTab === 'journal' ? 'Mushroom journal' : 'Flower journal';
+      : invTab === 'journal' ? 'Mushroom journal'
+        : invTab === 'fish' ? 'Fish journal' : 'Flower journal';
 
     if (invTab === 'journal') { renderJournal(); return; }
     if (invTab === 'flowers') { renderFlowers(); return; }
+    if (invTab === 'fish') { renderFish(); return; }
 
     invNote.textContent = '';
     // Flower seeds are collapsed into one line. A collector carries dozens of
@@ -92,6 +95,27 @@ export function initHud(state, { onPlantFlower } = {}) {
            <figcaption>?</figcaption></figure>`)).join('');
 
     invList.innerHTML = `<li class="journal"><div class="shroom-grid">${cells}</div></li>`;
+  }
+
+  /**
+   * The fish journal. Same shape as the mushrooms — every species, caught or
+   * not, because the empty slots are what say there is more in the pond.
+   *
+   * The sheet is a single column, so the sprite is selected by sliding the
+   * background *down* rather than across.
+   */
+  function renderFish() {
+    invNote.textContent = `${kindsCaught(state)} of ${FISH_IDS.length} kinds caught`;
+
+    const cells = fishJournalRows(state).map((f) => (f.caught
+      ? `<figure class="fish" title="${esc(f.name)} · $${f.sell}">
+           <div class="fish-art" style="background-position:0 -${f.sprite * 48}px"></div>
+           <figcaption>${esc(f.name)}<b>${f.caught}</b></figcaption>
+         </figure>`
+      : `<figure class="fish uncaught"><div class="fish-art"></div>
+           <figcaption>?</figcaption></figure>`)).join('');
+
+    invList.innerHTML = `<li class="journal"><div class="fish-grid">${cells}</div></li>`;
   }
 
   /**

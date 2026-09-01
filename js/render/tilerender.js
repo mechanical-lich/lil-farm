@@ -12,6 +12,8 @@ import { crateAt, CRATE_CAPACITY } from '../sim/crates.js';
 import { hayAt, hayLeft, HAY_HELPINGS } from '../sim/hay.js';
 import { toolList } from '../sim/tools.js';
 import { potAt, potList } from '../sim/pots.js';
+import { fishList } from '../sim/fish.js';
+import { shadowFor, SHADOW_ALPHA } from './fishart.js';
 import { flowerAt, isWatered } from '../sim/flowers.js';
 import { flowerCanvas } from './flowerart.js';
 import { pendingGroundTiles } from '../sim/build.js';
@@ -313,6 +315,7 @@ export function drawObjects(ctx, sheets, state, view, entityRows = null) {
   const grid = state.grid;
   const drawn = new Set();
 
+  drawFish(ctx, sheets, state, view);
   drawPots(ctx, sheets, state, view);
 
   for (let y = view.y0; y <= view.y1; y++) {
@@ -363,6 +366,32 @@ export function drawObjects(ctx, sheets, state, view, entityRows = null) {
  * The soil sits at rows 6-7 in both frames, so a base at row 5 rests on it.
  */
 const POT_LIFT = 9;
+
+/**
+ * Fish, as shadows under the water.
+ *
+ * First of everything on the object pass, so anything floating on the surface
+ * — a duck, a fallen leaf of a lily — sits above them, which is the right way
+ * round for something below the water. They drift a pixel with the tick so the
+ * pond does not read as a photograph; it is the tick that moves, not a clock,
+ * so a replayed catch-up draws exactly the same pond.
+ */
+function drawFish(ctx, sheets, state, view) {
+  for (const { x, y, sprite } of fishList(state)) {
+    if (x < view.x0 || x > view.x1 || y < view.y0 || y > view.y1) continue;
+    const art = shadowFor(sprite);
+    if (!art) continue;
+    // A slow figure-of-eight, a pixel either way, keyed off the tile so two
+    // fish in one pond are never in step.
+    const t = state.tickCount + x * 7 + y * 13;
+    const bob = Math.round(Math.sin(t / 18)) ;
+    const sway = Math.round(Math.sin(t / 11));
+    ctx.save();
+    ctx.globalAlpha = SHADOW_ALPHA;
+    ctx.drawImage(art, x * TILE + sway, y * TILE + bob);
+    ctx.restore();
+  }
+}
 
 /**
  * Pots, drawn under everything.

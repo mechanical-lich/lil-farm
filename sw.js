@@ -8,7 +8,7 @@
 // ⚠ Bump CACHE_VERSION on every deploy. Assets are served cache-first, so
 // without a bump a returning player keeps the old build indefinitely.
 
-const CACHE_VERSION = 'lil-farm-v44';
+const CACHE_VERSION = 'lil-farm-v45';
 
 const SHELL = [
   './',
@@ -21,6 +21,7 @@ const SHELL = [
   './assets/flora/mushrooms.png',
   './assets/flora/flowers.png',
   './assets/decorations.png',
+  './assets/animals/aquatic.png',
   './assets/animals/farm.png',
   './assets/battle_tilemap_packed.png',
   './assets/barn.png',
@@ -37,6 +38,8 @@ const SHELL = [
   './js/engine/loop.js',
   './js/render/sprites.js',
   './js/render/flowerart.js',
+  './js/render/fishart.js',
+  './js/render/effects.js',
   './js/render/renderer.js',
   './js/render/camera.js',
   './js/render/tilerender.js',
@@ -56,6 +59,7 @@ const SHELL = [
   './js/sim/hay.js',
   './js/sim/tools.js',
   './js/sim/pots.js',
+  './js/sim/fish.js',
   './js/sim/flowergenes.js',
   './js/sim/tasks.js',
   './js/sim/farmer.js',

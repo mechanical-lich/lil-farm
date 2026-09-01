@@ -24,6 +24,7 @@ import { readSeedId } from './flowergenes.js';
 import { takeFromHand } from './farmhand.js';
 import { emptyCrate } from './crates.js';
 import { removePot } from './pots.js';
+import { landFish } from './fish.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 
 const WANDER_CHANCE = 0.08;   // per idle tick
@@ -82,14 +83,39 @@ function claimNextTask(state) {
   }
 }
 
+/**
+ * Where the farmer has to be to work this task.
+ *
+ * Almost always the task's own tile, or the square beside it. A task may name
+ * somewhere else entirely — fishing does, because the tile being worked is
+ * water and nobody swims — and then that is the whole of the goal: walk there,
+ * stand there, work from there.
+ *
+ * Used by both the router and the arrival check, deliberately. They have to
+ * agree exactly or the farmer walks somewhere the route accepted and then
+ * refuses to start, and the surest way to make two functions agree is to have
+ * them ask the same one.
+ */
+function workSpot(task) {
+  return task.standX != null ? { x: task.standX, y: task.standY } : { x: task.x, y: task.y };
+}
+
 /** @returns {boolean} true if a route exists (possibly of length 0). */
 function planRouteTo(state, task) {
   const f = state.farmer;
+  const spot = workSpot(task);
   const path = findPath(
     state.grid,
     { x: f.x, y: f.y },
-    { x: task.x, y: task.y },
-    { actor: 'farmer', adjacent: !!task.adjacent, w: task.w || 1, h: task.h || 1 },
+    spot,
+    {
+      actor: 'farmer',
+      // A named spot is stood on, whatever the task says about adjacency —
+      // the adjacency was about the thing being worked, not the standing.
+      adjacent: task.standX == null && !!task.adjacent,
+      w: task.standX == null ? (task.w || 1) : 1,
+      h: task.standX == null ? (task.h || 1) : 1,
+    },
   );
   if (path === null) return false;
   f.path = path;
@@ -123,10 +149,14 @@ function step(state, f) {
 }
 
 function inPosition(f, task) {
-  const w = task.w || 1;
-  const h = task.h || 1;
   // Must match findPath's goal test exactly, or the farmer arrives somewhere
   // the route considered acceptable and then refuses to start work.
+  if (task.standX != null) {
+    const spot = workSpot(task);
+    return f.x === spot.x && f.y === spot.y;
+  }
+  const w = task.w || 1;
+  const h = task.h || 1;
   return task.adjacent
     ? besideBox(task.x, task.y, w, h, f.x, f.y)
     : insideBox(task.x, task.y, w, h, f.x, f.y);
@@ -263,6 +293,13 @@ function applyTaskResult(state, task) {
       // pot to put in the bag — taking one away is undoing a purchase, which
       // is worth saying out loud rather than quietly refunding.
       removePot(state, task.x, task.y);
+      break;
+    }
+
+    case 'fish': {
+      // Landed from the bank. The tile worked is water the farmer never stood
+      // on, so the fish comes out of state.fish rather than off the grid.
+      gained = landFish(state, task.x, task.y);
       break;
     }
 

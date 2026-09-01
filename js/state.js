@@ -7,6 +7,7 @@ import { generateWorld, startingBarnAnchor } from './world/worldgen.js';
 import { placeStructure, reconcileBuildings } from './sim/build.js';
 import { reconcileCrates } from './sim/crates.js';
 import { reconcileHay } from './sim/hay.js';
+import { reconcileFish } from './sim/fish.js';
 import { seedStartingMushrooms } from './sim/mushrooms.js';
 import { newMarket } from './sim/market.js';
 import { reconcileFlowers } from './sim/flowers.js';
@@ -45,6 +46,8 @@ export function newGame(seed = (Date.now() ^ 0x5f3759df) >>> 0) {
     hay: {},        // tile key -> {left}; see sim/hay.js
     tools: {},      // tile key -> buildable kind; see sim/tools.js
     pots: {},       // tile key -> true; see sim/pots.js
+    fish: {},       // tile key -> fish id; see sim/fish.js
+    fishJournal: {},   // fish id -> how many you have ever landed
     tasks: [],
     nextTaskId: 1,
     // See TESTING in config.js — a real farm starts with just a few seeds.
@@ -94,6 +97,8 @@ export function serialize(state) {
     hay: state.hay,
     tools: state.tools,
     pots: state.pots,
+    fish: state.fish,
+    fishJournal: state.fishJournal,
     tasks: state.tasks,
     nextTaskId: state.nextTaskId,
     inventory: state.inventory,
@@ -148,6 +153,9 @@ export function deserialize(data) {
     tools: data.tools || {},
     // Farms saved before flower pots existed simply have none.
     pots: data.pots || {},
+    // Farms saved before there were fish in the water simply have none.
+    fish: data.fish || {},
+    fishJournal: data.fishJournal || {},
     tasks: data.tasks || [],
     nextTaskId: data.nextTaskId || 1,
     inventory: data.inventory || {},
@@ -165,6 +173,11 @@ export function deserialize(data) {
   const crates = reconcileCrates(state);
   if (crates.adopted || crates.dropped) {
     console.warn(`crate records repaired on load: ${crates.adopted} adopted, ${crates.dropped} dropped`);
+  }
+  const swimming = reconcileFish(state);
+  if (swimming.dropped || swimming.forgotten) {
+    console.warn(`fish cleared on load: ${swimming.dropped} of a species that no longer exists, `
+      + `${swimming.forgotten} journal entries`);
   }
   const bales = reconcileHay(state);
   if (bales.adopted || bales.dropped) {

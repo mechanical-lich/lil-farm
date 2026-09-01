@@ -2,6 +2,7 @@
 
 import { COLORS, MAX_FPS, MAX_DPR, TILE } from '../config.js';
 import { drawGround, drawCrops, drawObjects, drawUnowned } from './tilerender.js';
+import { drawEffects, drawCastLine, anyEffects } from './effects.js';
 import {
   entitiesByRow, drawTaskMarkers, drawTillAnchor, drawPlacementGhost, drawEmotes,
   drawCarriedGhost,
@@ -72,19 +73,22 @@ export class Renderer {
     const key = frameKey(state, this.camera, overlay, this.dpr);
     const same = sameFrame(this.last, key);
 
-    if (!this.forceNext && same && !anythingMoving(state)) return false;
+    // A landed fish is on the wall clock rather than the tick, so it has to be
+    // able to keep the renderer awake by itself — the frame key would happily
+    // skip every frame of it.
+    if (!this.forceNext && same && !anythingMoving(state) && !anyEffects(now)) return false;
     // Even when there is something to show, there is no sense drawing it more
     // often than MAX_FPS.
     if (!this.forceNext && now - this.lastDrawAt < this.minFrameMs) return false;
 
-    this.draw(state, alpha, overlay);
+    this.draw(state, alpha, overlay, now);
     this.last = key;
     this.lastDrawAt = now;
     this.forceNext = false;
     return true;
   }
 
-  draw(state, alpha = 1, overlay = null) {
+  draw(state, alpha = 1, overlay = null, now = 0) {
     const { ctx, camera } = this;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.imageSmoothingEnabled = false;
@@ -118,6 +122,11 @@ export class Renderer {
     if (overlay?.tillAnchor) drawTillAnchor(ctx, overlay.tillAnchor, state.tickCount);
     if (overlay?.pending) drawPlacementGhost(ctx, this.sheets, overlay.pending);
     if (overlay?.carried) drawCarriedGhost(ctx, this.sheets, state, overlay.carried);
+
+    // Over the world but inside the camera transform: a cast line and a fish
+    // in mid-air both belong in world space, not on the HUD.
+    drawCastLine(ctx, state);
+    drawEffects(ctx, this.sheets, now);
 
     ctx.restore();
   }

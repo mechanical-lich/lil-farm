@@ -19,6 +19,7 @@ import { readSeedId, seedName } from './flowergenes.js';
 import { handAt, carriedTotal } from './farmhand.js';
 import { crateAt } from './crates.js';
 import { potAt } from './pots.js';
+import { fishAt, standFor } from './fish.js';
 
 /** Work is measured in ticks (1 tick = 1 second). */
 export const TASK_TYPES = {
@@ -33,6 +34,7 @@ export const TASK_TYPES = {
   fill: { label: 'Fill', verb: 'Filling' },
   collect: { label: 'Collect', verb: 'Collecting' },
   gather: { label: 'Take', verb: 'Taking' },
+  fish: { label: 'Fish', verb: 'Fishing' },
   unload: { label: 'Empty', verb: 'Emptying' },
   liftpot: { label: 'Take', verb: 'Taking' },
   till: { label: 'Till', verb: 'Tilling' },
@@ -53,6 +55,9 @@ export const WORK = {
   fill: 8,
   collect: 6,
   gather: 5,
+  // Long enough that a catch is an errand rather than a tap, and that the
+  // line has time to be seen in the water.
+  fish: 20,
   unload: 5,
   liftpot: 5,
 };
@@ -321,6 +326,20 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
   const ground = grid.getGround(x, y);
   const crop = cropAt(state, x, y);
 
+  // A shadow in the water. Worked from the bank, so the task carries the tile
+  // to stand on — without a bank in reach there is no task to offer, which is
+  // what stops the middle of a lake being tapped fruitlessly.
+  const fishTask = () => {
+    const found = fishAt(state, x, y);
+    if (!found) return null;
+    const stand = standFor(state, x, y);
+    if (!stand) return null;
+    return {
+      type: 'fish', x, y, work: WORK.fish, detail: found.name,
+      standX: stand.x, standY: stand.y,
+    };
+  };
+
   const clearTask = () => (def.clearable ? {
     type: def.task || 'clear',
     x, y,
@@ -451,6 +470,9 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
     }
 
     case 'harvest': {
+      const catchable = fishTask();
+      if (catchable) return catchable;
+
       // Picking a flower is deliberate: you reach for the harvest tool first.
       // A tap takes the flower's *water* (see 'auto' below), because watering
       // is what a player does over and over to a bed they are breeding, and
@@ -510,6 +532,13 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
           detail: `${itemName(crate.item)} crate`, adjacent: true,
         };
       }
+
+      // A shadow in the water. Nothing else on the farm competes for a water
+      // tile — you cannot till it, plant it or clear it — so a tap on one is
+      // never ambiguous, and making the player switch to the harvest tool to
+      // do the only thing water offers is a mode for the sake of a mode.
+      const catchable = fishTask();
+      if (catchable) return catchable;
 
       const trough = troughAnchorAt(state, x, y);
       if (trough) {
