@@ -76,7 +76,7 @@ export class Renderer {
     // A landed fish is on the wall clock rather than the tick, so it has to be
     // able to keep the renderer awake by itself — the frame key would happily
     // skip every frame of it.
-    if (!this.forceNext && same && !anythingMoving(state) && !anyEffects(now)) return false;
+    if (!this.forceNext && same && !anythingMoving(state) && !anyEffects()) return false;
     // Even when there is something to show, there is no sense drawing it more
     // often than MAX_FPS.
     if (!this.forceNext && now - this.lastDrawAt < this.minFrameMs) return false;
@@ -126,7 +126,7 @@ export class Renderer {
     // Over the world but inside the camera transform: a cast line and a fish
     // in mid-air both belong in world space, not on the HUD.
     drawCastLine(ctx, state);
-    drawEffects(ctx, this.sheets, now);
+    drawEffects(ctx, this.sheets);
 
     ctx.restore();
   }

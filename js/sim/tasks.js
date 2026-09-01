@@ -335,7 +335,11 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
     const stand = standFor(state, x, y);
     if (!stand) return null;
     return {
-      type: 'fish', x, y, work: WORK.fish, detail: found.name,
+      // Deliberately not the species. All you can see is a shadow, and the
+      // queue saying "Fish Big carp" hands you the answer before the farmer
+      // has got his line wet — the whole of a catch is not knowing until it
+      // comes out of the water.
+      type: 'fish', x, y, work: WORK.fish, detail: 'a shadow in the water',
       standX: stand.x, standY: stand.y,
     };
   };

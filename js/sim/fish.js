@@ -22,6 +22,7 @@
 
 import { emitUnlessSuspended } from '../engine/events.js';
 import { isWater } from '../world/tiledefs.js';
+import { findPath } from '../world/pathfind.js';
 import { PLOT, plotCoords } from '../world/land.js';
 import { addItem } from './inventory.js';
 
@@ -223,17 +224,32 @@ export function reconcileFish(state) {
 }
 
 /**
+ * How many banks to try before giving up on a fish.
+ *
+ * Each try is a path search, and a search that fails costs its whole budget —
+ * so checking all sixty-odd tiles within a cast would be far too slow for
+ * something that runs on every tap and every tile of a drag. Nearest-first with
+ * an early exit means the ordinary case, where the closest bank is simply
+ * reachable, costs exactly one search.
+ */
+const STAND_TRIES = 8;
+
+/**
  * The bank tile the farmer would fish this one from.
  *
- * The nearest place he can actually stand within a cast, straight-line — the
- * task carries it so the router walks him there and the arrival check knows
- * where "there" is, neither of them needing to know that the thing being worked
- * on is in the water.
+ * The nearest place he can actually *get to* within a cast — which is not the
+ * same as the nearest place he could stand on. An island in the middle of a
+ * pond is walkable ground he can never reach, and picking it left the farmer
+ * announcing "can't reach that salmon" for ever: the task was created, routed
+ * to the island, and failed on arrival every retry.
  *
- * @returns {{x: number, y: number}|null} null if there is no bank in reach
+ * So each candidate is checked with a real route from where he is now. Ordered
+ * nearest-first, so the answer is still the closest usable bank.
+ *
+ * @returns {{x: number, y: number}|null} null if no bank in reach can be got to
  */
-export function standFor(state, x, y) {
-  let best = null;
+export function standFor(state, x, y, from = state.farmer) {
+  const candidates = [];
   for (let dy = -CAST_RANGE; dy <= CAST_RANGE; dy++) {
     for (let dx = -CAST_RANGE; dx <= CAST_RANGE; dx++) {
       const d = Math.abs(dx) + Math.abs(dy);
@@ -241,10 +257,18 @@ export function standFor(state, x, y) {
       const sx = x + dx;
       const sy = y + dy;
       if (!state.grid.isWalkable(sx, sy, 'farmer')) continue;
-      if (!best || d < best.d) best = { d, x: sx, y: sy };
+      candidates.push({ d, x: sx, y: sy });
     }
   }
-  return best ? { x: best.x, y: best.y } : null;
+  candidates.sort((a, b) => a.d - b.d);
+
+  for (const c of candidates.slice(0, STAND_TRIES)) {
+    // A zero-length path counts: he is already standing there.
+    const path = findPath(state.grid, { x: from.x, y: from.y }, { x: c.x, y: c.y },
+      { actor: 'farmer' });
+    if (path) return { x: c.x, y: c.y };
+  }
+  return null;
 }
 
 /**

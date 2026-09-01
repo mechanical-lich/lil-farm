@@ -5447,6 +5447,111 @@ test('a puddle still holds less than a lake', () => {
   assert(fishCap(small) <= FISH_HARD_CAP, 'nothing exceeds it');
 });
 
+test('an island is not somewhere to fish from', () => {
+  // Walkable is not the same as reachable. A tile of dry land marooned in the
+  // middle of a pond passes isWalkable and can never be got to — picking it
+  // left the farmer announcing "can't reach that salmon" for ever, because the
+  // task was created, routed to the island, and failed on arrival every retry.
+  const { s, px, py } = pondFarm(9017, 7, 7);
+  const island = { x: px + 3, y: py + 3 };
+  s.grid.setGround(island.x, island.y, GROUND.GRASS);
+  assert(s.grid.isWalkable(island.x, island.y, 'farmer'), 'the island is walkable ground');
+  assertEqual(findPath(s.grid, { x: s.farmer.x, y: s.farmer.y }, island, { actor: 'farmer' }), null,
+    'and yet unreachable');
+
+  const fish = { x: island.x, y: island.y - 1 };
+  spawnFish(s, fish.x, fish.y, 'salmon');
+
+  const stand = standFor(s, fish.x, fish.y);
+  assert(stand, 'a bank was found');
+  assert(!(stand.x === island.x && stand.y === island.y), 'and it is not the island');
+  assert(findPath(s.grid, { x: s.farmer.x, y: s.farmer.y }, stand, { actor: 'farmer' }),
+    'it is somewhere he can actually get to');
+});
+
+test('a fish beside an island really does get caught', () => {
+  const { s, px, py } = pondFarm(9018, 7, 7);
+  const island = { x: px + 3, y: py + 3 };
+  s.grid.setGround(island.x, island.y, GROUND.GRASS);
+  const fish = { x: island.x, y: island.y - 1 };
+  spawnFish(s, fish.x, fish.y, 'salmon');
+
+  let stranded = false;
+  const off = on('task:unreachable', () => { stranded = true; });
+  addTask(s, taskForTile(s, fish.x, fish.y, 'auto'));
+  let n = 0;
+  while (s.tasks.length && n < 2000) { tick(s); n++; }
+  if (typeof off === 'function') off();
+
+  assert(!stranded, 'he never gave up on it');
+  assertEqual(fishAt(s, fish.x, fish.y), null, 'the salmon is out');
+  assertEqual(countItem(s, itemFor('salmon')), 1, 'and in the bag');
+});
+
+test('a fish with no reachable bank is refused, and says why', () => {
+  // Marooned on an island the farmer cannot get to at all: there is nowhere to
+  // fish from, so no task — but a tap on something plainly visible must not be
+  // met with silence.
+  const { s, px, py } = pondFarm(9019, 2 * CAST_RANGE + 5, 2 * CAST_RANGE + 5);
+  const mid = { x: px + CAST_RANGE + 2, y: py + CAST_RANGE + 2 };
+  s.grid.setGround(mid.x, mid.y, GROUND.GRASS);        // an island, far from any shore
+  const fish = { x: mid.x, y: mid.y - 1 };
+  spawnFish(s, fish.x, fish.y, 'carp');
+
+  assertEqual(standFor(s, fish.x, fish.y), null, 'nowhere to fish it from');
+  assertEqual(taskForTile(s, fish.x, fish.y, 'auto'), null, 'so no task is offered');
+  assert(fishAt(s, fish.x, fish.y), 'though the fish is plainly still there');
+});
+
+test('a fishing task told to stand somewhere unreachable finds another bank', () => {
+  // A task bakes in where to stand when it is queued. That goes stale — and a
+  // task saved by an older build can name a tile that was never reachable at
+  // all. One on a real farm retried one thousand seven hundred times before
+  // this: the fix at the point of *creation* could not help it, because the
+  // task already existed.
+  const { s, px, py } = pondFarm(9020, 7, 7);
+  const island = { x: px + 3, y: py + 3 };
+  s.grid.setGround(island.x, island.y, GROUND.GRASS);
+  const fish = { x: island.x, y: island.y - 1 };
+  spawnFish(s, fish.x, fish.y, 'carp');
+
+  const task = addTask(s, taskForTile(s, fish.x, fish.y, 'auto'));
+  assert(task, 'queued');
+  // Exactly what an older save holds: a bank on the island.
+  task.standX = island.x;
+  task.standY = island.y;
+
+  let stranded = false;
+  on('task:unreachable', () => { stranded = true; });
+
+  let n = 0;
+  while (s.tasks.length && n < 2000) { tick(s); n++; }
+
+  assert(!stranded, 'he did not give up on it');
+  assert(!(task.standX === island.x && task.standY === island.y),
+    'the task was given a different bank');
+  assertEqual(fishAt(s, fish.x, fish.y), null, 'and the carp was landed');
+  assertEqual(countItem(s, itemFor('carp')), 1, 'into the bag');
+});
+
+test('rethinking a bank does not disturb tasks that are perfectly fine', () => {
+  // The re-plan only fires when a route actually fails, so an ordinary fishing
+  // job keeps the bank it was given.
+  const { s, px, py } = pondFarm(9021, 5, 5);
+  const fish = { x: px + 2, y: py + 2 };
+  spawnFish(s, fish.x, fish.y, 'trout');
+
+  const task = addTask(s, taskForTile(s, fish.x, fish.y, 'auto'));
+  const chosen = { x: task.standX, y: task.standY };
+
+  let n = 0;
+  while (s.tasks.length && n < 2000) { tick(s); n++; }
+
+  assertEqual(task.standX, chosen.x, 'the bank never moved');
+  assertEqual(task.standY, chosen.y, 'on either axis');
+  assertEqual(countItem(s, itemFor('trout')), 1, 'and the trout was landed');
+});
+
 test('a duck lays faster than a hen, for a higher price', () => {
   assert(ANIMALS.duck.produceTicks < ANIMALS.chicken.produceTicks, 'ducks lay sooner');
   assert(ANIMALS.duck.price > ANIMALS.chicken.price, 'and cost more up front');

@@ -14,6 +14,18 @@
 
 import { TILE } from '../config.js';
 
+/**
+ * Effects keep their own clock, and every one of them reads it from here.
+ *
+ * They used to be handed the time by their callers, which was one clock too
+ * many: the catch was stamped with performance.now() (milliseconds since the
+ * page loaded) and compared against the renderer's Date.now() (milliseconds
+ * since 1970). The difference is about seventeen hundred billion, so every
+ * effect was already expired before its first frame and the animation simply
+ * never appeared. One source, no arguments, no way to get it wrong.
+ */
+const clock = () => Date.now();
+
 /** How long a fish takes to come out of the water and into the bag. */
 const CATCH_MS = 700;
 
@@ -28,19 +40,21 @@ const catches = [];
  * Coordinates are tiles; the draw works in world pixels like everything else
  * inside the camera transform.
  */
-export function addCatch(now, { fromX, fromY, toX, toY, sprite }) {
-  catches.push({ fromX, fromY, toX, toY, sprite, start: now });
+export function addCatch({ fromX, fromY, toX, toY, sprite }) {
+  catches.push({ fromX, fromY, toX, toY, sprite, start: clock() });
 }
 
 /** Is anything still in flight? The renderer asks before deciding to skip. */
-export function anyEffects(now) {
+export function anyEffects() {
+  const now = clock();
   return catches.some((c) => now - c.start < CATCH_MS);
 }
 
 /** Thrown away when the player is not looking, so nothing piles up unseen. */
 export function clearEffects() { catches.length = 0; }
 
-export function drawEffects(ctx, sheets, now) {
+export function drawEffects(ctx, sheets) {
+  const now = clock();
   for (let i = catches.length - 1; i >= 0; i--) {
     const c = catches[i];
     const t = (now - c.start) / CATCH_MS;

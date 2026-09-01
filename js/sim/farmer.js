@@ -24,7 +24,7 @@ import { readSeedId } from './flowergenes.js';
 import { takeFromHand } from './farmhand.js';
 import { emptyCrate } from './crates.js';
 import { removePot } from './pots.js';
-import { landFish } from './fish.js';
+import { landFish, standFor } from './fish.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 
 const WANDER_CHANCE = 0.08;   // per idle tick
@@ -100,6 +100,28 @@ function workSpot(task) {
   return task.standX != null ? { x: task.standX, y: task.standY } : { x: task.x, y: task.y };
 }
 
+/**
+ * Picks a fishing task a fresh bank, if the one it has cannot be got to.
+ *
+ * A task bakes in where to stand at the moment it is queued, from where the
+ * farmer was standing then. That is usually right and always cheap, but it goes
+ * stale: he may have walked somewhere with a better bank, the ground may have
+ * changed, and a task saved by an older build may name a tile that was never
+ * reachable at all. Left alone the task retries for ever — one on a real farm
+ * had tried and failed one thousand seven hundred times.
+ *
+ * @returns {boolean} whether the task now names somewhere reachable
+ */
+function rethinkStand(state, task) {
+  if (task.standX == null || task.type !== 'fish') return false;
+  const fresh = standFor(state, task.x, task.y);
+  if (!fresh) return false;
+  if (fresh.x === task.standX && fresh.y === task.standY) return false;   // no better idea
+  task.standX = fresh.x;
+  task.standY = fresh.y;
+  return true;
+}
+
 /** @returns {boolean} true if a route exists (possibly of length 0). */
 function planRouteTo(state, task) {
   const f = state.farmer;
@@ -117,7 +139,13 @@ function planRouteTo(state, task) {
       h: task.standX == null ? (task.h || 1) : 1,
     },
   );
-  if (path === null) return false;
+  if (path === null) {
+    // Before giving up: the bank it was told to use may simply be the wrong one
+    // now. Ask again from where he is standing, and if that names somewhere
+    // else, try that instead.
+    if (rethinkStand(state, task)) return planRouteTo(state, task);
+    return false;
+  }
   f.path = path;
   return true;
 }
