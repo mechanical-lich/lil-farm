@@ -509,9 +509,15 @@ The whole premise is that the farm runs with the tab closed, so returning shows 
 - Nothing to say means no card.  An absence under a minute isn't news either.
 
 ## Panels and modes
-The status bar at the top is also the task-queue button: it already tells you what the farmer is doing, so it's where you reach when you want to know what's next, and it carries the queue count. This keeps the bottom row down to three buttons on a phone-width screen.
+The status bar at the top is also the task-queue button: it already tells you what the farmer is doing, so it's where you reach when you want to know what's next, and it carries the queue count.
 
-The sliding panels (Shop, Tasks, Bag) only cover part of the screen, so the map stays visible above them.  That made it easy to be "still in Build mode" while shopping and quietly put down a fence with a stray tap.
+**What sits where is by how often you reach for it, not by what it is.**  The top row is a readout you glance at — money, the farmer, and the shop; the bottom row is the things you *press*, in thumb reach: Pan, Bag, Journal, settings.  The shop and the bag started the other way round and were swapped, because the bag is opened many times an hour and the shop a few times a session.
+
+**The bag button carries no count.**  It had one in the HUD, where a number is what that row is for, but the total weight of everything you own is not a thing anybody acts on — down in the thumb row it was one more figure moving for no reason.
+
+**The journal is its own panel**, not tabs of the bag.  Mushrooms, flowers, fish and achievements were the bag's second through fifth tabs, which was right when there was one of them and wrong at four: the bag is what you are carrying *now* and empties when you sell, and a journal is what you have found *ever*.  They still share a panel with each other, because all four are the same shape — a grid of slots with the empty ones showing, which is the part that says there is more out there.
+
+The sliding panels (Shop, Tasks, Bag, Journal) only cover part of the screen, so the map stays visible above them.  That made it easy to be "still in Build mode" while shopping and quietly put down a fence with a stray tap.
 
 - Opening any panel **drops the tool back to plain Tap** and closes the tool's sub-picker, so nothing destructive stays armed behind it.
 - Opening a panel also abandons a half-finished tilling row or placement ghost.

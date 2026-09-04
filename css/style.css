@@ -173,7 +173,18 @@ body {
   gap: 8px;
 }
 
-#controls button { flex: 1; }
+/* Four across on a 393px phone once the bag came down from the HUD and the
+   journal arrived: Pan, Bag, Journal, gear. At the default 15px with 14px of
+   side padding, "Bag 127" wrapped onto a second line and the whole row grew a
+   storey. Tighter type and no wrapping keeps it one row at every count the bag
+   can reach. */
+#controls button {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 8px;
+  font-size: 14px;
+  white-space: nowrap;
+}
 
 /* Tools scroll horizontally rather than wrapping, so the row stays one line
    and the map keeps as much vertical space as possible. */
@@ -801,9 +812,8 @@ li.market.glut .market-top small { color: #a33d2e; }
 
 /* Tabs, not a row of loose buttons: they sit on a shared baseline with square
    bottom corners so the selected one reads as joined to the list below it.
-   Note the ID prefixes below — `#ui button` is an ID selector, so a bare
-   `.tabs button.on` rule loses to it and the selected tab never turns green.
-   Every new tab row has to be added here, or it silently looks unselected. */
+   Note the `#ui` prefix below — `#ui button` is an ID selector, so a bare
+   `.tabs button.on` rule loses to it and the selected tab never turns green. */
 .tabs {
   display: flex;
   gap: 4px;
@@ -811,8 +821,12 @@ li.market.glut .market-top small { color: #a33d2e; }
   border-bottom: 2px solid var(--panel-edge);
 }
 
-#shop-tabs button,
-#inv-tabs button {
+/* Matched by shape rather than by name. This was a list of tab-row ids, with a
+   note above saying that every new row had to be added to it — and the very
+   next row added (the journal's) was missed, so its selected tab sat there
+   looking unselected. `#ui .tabs button` outranks `#ui button` on specificity
+   just as well, and there is nothing left to keep in step. */
+#ui .tabs button {
   flex: 1;
   border-radius: 10px 10px 0 0;
   border-bottom: none;
@@ -824,18 +838,16 @@ li.market.glut .market-top small { color: #a33d2e; }
   color: #7a604a;
 }
 
-#shop-tabs button.on,
-#inv-tabs button.on {
+#ui .tabs button.on {
   background: var(--accent);
   border-color: #3f8a34;
   color: #10240c;
 }
 
-#shop-tabs button:active,
-#inv-tabs button:active { transform: none; }
+#ui .tabs button:active { transform: none; }
 
 #shop-note,
-#inv-note {
+#journal-note {
   font-size: 13px;
   color: #7a604a;
   padding: 0 2px 6px;

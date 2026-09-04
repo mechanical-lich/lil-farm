@@ -38,6 +38,7 @@ import { initMarketPanel } from './ui/marketpanel.js';
 import { initShopPanel } from './ui/shoppanel.js';
 import { initSettingsPanel } from './ui/settingspanel.js';
 import { initHud } from './ui/hud.js';
+import { initJournal } from './ui/journal.js';
 import { initToasts, toast } from './ui/toast.js';
 import { initAwards, showAward, clearAwards } from './ui/award.js';
 import { buildSummary, showSummary } from './ui/summary.js';
@@ -92,7 +93,8 @@ async function boot() {
   initToasts();
   initAwards();
   const autosaver = new Autosaver(() => serialize(state));
-  const hud = initHud(state, {
+  const hud = initHud(state);
+  initJournal(state, {
     // From the seed drawer straight out to the map: the journal steps aside,
     // the flower is sited, and the drawer comes back exactly as it was left.
     onPlantFlower: (seedId, reopen) => {

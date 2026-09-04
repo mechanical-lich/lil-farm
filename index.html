@@ -26,7 +26,7 @@
         <span id="hud-status-text">Idle</span>
         <span id="task-count">0</span>
       </button>
-      <button class="hud-chip" id="inv-toggle">Bag 0</button>
+      <button class="hud-chip" id="shop-toggle">🏪 Shop</button>
     </div>
 
     <div id="debug"></div>
@@ -49,7 +49,8 @@
       <div id="toolbar"></div>
       <div id="controls">
         <button id="paint-toggle" title="Drag across the farm to queue lots of work">✋ Pan</button>
-        <button id="shop-toggle">🏪 Shop</button>
+        <button id="inv-toggle">🎒 Bag</button>
+        <button id="journal-toggle" title="Everything you have found">📔 Journal</button>
         <button id="settings-toggle" title="Backup and settings" aria-label="Settings">⚙</button>
       </div>
     </div>
@@ -123,15 +124,23 @@
         <h2 id="inv-title">Bag</h2>
         <button id="inv-close">Done</button>
       </div>
-      <div id="inv-tabs" class="tabs">
-        <button data-tab="bag" class="on">Bag</button>
-        <button data-tab="journal">Mushrooms</button>
+      <ul id="inv-list"></ul>
+    </div>
+
+    <!-- The collections: what the farm has been found to hold. See ui/journal.js. -->
+    <div class="panel" id="journal-panel">
+      <div class="panel-head">
+        <h2 id="journal-title">Journal</h2>
+        <button id="journal-close">Done</button>
+      </div>
+      <div id="journal-tabs" class="tabs">
+        <button data-tab="mushrooms" class="on">Mushrooms</button>
         <button data-tab="flowers">Flowers</button>
         <button data-tab="fish">Fish</button>
         <button data-tab="awards">Awards</button>
       </div>
-      <div id="inv-note"></div>
-      <ul id="inv-list"></ul>
+      <div id="journal-note"></div>
+      <ul id="journal-list"></ul>
     </div>
   </div>
 
