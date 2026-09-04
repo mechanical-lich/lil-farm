@@ -625,6 +625,43 @@ li.market.glut .market-top small { color: #a33d2e; }
   opacity: 0.45;
 }
 
+/* --- achievements ------------------------------------------------------- */
+
+/* A medal rather than a sprite: there is no art for these, and a row of blank
+   discs says "there are more of these" without saying a word about what they
+   are for. */
+.medal {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  font-size: 17px;
+  border: 2px solid var(--panel-edge);
+  border-radius: 50%;
+  background: rgba(255, 214, 120, 0.35);
+}
+
+.medal.locked {
+  background: rgba(185, 138, 84, 0.16);
+  border-style: dashed;
+  font-weight: 700;
+  color: #a08d78;
+}
+
+.panel li.award {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.medal-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 2px;
+}
+
 /* --- the land map ------------------------------------------------------ */
 
 .panel li.land-map {
@@ -948,6 +985,181 @@ li.market.glut .market-top small { color: #a33d2e; }
 
 .toast.in { opacity: 1; transform: translateY(0); }
 .toast-warn { background: rgba(150, 60, 30, 0.92); }
+
+/* --- the achievement banner --------------------------------------------- */
+
+/* Deliberately not a toast. Everything else the game says is a receipt that
+   slides in at the bottom and is gone; this stops in the middle of the screen
+   and asks to be looked at, because it is the only message a player might see
+   twice in a month. See js/ui/award.js. */
+#award {
+  position: absolute;
+  inset: 0;
+  display: none;
+  place-items: center;
+  pointer-events: none;
+  z-index: 60;
+}
+
+#award.on { display: grid; }
+#award.on .award-card { pointer-events: auto; }
+
+.award-card {
+  position: relative;
+  display: grid;
+  place-items: center;
+  transform: scale(0.82);
+  opacity: 0;
+  transition: transform 0.34s cubic-bezier(0.2, 1.5, 0.4, 1), opacity 0.24s ease;
+}
+
+#award.in .award-card { transform: scale(1); opacity: 1; }
+#award.out .award-card { transform: scale(1.06) translateY(-8px); opacity: 0; }
+
+/* A slow wheel of light behind the plate. Low contrast on purpose: it should
+   be felt at the edge of the eye, not read. */
+.award-rays {
+  position: absolute;
+  width: 460px;
+  height: 460px;
+  border-radius: 50%;
+  background:
+    conic-gradient(from 0deg,
+      rgba(255, 214, 120, 0.32) 0deg 12deg, transparent 12deg 30deg,
+      rgba(255, 214, 120, 0.32) 30deg 42deg, transparent 42deg 60deg,
+      rgba(255, 214, 120, 0.32) 60deg 72deg, transparent 72deg 90deg,
+      rgba(255, 214, 120, 0.32) 90deg 102deg, transparent 102deg 120deg,
+      rgba(255, 214, 120, 0.32) 120deg 132deg, transparent 132deg 150deg,
+      rgba(255, 214, 120, 0.32) 150deg 162deg, transparent 162deg 180deg,
+      rgba(255, 214, 120, 0.32) 180deg 192deg, transparent 192deg 210deg,
+      rgba(255, 214, 120, 0.32) 210deg 222deg, transparent 222deg 240deg,
+      rgba(255, 214, 120, 0.32) 240deg 252deg, transparent 252deg 270deg,
+      rgba(255, 214, 120, 0.32) 270deg 282deg, transparent 282deg 300deg,
+      rgba(255, 214, 120, 0.32) 300deg 312deg, transparent 312deg 330deg,
+      rgba(255, 214, 120, 0.32) 330deg 342deg, transparent 342deg 360deg);
+  -webkit-mask-image: radial-gradient(circle, #000 18%, transparent 62%);
+  mask-image: radial-gradient(circle, #000 18%, transparent 62%);
+  opacity: 0;
+}
+
+#award.in .award-rays {
+  animation: rays-in 0.5s ease forwards, rays-turn 14s linear infinite;
+}
+
+@keyframes rays-in { to { opacity: 0.75; } }
+@keyframes rays-turn { to { transform: rotate(360deg); } }
+
+.award-plate {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: min(340px, 88vw);
+  padding: 16px 22px;
+  border: 3px solid #b8863a;
+  border-radius: 18px;
+  background: linear-gradient(160deg, #ffe9b0, #f4c766 45%, #e8ad45);
+  box-shadow: 0 10px 30px rgba(40, 25, 6, 0.45), inset 0 2px 0 rgba(255, 255, 255, 0.6);
+  color: #33230d;
+}
+
+/* One sweep of light across the plate as it lands, and no more: a sheen that
+   keeps going is a loading spinner. */
+.award-sheen {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 70px;
+  left: -120px;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.75), transparent);
+  transform: skewX(-18deg);
+}
+
+#award.in .award-sheen { animation: sheen 0.85s ease-out 0.22s 1; }
+
+@keyframes sheen { to { left: 120%; } }
+
+.award-medal {
+  flex: none;
+  font-size: 40px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 2px rgba(60, 40, 10, 0.4));
+}
+
+#award.in .award-medal { animation: medal-pop 0.7s ease-out 0.1s 1; }
+
+/* A shake with a bit of swing in it, so the trophy reads as having been set
+   down hard rather than faded in. */
+@keyframes medal-pop {
+  0% { transform: scale(0.4) rotate(-18deg); }
+  45% { transform: scale(1.22) rotate(9deg); }
+  70% { transform: scale(0.96) rotate(-4deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+
+.award-kicker {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #8a6420;
+}
+
+.award-name {
+  font-size: 19px;
+  font-weight: 800;
+  line-height: 1.15;
+  margin-top: 1px;
+}
+
+.award-blurb {
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.8;
+  margin-top: 2px;
+}
+
+/* The burst. Each spark is thrown along its own angle by a custom property
+   set in js/ui/award.js, so all fourteen share one keyframe. */
+.award-sparks {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.award-sparks i {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin: -3px 0 0 -3px;
+  border-radius: 2px;
+  background: #ffd77a;
+  box-shadow: 0 0 6px rgba(255, 210, 120, 0.9);
+  opacity: 0;
+}
+
+#award.in .award-sparks i {
+  animation: spark 0.75s ease-out var(--t, 0ms) 1;
+}
+
+@keyframes spark {
+  0% { opacity: 1; transform: rotate(var(--a)) translateX(10px) scale(1); }
+  100% { opacity: 0; transform: rotate(var(--a)) translateX(var(--d)) scale(0.3); }
+}
+
+/* Somebody who has asked their phone to stop moving things still gets the
+   banner — they just get it whole, with none of the throwing about. */
+@media (prefers-reduced-motion: reduce) {
+  .award-card { transition: opacity 0.2s ease; transform: none; }
+  #award.in .award-card,
+  #award.out .award-card { transform: none; }
+  #award.in .award-rays { animation: rays-in 0.4s ease forwards; }
+  #award.in .award-sheen,
+  #award.in .award-medal,
+  #award.in .award-sparks i { animation: none; }
+  .award-sparks i { opacity: 0; }
+}
 
 /* --- misc -------------------------------------------------------------- */
 

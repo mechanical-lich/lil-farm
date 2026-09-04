@@ -7,6 +7,7 @@
 // pure function of (seed, tickCount), so it's reproducible in tests.
 
 import { makeRng } from '../engine/rng.js';
+import { noteAnimalBought, noteHandHired } from './achievements.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 import { CROPS, seedIdFor, isSeedId, cropFromSeedId } from './crops.js';
 import {
@@ -206,6 +207,7 @@ export function buyAnimal(state, type, x, y) {
   const animal = makeAnimal(state, type, x, y);
   emitUnlessSuspended('money:changed', { delta: -def.price });
   emitUnlessSuspended('animal:bought', { type });
+  noteAnimalBought(state, type);
   return { ok: true, spent: def.price, animal };
 }
 
@@ -232,6 +234,7 @@ export function hireHand(state, x, y) {
   const hand = makeHand(state, x, y);
   emitUnlessSuspended('money:changed', { delta: -HAND_PRICE });
   emitUnlessSuspended('hand:hired', { id: hand.id });
+  noteHandHired(state);
   return { ok: true, spent: HAND_PRICE, hand };
 }
 

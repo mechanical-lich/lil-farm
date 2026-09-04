@@ -7,6 +7,7 @@ import { journalRows as flowerJournalRows, seedGroups } from '../sim/flowers.js'
 import { journalRows as fishJournalRows, kindsCaught, FISH_IDS } from '../sim/fish.js';
 import { makeGenome, hueName, isFlowerSeed, isCross, petalHue } from '../sim/flowergenes.js';
 import { flowerDataUrl } from '../render/flowerart.js';
+import { rows as awardRows, earnedCount, ACHIEVEMENTS } from '../sim/achievements.js';
 import { taskLabel } from '../sim/tasks.js';
 
 export function initHud(state, { onPlantFlower } = {}) {
@@ -51,11 +52,13 @@ export function initHud(state, { onPlantFlower } = {}) {
     }
     invTitle.textContent = invTab === 'bag' ? 'Bag'
       : invTab === 'journal' ? 'Mushroom journal'
-        : invTab === 'fish' ? 'Fish journal' : 'Flower journal';
+        : invTab === 'fish' ? 'Fish journal'
+          : invTab === 'awards' ? 'Achievements' : 'Flower journal';
 
     if (invTab === 'journal') { renderJournal(); return; }
     if (invTab === 'flowers') { renderFlowers(); return; }
     if (invTab === 'fish') { renderFish(); return; }
+    if (invTab === 'awards') { renderAwards(); return; }
 
     invNote.textContent = '';
     // Flower seeds are collapsed into one line. A collector carries dozens of
@@ -116,6 +119,32 @@ export function initHud(state, { onPlantFlower } = {}) {
            <figcaption>?</figcaption></figure>`)).join('');
 
     invList.innerHTML = `<li class="journal"><div class="fish-grid">${cells}</div></li>`;
+  }
+
+  /**
+   * The achievements.
+   *
+   * Earned ones are spelled out; the rest are a row of blank medals with no
+   * name and no clue what they want, which is the whole point — finding out
+   * what the farm was watching for is the surprise. The names never reach the
+   * DOM at all: see rows() in sim/achievements.js, which withholds them at the
+   * source rather than trusting this to remember not to print them.
+   */
+  function renderAwards() {
+    const all = awardRows(state);
+    invNote.textContent = `${earnedCount(state)} of ${ACHIEVEMENTS.length} earned`;
+
+    const won = all.filter((a) => a.earned).map((a) => `
+      <li class="award">
+        <span class="medal">🏆</span>
+        <span class="shop-name">${esc(a.name)}<em>${esc(a.blurb)}</em></span>
+      </li>`).join('');
+
+    const locked = all.filter((a) => !a.earned)
+      .map(() => '<span class="medal locked">?</span>').join('');
+
+    invList.innerHTML = (won || '<li class="empty">Nothing yet. Go and farm!</li>')
+      + (locked ? `<li class="journal"><div class="medal-row">${locked}</div></li>` : '');
   }
 
   /**
@@ -180,6 +209,7 @@ export function initHud(state, { onPlantFlower } = {}) {
   on('inventory:changed', () => { render(); if (invOpen) renderInventory(); });
   on('mushroom:found', () => { if (invOpen) renderInventory(); });
   on('flower:picked', () => { if (invOpen) renderInventory(); });
+  on('achievement:earned', () => { if (invOpen) renderInventory(); });
   on('money:changed', render);
   on('tasks:changed', render);
   on('task:done', render);

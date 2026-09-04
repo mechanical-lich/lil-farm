@@ -57,6 +57,10 @@ import {
 } from '../js/sim/fish.js';
 import { movableAt, canMoveTo, moveTo } from '../js/sim/moving.js';
 import {
+  ACHIEVEMENTS, count, isEarned, earnedCount, rows as awardRows, earnedSince,
+  checkAchievements, noteTaskResult, notePlayDay, dayBefore, bump, achievementDef,
+} from '../js/sim/achievements.js';
+import {
   ANIMALS, TROUGH_CAPACITY, FEED_COST, FOOD_DURATION, WATER_DURATION, SEEK_THRESHOLD,
   foodRate, waterRate, canGraze, TARGET_RECHECK,
   makeAnimal, collectFrom, isNeglected, fillWaterTrough, fillFeedTrough, pickFeed, animalDef,
@@ -7367,7 +7371,315 @@ test('import refuses a versioned object that has no farm in it', () => {
   assert(!check.ok, 'no map and no farmer is not a save');
 });
 
+
+// --- achievements -------------------------------------------------------
+
+test('every achievement is a distinct id with something to show for it', () => {
+  const ids = new Set();
+  for (const a of ACHIEVEMENTS) {
+    assert(!ids.has(a.id), `two achievements share the id ${a.id}`);
+    ids.add(a.id);
+    assert(a.name && a.blurb, `${a.id} needs a name and a blurb`);
+    assert(typeof a.check === 'function', `${a.id} needs a check`);
+  }
+});
+
+test('a locked achievement gives away neither its name nor its condition', () => {
+  // The point of the whole feature: the panel prints whatever it is handed, so
+  // withholding has to happen here or not at all.
+  const s = newGame(9300);
+  const locked = awardRows(s);
+  assert(locked.length === ACHIEVEMENTS.length, 'every one is listed');
+  for (const row of locked) {
+    assertEqual(row.earned, false, `${row.id} starts locked`);
+    assertEqual(row.name, null, `${row.id} must not name itself`);
+    assertEqual(row.blurb, null, `${row.id} must not state its condition`);
+  }
+
+  bump(s, 'houses');
+  const won = awardRows(s).find((r) => r.id === 'home_sweet_home');
+  assert(won.earned && won.name && won.blurb, 'and says everything once earned');
+});
+
+test('a new farm has earned nothing', () => {
+  assertEqual(earnedCount(newGame(9301)), 0);
+});
+
+test('digging water through the real build queue counts the tiles', () => {
+  // Through the pipeline rather than by calling completeBuild: the count has to
+  // survive a build being queued, walked to, and possibly failing on the way.
+  const s = farmWithMaterials(9302);
+  let dug = 0;
+  for (let i = 0; i < 3; i++) {
+    const x = s.farmer.x + 2 + i;
+    const y = s.farmer.y + 2;
+    addTask(s, taskForTile(s, x, y, 'build', { buildKind: 'pond' }));
+    let n = 0;
+    while (s.tasks.length && n < 4000) { tick(s); n++; }
+    if (isWater(s.grid.getGround(x, y))) dug++;
+  }
+  assert(dug === 3, `all three ponds went in (${dug})`);
+  assertEqual(count(s, 'water'), 3, 'and each tile was counted once');
+});
+
+test('a house earns its award only when the player builds one', () => {
+  const s = farmWithMaterials(9303);
+
+  // A house already standing — the case every existing save is in. It must be
+  // worth nothing, or the award arrives for the next egg picked up.
+  placeStructure(s, 'house', s.farmer.x + 6, s.farmer.y + 6, [3, 2]);
+  checkAchievements(s);
+  assert(!isEarned(s, 'home_sweet_home'), 'a house that was already there earns nothing');
+
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y + 2;
+  addTask(s, taskForTile(s, x, y, 'build', { buildKind: 'house', w: 3, h: 2 }));
+  let n = 0;
+  while (s.tasks.length && n < 8000) { tick(s); n++; }
+  assert(isEarned(s, 'home_sweet_home'), 'building one does it');
+});
+
+test('harvesting through the pipeline counts toward the crop total', () => {
+  const s = farmWithMaterials(9304);
+  const x = s.farmer.x + 1;
+  const y = s.farmer.y;
+  s.grid.setGround(x, y, GROUND.TILLED);
+  plantCrop(s, x, y, 'carrot');
+  waterTile(s, x, y);
+  for (let i = 0; i < CROPS.carrot.growTicks + 10; i++) tick(s);
+  assert(isRipe(cropAt(s, x, y)), 'the carrot is ready');
+
+  const before = countItem(s, 'carrot');
+  addTask(s, taskForTile(s, x, y, 'harvest'));
+  let n = 0;
+  while (s.tasks.length && n < 4000) { tick(s); n++; }
+  const picked = countItem(s, 'carrot') - before;
+  assert(picked > 0, 'carrots were harvested');
+  assertEqual(count(s, 'crops'), picked, 'and every one of them counted');
+});
+
+test('eggs, mushrooms and crops are told apart; nothing else is counted', () => {
+  const s = newGame(9305);
+  noteTaskResult(s, { type: 'pickup' }, { egg: 3 });
+  noteTaskResult(s, { type: 'unload' }, { egg: 2, wood: 40, milk: 5 });
+  noteTaskResult(s, { type: 'forage' }, { mushroom_button: 1 });
+  noteTaskResult(s, { type: 'harvest' }, { eggplant: 4 });
+
+  assertEqual(count(s, 'eggs'), 5, 'eggs from a pickup and out of a crate');
+  assertEqual(count(s, 'mushrooms'), 1);
+  assertEqual(count(s, 'crops'), 4, 'eggplant is a crop, not an egg');
+});
+
+test('what the cluck lands on the thousandth egg and not before', () => {
+  const s = newGame(9306);
+  noteTaskResult(s, { type: 'pickup' }, { egg: 999 });
+  assert(!isEarned(s, 'what_the_cluck'), '999 is not 1000');
+  noteTaskResult(s, { type: 'pickup' }, { egg: 1 });
+  assert(isEarned(s, 'what_the_cluck'), 'and the next one does it');
+});
+
+/** Enough barn for a herd: capacity gates both buying animals and hiring. */
+function barnyard(seed, barns = 12) {
+  const s = farmWithMaterials(seed);
+  s.money = 1e6;
+  for (let i = 0; i < barns; i++) {
+    placeStructure(s, 'barn', s.farmer.x + 8, s.farmer.y + 8 + i * 3, [3, 2]);
+  }
+  return s;
+}
+
+test("Noah's ark wants two of every animal, and the zoo wants a hundred of any", () => {
+  const s = barnyard(9307);
+  const spot = () => {
+    for (let r = 1; r < 20; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          const x = s.farmer.x + dx;
+          const y = s.farmer.y + dy;
+          if (canPlaceAnimal(s, x, y) && !animalAt(s, x, y)) return { x, y };
+        }
+      }
+    }
+    throw new Error('nowhere to put an animal');
+  };
+
+  const types = Object.keys(ANIMALS);
+  for (const type of types) {
+    const at = spot();
+    assert(buyAnimal(s, type, at.x, at.y).ok, `bought one ${type}`);
+  }
+  assert(!isEarned(s, 'noahs_ark'), 'one of each is not two of each');
+
+  for (const type of types) {
+    const at = spot();
+    assert(buyAnimal(s, type, at.x, at.y).ok, `bought a second ${type}`);
+  }
+  assert(isEarned(s, 'noahs_ark'), 'two of each does it');
+  assertEqual(count(s, 'animals'), types.length * 2, 'and the total is kept too');
+  assert(!isEarned(s, 'zoo'), 'twelve animals is not a zoo');
+});
+
+test('beating a farmhand to an animal only counts if one was on its way', () => {
+  const s = newGame(9308);
+  const animal = { id: 77 };
+
+  s.hands = [];
+  noteTaskResult(s, { type: 'collect', animalId: 77 }, { milk: 1 });
+  assert(!isEarned(s, 'manual_labor'), 'doing your own milking is not beating anybody');
+
+  s.hands = [{ id: 1, target: { kind: 'animal', id: 99 } }];
+  noteTaskResult(s, { type: 'collect', animalId: 77 }, { milk: 1 });
+  assert(!isEarned(s, 'manual_labor'), 'a hand walking to a different animal is not it either');
+
+  s.hands = [{ id: 1, target: { kind: 'animal', id: 77 } }];
+  noteTaskResult(s, { type: 'collect', animalId: 77 }, { milk: 1 });
+  assert(isEarned(s, 'manual_labor'), 'taking the one they were walking to does it');
+  assert(animal.id === 77);
+});
+
+test('hiring ten farmhands earns hired help', () => {
+  const s = barnyard(9309);
+  let hired = 0;
+  for (let r = 1; r < 20 && hired < 10; r++) {
+    for (let dy = -r; dy <= r && hired < 10; dy++) {
+      for (let dx = -r; dx <= r && hired < 10; dx++) {
+        const x = s.farmer.x + dx;
+        const y = s.farmer.y + dy;
+        if (!canPlaceAnimal(s, x, y)) continue;
+        if (hireHand(s, x, y).ok) hired++;
+      }
+    }
+  }
+  assertEqual(hired, 10, 'ten were hired');
+  assert(isEarned(s, 'hired_help'));
+});
+
+test('the collection awards read the journals, so a farm keeps what it found', () => {
+  // The one place existing progress counts, and deliberately so: the journals
+  // have always been a real record of everything ever picked.
+  const s = newGame(9310);
+  for (const m of MUSHROOMS) s.journal[m.id] = 1;
+  checkAchievements(s);
+  assert(isEarned(s, 'mushroom_master'), 'a full mushroom journal is a full collection');
+
+  const t = newGame(9311);
+  t.journal = Object.fromEntries(MUSHROOMS.slice(1).map((m) => [m.id, 1]));
+  checkAchievements(t);
+  assert(!isEarned(t, 'mushroom_master'), 'one short is not all of them');
+});
+
+test('the fish award wants the whole sheet', () => {
+  const s = newGame(9312);
+  s.fishJournal = Object.fromEntries(FISH_IDS.map((id) => [id, 1]));
+  checkAchievements(s);
+  assert(isEarned(s, 'bigger_boat'));
+});
+
+test('the flower award wants every wild colour of every kind', () => {
+  const s = newGame(9313);
+  const wheel = Array.from({ length: 24 }, (_, i) => i);
+
+  s.flowerJournal = Object.fromEntries(
+    FLOWER_KINDS.map((k) => [k, { picked: 1, hues: [0, 1, 2] }]),
+  );
+  checkAchievements(s);
+  assert(!isEarned(s, 'flower_master'), 'three colours each is not the collection');
+
+  s.flowerJournal = Object.fromEntries(
+    FLOWER_KINDS.map((k) => [k, { picked: 1, hues: [...wheel] }]),
+  );
+  checkAchievements(s);
+  assert(isEarned(s, 'flower_master'), 'every wheel filled is');
+});
+
+test('an achievement is announced once and once only', () => {
+  const s = newGame(9314);
+  let seen = 0;
+  const off = on('achievement:earned', () => { seen++; });
+  try {
+    bump(s, 'houses');
+    bump(s, 'houses');
+    checkAchievements(s);
+    checkAchievements(s);
+  } finally { off(); }
+  assertEqual(seen, 1, 'earning it again is not an event');
+});
+
+test('the day streak counts calendar days, and a gap restarts it', () => {
+  const s = newGame(9315);
+  assertEqual(notePlayDay(s, '2026-03-01'), 1, 'the first day is a streak of one');
+  assertEqual(notePlayDay(s, '2026-03-01'), 1, 'playing twice in a day is still one day');
+  assertEqual(notePlayDay(s, '2026-03-02'), 2, 'the next day carries on');
+  assertEqual(notePlayDay(s, '2026-03-04'), 1, 'a missed day starts again');
+});
+
+test('ten days running earns the dedicated farmer', () => {
+  const s = newGame(9316);
+  for (let d = 1; d <= 9; d++) notePlayDay(s, `2026-03-0${d}`);
+  assert(!isEarned(s, 'dedicated_farmer'), 'nine days is not ten');
+  notePlayDay(s, '2026-03-10');
+  assert(isEarned(s, 'dedicated_farmer'));
+});
+
+test('a streak survives the turn of a month and a leap year', () => {
+  assertEqual(dayBefore('2026-03-01'), '2026-02-28');
+  assertEqual(dayBefore('2024-03-01'), '2024-02-29');
+  assertEqual(dayBefore('2026-01-01'), '2025-12-31');
+
+  const s = newGame(9317);
+  notePlayDay(s, '2026-01-31');
+  assertEqual(notePlayDay(s, '2026-02-01'), 2, 'the first of the month follows the last');
+});
+
+test('what was earned while you were away can be found again afterwards', () => {
+  // Events are suspended through catch-up, so the toast never fires; the tick
+  // stamp is the only trace, and the boot report reads it back.
+  const s = newGame(9318);
+  const before = s.tickCount;
+  s.tickCount += 500;
+  bump(s, 'houses');
+
+  assertEqual(earnedSince(s, before), ['home_sweet_home']);
+  assertEqual(earnedSince(s, s.tickCount), [], 'and not again on the next load');
+});
+
+test('achievements survive a save and reload', () => {
+  const s = newGame(9319);
+  noteTaskResult(s, { type: 'pickup' }, { egg: 12 });
+  bump(s, 'houses');
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual(count(back, 'eggs'), 12, 'the tallies come back');
+  assert(isEarned(back, 'home_sweet_home'), 'and so does what was earned');
+});
+
+test('a farm saved before achievements existed loads with a clean slate', () => {
+  const data = serialize(newGame(9320));
+  delete data.achievements;
+  const back = deserialize(JSON.parse(JSON.stringify(data)));
+  assertEqual(earnedCount(back), 0, 'nothing is back-filled');
+  assertEqual(count(back, 'eggs'), 0);
+
+  // And it still works from there.
+  noteTaskResult(back, { type: 'pickup' }, { egg: 1 });
+  assertEqual(count(back, 'eggs'), 1);
+});
+
+test('achievement checks never touch the map', () => {
+  // They run on every hook, several times a second while the farmer works.
+  // Anything that walked the grid here would show up as a stutter long before
+  // anyone thought to look in this file.
+  const s = newGame(9321);
+  let reads = 0;
+  const realGet = s.grid.getGround.bind(s.grid);
+  s.grid.getGround = (x, y) => { reads++; return realGet(x, y); };
+  for (let i = 0; i < 200; i++) checkAchievements(s);
+  s.grid.getGround = realGet;
+  assertEqual(reads, 0, 'not one tile was read');
+});
+
 // --- offline shell ------------------------------------------------------
+
 
 test('every module is precached by the service worker', () => {
   // The shell list in sw.js is hand-written and drifts: a new module that isn't

@@ -20,6 +20,7 @@ import { addCatch } from './render/effects.js';
 import { canPlantAt } from './sim/flowers.js';
 import { cropAt, isRipe } from './sim/crops.js';
 import { fishAt } from './sim/fish.js';
+import { notePlayDay, earnedSince, achievementDef } from './sim/achievements.js';
 import { readSeedId, seedName } from './sim/flowergenes.js';
 import { drawAnimalSprite, drawHandSprite } from './render/entityrender.js';
 import { drawObjectSprite } from './render/tilerender.js';
@@ -38,6 +39,7 @@ import { initShopPanel } from './ui/shoppanel.js';
 import { initSettingsPanel } from './ui/settingspanel.js';
 import { initHud } from './ui/hud.js';
 import { initToasts, toast } from './ui/toast.js';
+import { initAwards, showAward, clearAwards } from './ui/award.js';
 import { buildSummary, showSummary } from './ui/summary.js';
 import * as events from './engine/events.js';
 
@@ -73,6 +75,7 @@ async function boot() {
 
   // Replay the time the tab was closed before the first paint, so the player
   // never sees a stale farm snap forward a moment later.
+  const returnedAt = state.tickCount;
   const away = Date.now() - state.lastTickTime;
   const catchup = await runCatchup(away, () => simTick(state), (done, total) => {
     els.bootText.textContent = `Catching up… ${Math.round((done / total) * 100)}%`;
@@ -80,8 +83,14 @@ async function boot() {
   // Anything past the cap is written off rather than left on the clock, or it
   // comes back as a fresh seven-day backlog every time the game is opened.
   discardSkipped(state, catchup);
+  // Anything the farm earned while nobody was watching. Taken now, before
+  // anything else can add to the list: events are suspended through catch-up
+  // by design, so these never toasted, and the record's tick stamps are the
+  // only way to find them again.
+  const missed = earnedSince(state, returnedAt);
 
   initToasts();
+  initAwards();
   const autosaver = new Autosaver(() => serialize(state));
   const hud = initHud(state, {
     // From the seed drawer straight out to the map: the journal steps aside,
@@ -228,7 +237,7 @@ async function boot() {
     save: () => autosaver.saveNow(),
     // Order matters: stop autosaving before clearing, or the unload handlers
     // write this farm straight back over the cleared slot.
-    wipe: () => { autosaver.disable(); clearSave(); location.reload(); },
+    wipe: () => { autosaver.disable(); clearAwards(); clearSave(); location.reload(); },
 
     /**
      * Top up a farm in progress, e.g. lilfarm.give({ wood: 200 }) or
@@ -244,6 +253,10 @@ async function boot() {
 
   els.boot.classList.add('hidden');
   reportReturn(state, catchup, isNew);
+  for (const id of missed) announceAward(achievementDef(id));
+  // Opening the game at all is what the day streak counts, so this goes in
+  // once per boot — after the toasts exist, since it can earn one outright.
+  notePlayDay(state, today());
   registerServiceWorker();
 }
 
@@ -769,8 +782,23 @@ function wirePaintToggle() {
   return { isOn: () => on };
 }
 
+/** Today's date in the player's own timezone, as 'YYYY-MM-DD'. */
+function today(now = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/** One award, said properly. See ui/award.js for why this isn't a toast. */
+function announceAward(def) {
+  if (def) showAward({ name: def.name, blurb: def.blurb });
+}
+
 /** Turns simulation events into player-visible feedback. */
 function wireToastFeedback() {
+  // Deliberately the loudest thing the game says: an achievement is rare, and
+  // it is the only toast that is worth interrupting whatever else is on screen.
+  events.on('achievement:earned', ({ id }) => announceAward(achievementDef(id)));
+
   events.on('mushroom:found', ({ name, first }) => {
     toast(first ? `New find: ${name}!` : `Picked a ${name.toLowerCase()}`);
   });

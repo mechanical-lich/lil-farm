@@ -25,6 +25,7 @@ import { takeFromHand } from './farmhand.js';
 import { emptyCrate } from './crates.js';
 import { removePot } from './pots.js';
 import { landFish, standFor } from './fish.js';
+import { noteTaskResult, noteBuild } from './achievements.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 
 const WANDER_CHANCE = 0.08;   // per idle tick
@@ -368,13 +369,16 @@ function applyTaskResult(state, task) {
         break;
       }
       gained = clearBuildSite(state, task);
-      completeBuild(state, task);
+      if (completeBuild(state, task)) noteBuild(state, task);
       break;
 
     default:
       break;
   }
 
+  // Counted before the event goes out, so anything the player is told about
+  // has already been recorded — a toast and an award can never disagree.
+  noteTaskResult(state, task, gained);
   emitUnlessSuspended('task:done', { task, gained });
 }
 

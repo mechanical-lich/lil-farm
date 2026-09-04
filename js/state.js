@@ -8,6 +8,7 @@ import { placeStructure, reconcileBuildings } from './sim/build.js';
 import { reconcileCrates } from './sim/crates.js';
 import { reconcileHay } from './sim/hay.js';
 import { reconcileFish } from './sim/fish.js';
+import { newAchievementRecord } from './sim/achievements.js';
 import { seedStartingMushrooms } from './sim/mushrooms.js';
 import { newMarket } from './sim/market.js';
 import { reconcileFlowers } from './sim/flowers.js';
@@ -48,6 +49,7 @@ export function newGame(seed = (Date.now() ^ 0x5f3759df) >>> 0) {
     pots: {},       // tile key -> true; see sim/pots.js
     fish: {},       // tile key -> fish id; see sim/fish.js
     fishJournal: {},   // fish id -> how many you have ever landed
+    achievements: newAchievementRecord(),   // see sim/achievements.js
     tasks: [],
     nextTaskId: 1,
     // See TESTING in config.js — a real farm starts with just a few seeds.
@@ -99,6 +101,7 @@ export function serialize(state) {
     pots: state.pots,
     fish: state.fish,
     fishJournal: state.fishJournal,
+    achievements: state.achievements,
     tasks: state.tasks,
     nextTaskId: state.nextTaskId,
     inventory: state.inventory,
@@ -156,6 +159,13 @@ export function deserialize(data) {
     // Farms saved before there were fish in the water simply have none.
     fish: data.fish || {},
     fishJournal: data.fishJournal || {},
+    // Deliberately not migrated. A farm saved before achievements existed has
+    // no record of what it has already done — nothing counts eggs picked up
+    // last week — and back-filling from what happens to be standing on it now
+    // would hand out some awards and not others for no reason the player could
+    // see. Everyone starts from zero; the standing ones (ten barns, a house)
+    // come back the moment the next one goes up.
+    achievements: data.achievements || newAchievementRecord(),
     tasks: data.tasks || [],
     nextTaskId: data.nextTaskId || 1,
     inventory: data.inventory || {},
