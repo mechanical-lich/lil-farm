@@ -37,18 +37,63 @@ import { ANIMALS } from './animals.js';
 import { CROPS } from './crops.js';
 import { SPECIES, MUSHROOMS, journalCount } from './mushrooms.js';
 import { FLOWER_KINDS, WILD_HUES } from './flowergenes.js';
-import { FISH_IDS, caughtBefore } from './fish.js';
+import { FISH_IDS, caughtBefore, itemFor } from './fish.js';
 import { handTargeting } from './farmhand.js';
 
-/** Item ids that count as a crop and as a mushroom, built from their own tables. */
+/**
+ * Which bag items count toward which tally, built from the tables that own
+ * them rather than typed out here.
+ *
+ * A new crop, a new mushroom colour or a new fish therefore counts the day it
+ * is added, with nothing to remember to update — which matters more than it
+ * looks, because forgetting would not break anything loudly. It would just
+ * quietly stop counting, and the first anyone would know is an achievement that
+ * never arrived.
+ */
 const CROP_ITEMS = new Set(Object.keys(CROPS));
 const MUSHROOM_ITEMS = new Set(Object.values(SPECIES).map((s) => s.item));
+const FISH_ITEMS = new Set(FISH_IDS.map(itemFor));
+const PRODUCE_ITEMS = new Set(
+  Object.values(ANIMALS).map((a) => a.produces).filter((id) => id && id !== 'egg'),
+);
 
 /** How many wild colours there are to find in total, across every kind. */
 export const FLOWER_SLOTS = FLOWER_KINDS.length * WILD_HUES;
 
 /**
+ * One rung of a ladder becomes one achievement.
+ *
+ * Most of these count the same handful of things at different heights — ten
+ * crops, a hundred, five hundred, a thousand — and writing each rung out by
+ * hand meant four near-identical objects whose only real difference was a
+ * number, with four chances to point the check at the wrong counter. Here the
+ * counter is named once for the whole ladder.
+ *
+ * What is *not* generated is the name. "Egg hunt", "Good clutch", "Omelette
+ * money" — the joke is the reward, and a ladder that generated "Eggs II" would
+ * be a progress bar wearing a medal. Blurbs are generated, because "Picked up
+ * 500 eggs" is a fact and facts do not need writing twice; a rung can override
+ * it where the sentence needs care (see the ones that stop at one).
+ *
+ * @param {string} key the tally in state.achievements.counts
+ * @param {(n: number) => string} text how the blurb reads at n
+ * @param {Array<{at: number, id: string, name: string, blurb?: string}>} rungs
+ */
+function ladder(key, text, rungs) {
+  return rungs.map((rung) => ({
+    id: rung.id,
+    name: rung.name,
+    blurb: rung.blurb || text(rung.at),
+    check: (s) => count(s, key) >= rung.at,
+  }));
+}
+
+/**
  * The list, in the order it is shown.
+ *
+ * Ladders first, because they are what a player is walking up on any given
+ * afternoon; then the odd ones out; then the three that ask for a whole
+ * collection, which are the end of the game rather than a step in it.
  *
  * `blurb` is what the player is told once they have it — which is also the
  * first time they are told anything, since a locked achievement shows neither
@@ -57,37 +102,86 @@ export const FLOWER_SLOTS = FLOWER_KINDS.length * WILD_HUES;
  *
  * Every `check` is a pure function of the state and must stay cheap: they all
  * run on every hook, so nothing in here may walk the map.
+ *
+ * **Ids are permanent.** They are the keys in every existing save's earned
+ * record, so a rung may be renamed or reworded freely and must never be
+ * renumbered or renamed *as an id* — that would take an award back off a farm
+ * that had earned it.
  */
 export const ACHIEVEMENTS = [
-  {
-    id: 'water_works',
-    name: 'Water works',
-    blurb: 'Dug 100 tiles of water',
-    check: (s) => count(s, 'water') >= 100,
-  },
-  {
-    id: 'zoo',
-    name: 'Is this a zoo?',
-    blurb: 'Bought 100 animals',
-    check: (s) => count(s, 'animals') >= 100,
-  },
+  ...ladder('crops', (n) => `Harvested ${n} crops`, [
+    { at: 10, id: 'first_pickings', name: 'First pickings' },
+    { at: 100, id: 'market_day', name: 'Market day' },
+    { at: 500, id: 'full_cellar', name: 'Full cellar' },
+    { at: 1000, id: 'bountiful_harvest', name: 'Bountiful harvest' },
+  ]),
+
+  ...ladder('eggs', (n) => `Picked up ${n} eggs`, [
+    { at: 10, id: 'egg_hunt', name: 'Egg hunt' },
+    { at: 100, id: 'good_clutch', name: 'Good clutch' },
+    { at: 500, id: 'omelette_money', name: 'Omelette money' },
+    { at: 1000, id: 'what_the_cluck', name: 'What the cluck' },
+  ]),
+
+  // Milk, goat's milk and wool — everything an animal gives that isn't an egg.
+  ...ladder('produce', (n) => `Collected ${n} pails of milk and fleeces of wool`, [
+    { at: 10, id: 'milk_round', name: 'Milk round' },
+    { at: 100, id: 'creamery', name: 'Creamery' },
+    { at: 500, id: 'dairy_empire', name: 'Dairy empire' },
+  ]),
+
+  ...ladder('mushrooms', (n) => `Picked ${n} mushrooms`, [
+    { at: 10, id: 'forager', name: 'Forager' },
+    { at: 100, id: 'mushroom_mania', name: 'Mushroom mania' },
+    { at: 500, id: 'fungus_among_us', name: 'Fungus among us' },
+  ]),
+
+  ...ladder('fish', (n) => `Landed ${n} fish`, [
+    { at: 10, id: 'got_a_bite', name: 'Got a bite' },
+    { at: 100, id: 'angler', name: 'Angler' },
+    { at: 500, id: 'old_salt', name: 'Old salt' },
+  ]),
+
+  ...ladder('flowers', (n) => `Planted ${n} flowers`, [
+    { at: 10, id: 'first_bloom', name: 'First bloom' },
+    { at: 50, id: 'green_thumb', name: 'Green thumb' },
+    { at: 100, id: 'greenhouse_god', name: 'Greenhouse god' },
+    { at: 250, id: 'flower_fields', name: 'Flower fields' },
+  ]),
+
+  ...ladder('animals', (n) => `Bought ${n} animals`, [
+    { at: 1, id: 'first_of_the_herd', name: 'First of the herd', blurb: 'Bought your first animal' },
+    { at: 10, id: 'small_holding', name: 'Small holding' },
+    { at: 100, id: 'zoo', name: 'Is this a zoo?' },
+  ]),
+
+  ...ladder('hands', (n) => `Hired ${n} farmhands`, [
+    { at: 1, id: 'extra_hands', name: 'An extra pair of hands', blurb: 'Hired your first farmhand' },
+    { at: 10, id: 'hired_help', name: 'Hired help' },
+    { at: 25, id: 'on_the_payroll', name: 'On the payroll' },
+  ]),
+
+  ...ladder('water', (n) => `Dug ${n} tiles of water`, [
+    { at: 10, id: 'puddle', name: 'Puddle' },
+    { at: 100, id: 'water_works', name: 'Water works' },
+    { at: 500, id: 'reservoir', name: 'Reservoir' },
+  ]),
+
+  ...ladder('barns', (n) => `Built ${n} barns`, [
+    { at: 1, id: 'first_barn', name: 'Somewhere to sleep', blurb: 'Built a barn of your own' },
+    { at: 10, id: 'barn_raising', name: 'Barn raising' },
+  ]),
+
+  ...ladder('houses', () => '', [
+    { at: 1, id: 'home_sweet_home', name: 'Home sweet home', blurb: 'Built a house' },
+  ]),
+
+  // The odd ones out: no ladder, no second helping.
   {
     id: 'noahs_ark',
     name: "Noah's ark",
     blurb: 'Bought two of every animal',
     check: (s) => Object.keys(ANIMALS).every((type) => count(s, `bought:${type}`) >= 2),
-  },
-  {
-    id: 'green_thumb',
-    name: 'Green thumb',
-    blurb: 'Planted 50 flowers',
-    check: (s) => count(s, 'flowers') >= 50,
-  },
-  {
-    id: 'greenhouse_god',
-    name: 'Greenhouse god',
-    blurb: 'Planted 100 flowers',
-    check: (s) => count(s, 'flowers') >= 100,
   },
   {
     // The name is the condition: you got there before the hired help did.
@@ -99,41 +193,14 @@ export const ACHIEVEMENTS = [
     check: (s) => count(s, 'beatHand') >= 1,
   },
   {
-    id: 'hired_help',
-    name: 'Hired help',
-    blurb: 'Hired 10 farmhands',
-    check: (s) => count(s, 'hands') >= 10,
+    id: 'dedicated_farmer',
+    name: 'Dedicated farmer',
+    blurb: 'Played ten days running',
+    check: (s) => count(s, 'streak') >= 10,
   },
-  {
-    id: 'barn_raising',
-    name: 'Barn raising',
-    blurb: 'Built ten barns',
-    check: (s) => count(s, 'barns') >= 10,
-  },
-  {
-    id: 'home_sweet_home',
-    name: 'Home sweet home',
-    blurb: 'Built a house',
-    check: (s) => count(s, 'houses') >= 1,
-  },
-  {
-    id: 'what_the_cluck',
-    name: 'What the cluck',
-    blurb: 'Picked up 1000 eggs',
-    check: (s) => count(s, 'eggs') >= 1000,
-  },
-  {
-    id: 'bountiful_harvest',
-    name: 'Bountiful harvest',
-    blurb: 'Harvested 1000 crops',
-    check: (s) => count(s, 'crops') >= 1000,
-  },
-  {
-    id: 'mushroom_mania',
-    name: 'Mushroom mania',
-    blurb: 'Picked 100 mushrooms',
-    check: (s) => count(s, 'mushrooms') >= 100,
-  },
+
+  // And the three that want the whole cabinet. Last on the list because that is
+  // where they are in the game.
   {
     id: 'mushroom_master',
     name: 'Mushroom master',
@@ -156,12 +223,6 @@ export const ACHIEVEMENTS = [
     name: "We're going to need a bigger boat",
     blurb: `Caught all ${FISH_IDS.length} fish`,
     check: (s) => FISH_IDS.every((id) => caughtBefore(s, id)),
-  },
-  {
-    id: 'dedicated_farmer',
-    name: 'Dedicated farmer',
-    blurb: 'Played ten days running',
-    check: (s) => count(s, 'streak') >= 10,
   },
 ];
 
@@ -300,8 +361,10 @@ export function checkAchievements(state) {
 export function noteTaskResult(state, task, gained) {
   for (const [id, n] of Object.entries(gained || {})) {
     if (id === 'egg') bump(state, 'eggs', n);
+    else if (PRODUCE_ITEMS.has(id)) bump(state, 'produce', n);
     else if (CROP_ITEMS.has(id)) bump(state, 'crops', n);
     else if (MUSHROOM_ITEMS.has(id)) bump(state, 'mushrooms', n);
+    else if (FISH_ITEMS.has(id)) bump(state, 'fish', n);
   }
 
   if (task.type === 'plantflower') bump(state, 'flowers');

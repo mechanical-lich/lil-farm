@@ -16,6 +16,18 @@
 // would be a pile-up rather than a moment — so they queue and take their turn.
 
 const HOLD_MS = 3500;
+
+/**
+ * How long each one holds when there are others behind it.
+ *
+ * Tiered achievements arrive in clumps — a crate of a thousand eggs unloaded on
+ * a farm that had none crosses four rungs at once — and four full-length
+ * banners is sixteen seconds of not being able to play. Shortened, a clump
+ * reads as a run of good news rather than a queue to sit through, and the last
+ * one still gets the full hold because nothing is waiting behind it.
+ */
+const HOLD_QUEUED_MS = 1600;
+
 const OUT_MS = 420;
 
 /** How many sparks fly. Enough to read as a burst, few enough to stay cheap. */
@@ -89,7 +101,7 @@ function next() {
   requestAnimationFrame(() => host.classList.add('in'));
 
   clearTimeout(timer);
-  timer = setTimeout(dismiss, HOLD_MS);
+  timer = setTimeout(dismiss, queue.length ? HOLD_QUEUED_MS : HOLD_MS);
 }
 
 function dismiss() {

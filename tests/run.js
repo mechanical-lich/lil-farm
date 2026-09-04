@@ -7678,7 +7678,118 @@ test('achievement checks never touch the map', () => {
   assertEqual(reads, 0, 'not one tile was read');
 });
 
+test('a ladder earns every rung below the one you reach', () => {
+  // The point of the whole tier system, and the thing that would break
+  // silently: a rung pointed at the wrong counter still looks fine in the
+  // panel, it just never arrives.
+  const s = newGame(9322);
+  noteTaskResult(s, { type: 'harvest' }, { carrot: 1000 });
+
+  for (const id of ['first_pickings', 'market_day', 'full_cellar', 'bountiful_harvest']) {
+    assert(isEarned(s, id), `${id} comes with a thousand crops`);
+  }
+});
+
+test('a ladder earns nothing above the rung you are on', () => {
+  const s = newGame(9323);
+  noteTaskResult(s, { type: 'harvest' }, { carrot: 99 });
+  assert(isEarned(s, 'first_pickings'), 'ten is passed');
+  assert(!isEarned(s, 'market_day'), 'a hundred is not');
+  assert(!isEarned(s, 'full_cellar'));
+});
+
+test('one ladder never earns another ladder rung', () => {
+  // The copy-paste failure the ladder helper makes possible: the right
+  // thresholds against the wrong counter.
+  const crops = newGame(9324);
+  noteTaskResult(crops, { type: 'harvest' }, { carrot: 1000 });
+  for (const id of ['egg_hunt', 'forager', 'got_a_bite', 'milk_round', 'first_bloom']) {
+    assert(!isEarned(crops, id), `a crop is not ${id}`);
+  }
+
+  const eggs = newGame(9325);
+  noteTaskResult(eggs, { type: 'pickup' }, { egg: 1000 });
+  for (const id of ['first_pickings', 'forager', 'got_a_bite', 'milk_round']) {
+    assert(!isEarned(eggs, id), `an egg is not ${id}`);
+  }
+});
+
+test('milk and wool are their own tally, apart from the eggs', () => {
+  const s = newGame(9326);
+  noteTaskResult(s, { type: 'collect' }, { milk: 4 });
+  noteTaskResult(s, { type: 'collect' }, { goat_milk: 3 });
+  noteTaskResult(s, { type: 'collect' }, { wool: 3 });
+  assertEqual(count(s, 'produce'), 10, "a goat's milk counts the same as a cow's");
+  assert(isEarned(s, 'milk_round'));
+  assertEqual(count(s, 'eggs'), 0, 'and none of it was an egg');
+});
+
+test('landing fish through the real pipeline counts toward the angler', () => {
+  const { s, px, py } = pondFarm(9327, 3, 3);
+  spawnFish(s, px, py, 'crab');
+
+  const spec = taskForTile(s, px, py, 'harvest');
+  assert(spec, 'the fish may be queued');
+  addTask(s, spec);
+  let n = 0;
+  while (s.tasks.length && n < 4000) { tick(s); n++; }
+
+  assertEqual(countItem(s, itemFor('crab')), 1, 'the crab is in the bag');
+  assertEqual(count(s, 'fish'), 1, 'and it counted as a fish, not as produce');
+  assertEqual(count(s, 'produce'), 0);
+});
+
+test('every achievement name is its own', () => {
+  // Ids are checked above; names are what the player actually sees, and two
+  // rungs of a ladder sharing one would read as the same award twice.
+  const names = new Set();
+  for (const a of ACHIEVEMENTS) {
+    assert(!names.has(a.name), `two achievements are called "${a.name}"`);
+    names.add(a.name);
+  }
+});
+
+test('no rung promises a number it does not want', () => {
+  // The blurbs are generated from the threshold, so a mismatch means the
+  // generated sentence and the check have drifted apart. Read the number back
+  // out of the blurb and hold the check to it.
+  const s = newGame(9328);
+  for (const a of ACHIEVEMENTS) {
+    const said = /\b(\d+)\b/.exec(a.blurb);
+    if (!said) continue;
+    const n = Number(said[1]);
+    if (n < 2) continue;                       // "your first animal" and friends
+    if (/all \d+/.test(a.blurb)) continue;     // the collection ones read a journal
+    if (/two of every/.test(a.blurb)) continue;
+
+    // Whatever it counts, one short of the stated number must not earn it.
+    const key = keyBehind(a.id);
+    if (!key) continue;
+    s.achievements = { earned: {}, counts: { [key]: n - 1 } };
+    checkAchievements(s);
+    assert(!isEarned(s, a.id), `${a.id} says ${n} but fires at ${n - 1}`);
+
+    s.achievements = { earned: {}, counts: { [key]: n } };
+    checkAchievements(s);
+    assert(isEarned(s, a.id), `${a.id} says ${n} and does not fire at ${n}`);
+  }
+});
+
+/** Which tally a rung is really watching, worked out by moving one at a time. */
+function keyBehind(id) {
+  const keys = ['crops', 'eggs', 'produce', 'mushrooms', 'fish', 'flowers',
+    'animals', 'hands', 'water', 'barns', 'houses', 'streak'];
+  for (const key of keys) {
+    const probe = newGame(1);
+    probe.achievements = { earned: {}, counts: { [key]: 1e6 } };
+    checkAchievements(probe);
+    if (isEarned(probe, id)) return key;
+  }
+  return null;
+}
+
 // --- offline shell ------------------------------------------------------
+
 
 
 test('every module is precached by the service worker', () => {
