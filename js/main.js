@@ -20,7 +20,7 @@ import { addCatch } from './render/effects.js';
 import { canPlantAt } from './sim/flowers.js';
 import { cropAt, isRipe } from './sim/crops.js';
 import { fishAt } from './sim/fish.js';
-import { notePlayDay, earnedSince, achievementDef } from './sim/achievements.js';
+import { notePlayDay, earnedSince, achievementDef, notePet } from './sim/achievements.js';
 import { readSeedId, seedName } from './sim/flowergenes.js';
 import { drawAnimalSprite, drawHandSprite } from './render/entityrender.js';
 import { drawObjectSprite } from './render/tilerender.js';
@@ -712,6 +712,9 @@ function queueTileTask(state, toolbar, x, y, { announce }) {
     if (animal && !isReady(animal)) {
       const name = animalDef(animal.type).name.toLowerCase();
       const { gained } = petAnimal(state, animal);
+      // Counted here rather than inside petAnimal, which would close an import
+      // cycle — see notePet. Nothing else in the game pets an animal.
+      notePet(state, gained);
       toast(gained
         ? `The ${name} loves the attention`
         : `The ${name} has had plenty of fuss for now`);

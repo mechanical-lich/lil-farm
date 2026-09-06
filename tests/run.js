@@ -59,6 +59,7 @@ import { movableAt, canMoveTo, moveTo } from '../js/sim/moving.js';
 import {
   ACHIEVEMENTS, count, isEarned, earnedCount, rows as awardRows, earnedSince,
   checkAchievements, noteTaskResult, notePlayDay, dayBefore, bump, achievementDef,
+  notePet,
 } from '../js/sim/achievements.js';
 import {
   ANIMALS, TROUGH_CAPACITY, FEED_COST, FOOD_DURATION, WATER_DURATION, SEEK_THRESHOLD,
@@ -7755,16 +7756,20 @@ test('no rung promises a number it does not want', () => {
   // out of the blurb and hold the check to it.
   const s = newGame(9328);
   for (const a of ACHIEVEMENTS) {
-    const said = /\b(\d+)\b/.exec(a.blurb);
+    // Thresholds are written with thousands separators — see commas() — so
+    // "2,500" must read as 2500 rather than as 2.
+    const said = /\b\d[\d,]*\b/.exec(a.blurb);
     if (!said) continue;
-    const n = Number(said[1]);
+    const n = Number(said[0].replace(/,/g, ''));
     if (n < 2) continue;                       // "your first animal" and friends
     if (/all \d+/.test(a.blurb)) continue;     // the collection ones read a journal
     if (/two of every/.test(a.blurb)) continue;
 
     // Whatever it counts, one short of the stated number must not earn it.
+    // A rung whose counter isn't in the list below escapes this whole check,
+    // so failing to find one is itself the bug.
     const key = keyBehind(a.id);
-    if (!key) continue;
+    assert(key, `${a.id} counts something keyBehind() has not been told about`);
     s.achievements = { earned: {}, counts: { [key]: n - 1 } };
     checkAchievements(s);
     assert(!isEarned(s, a.id), `${a.id} says ${n} but fires at ${n - 1}`);
@@ -7778,17 +7783,119 @@ test('no rung promises a number it does not want', () => {
 /** Which tally a rung is really watching, worked out by moving one at a time. */
 function keyBehind(id) {
   const keys = ['crops', 'eggs', 'produce', 'mushrooms', 'fish', 'flowers',
-    'animals', 'hands', 'water', 'barns', 'houses', 'streak'];
+    'animals', 'hands', 'water', 'barns', 'houses', 'streak',
+    'sown', 'tilled', 'watered', 'cleared', 'feedFills', 'waterFills', 'pets', 'earned'];
   for (const key of keys) {
     const probe = newGame(1);
-    probe.achievements = { earned: {}, counts: { [key]: 1e6 } };
+    // Big enough to clear the top rung of every ladder — the takings ladder
+    // now runs to ten million, and a probe that fell short of a rung would
+    // report it as counting nothing at all.
+    probe.achievements = { earned: {}, counts: { [key]: 1e12 } };
     checkAchievements(probe);
     if (isEarned(probe, id)) return key;
   }
   return null;
 }
 
+test('the day’s work counts itself: tilling, watering, sowing, clearing', () => {
+  // Through the real queue, because these are task types rather than things in
+  // the bag — nothing is left behind afterwards for a later pass to count.
+  const s = farmWithMaterials(9330);
+  s.inventory.carrot_seed = 10;
+  const x = s.farmer.x + 1;
+  const y = s.farmer.y + 1;
+  const run = () => { let n = 0; while (s.tasks.length && n < 4000) { tick(s); n++; } };
+
+  addTask(s, taskForTile(s, x, y, 'till'));
+  run();
+  assertEqual(count(s, 'tilled'), 1, 'one bed tilled');
+
+  addTask(s, taskForTile(s, x, y, 'plant', { cropType: 'carrot' }));
+  run();
+  assertEqual(count(s, 'sown'), 1, 'one seed sown');
+
+  addTask(s, taskForTile(s, x, y, 'water'));
+  run();
+  assertEqual(count(s, 'watered'), 1, 'one tile watered');
+
+  // Something to clear: a tree beside him.
+  s.grid.setObject(x + 1, y, OBJ.TREE);
+  addTask(s, taskForTile(s, x + 1, y, 'chop'));
+  run();
+  assertEqual(count(s, 'cleared'), 1, 'one tree down');
+
+  assertEqual(count(s, 'flowers'), 0, 'and a crop seed is not a flower');
+});
+
+test('a trough only counts when it actually got filled', () => {
+  const s = farmWithMaterials(9331);
+  s.inventory.feed = 0;
+  for (const id of Object.keys(CROPS)) s.inventory[id] = 0;
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y;
+  completeBuild(s, { buildKind: 'feedTrough', x, y });
+
+  const run = () => { let n = 0; while (s.tasks.length && n < 4000) { tick(s); n++; } };
+
+  addTask(s, taskForTile(s, x, y, 'fill'));
+  run();
+  assertEqual(count(s, 'feedFills'), 0, 'nothing to fill it with, so nothing done');
+
+  s.inventory.feed = 20;
+  addTask(s, taskForTile(s, x, y, 'fill'));
+  run();
+  assertEqual(count(s, 'feedFills'), 1, 'and now it counts');
+  assertEqual(count(s, 'waterFills'), 0, 'feed is not water');
+});
+
+test('water troughs have a tally of their own', () => {
+  const s = farmWithMaterials(9332);
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y;
+  completeBuild(s, { buildKind: 'waterTrough', x, y });
+  addTask(s, taskForTile(s, x, y, 'fill'));
+  let n = 0;
+  while (s.tasks.length && n < 4000) { tick(s); n++; }
+
+  assertEqual(count(s, 'waterFills'), 1);
+  assertEqual(count(s, 'feedFills'), 0);
+});
+
+test('petting counts the fuss the animal felt, not the taps', () => {
+  const s = newGame(9333);
+  const animal = makeAnimal(s, 'cow', s.farmer.x + 1, s.farmer.y);
+
+  notePet(s, petAnimal(s, animal).gained);
+  assertEqual(count(s, 'pets'), 1, 'the first one lands');
+
+  // Straight back in again, inside the cooldown: a smile, not affection.
+  notePet(s, petAnimal(s, animal).gained);
+  assertEqual(count(s, 'pets'), 1, 'tapping the same cow again is not a second fuss');
+
+  for (let i = 0; i < PET_COOLDOWN + 1; i++) tick(s);
+  notePet(s, petAnimal(s, animal).gained);
+  assertEqual(count(s, 'pets'), 2, 'once the cooldown is up it counts again');
+});
+
+test('selling counts toward the money ladders', () => {
+  const s = newGame(9334);
+  s.inventory = { eggplant: 30 };
+  const res = sell(s, 'eggplant', 30);
+  assert(res.ok, 'the eggplants sold');
+  assertEqual(count(s, 'earned'), res.earned, 'exactly what the town paid');
+  assert(res.earned >= 1000 ? isEarned(s, 'first_thousand') : !isEarned(s, 'first_thousand'),
+    'and the rung agrees with the takings');
+});
+
+test('buying is not earning', () => {
+  const s = newGame(9335);
+  s.money = 100000;
+  buy(s, 'wood', 50);
+  assertEqual(count(s, 'earned'), 0, 'money going out is not money coming in');
+});
+
 // --- offline shell ------------------------------------------------------
+
 
 
 

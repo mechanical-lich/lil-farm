@@ -7,7 +7,7 @@
 // pure function of (seed, tickCount), so it's reproducible in tests.
 
 import { makeRng } from '../engine/rng.js';
-import { noteAnimalBought, noteHandHired } from './achievements.js';
+import { noteAnimalBought, noteHandHired, noteSale } from './achievements.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 import { CROPS, seedIdFor, isSeedId, cropFromSeedId } from './crops.js';
 import {
@@ -306,6 +306,7 @@ export function sell(state, id, qty = 1) {
   // The town now holds these, which is what moves the price next time.
   recordSale(state, id, qty, earned);
   emitUnlessSuspended('money:changed', { delta: earned });
+  noteSale(state, earned);
   return { ok: true, earned, qty };
 }
 

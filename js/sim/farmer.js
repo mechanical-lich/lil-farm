@@ -25,7 +25,7 @@ import { takeFromHand } from './farmhand.js';
 import { emptyCrate } from './crates.js';
 import { removePot } from './pots.js';
 import { landFish, standFor } from './fish.js';
-import { noteTaskResult, noteBuild } from './achievements.js';
+import { noteTaskResult, noteBuild, noteTroughFilled } from './achievements.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 
 const WANDER_CHANCE = 0.08;   // per idle tick
@@ -290,6 +290,8 @@ function applyTaskResult(state, task) {
         : fillFeedTrough(state, task.x, task.y);
       if (!res.ok) {
         emitUnlessSuspended('task:failed', { task, reason: res.reason || 'could not fill it' });
+      } else {
+        noteTroughFilled(state, trough.kind);
       }
       break;
     }
