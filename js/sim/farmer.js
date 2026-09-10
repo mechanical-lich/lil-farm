@@ -25,6 +25,8 @@ import { takeFromHand } from './farmhand.js';
 import { emptyCrate } from './crates.js';
 import { removePot } from './pots.js';
 import { landFish, standFor } from './fish.js';
+import { popBalloon } from './balloons.js';
+import { makeAnimal, freeSpotNear } from './animals.js';
 import { noteTaskResult, noteBuild, noteTroughFilled } from './achievements.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 
@@ -324,6 +326,28 @@ function applyTaskResult(state, task) {
       // pot to put in the bag — taking one away is undoing a purchase, which
       // is worth saying out loud rather than quietly refunding.
       removePot(state, task.x, task.y);
+      break;
+    }
+
+    case 'pop': {
+      const present = popBalloon(state, task.x, task.y);
+      if (!present) break;
+
+      // A mythical arrives as an animal standing next to the burst balloon.
+      // Deliberately not checked against barn capacity: a present is never
+      // refused for want of a stall, and the only thing capacity gates is
+      // *buying*, so an over-full farm simply cannot buy its next chicken
+      // until it builds — which is a fair price for a unicorn.
+      if (present.mythical) {
+        const spot = freeSpotNear(state, task.x, task.y, present.mythical)
+          || { x: task.x, y: task.y };
+        const animal = makeAnimal(state, present.mythical, spot.x, spot.y, 0);
+        emitUnlessSuspended('balloon:mythical', { type: present.mythical, id: animal.id });
+        break;
+      }
+
+      gained = present.gained;
+      addItems(state, gained);
       break;
     }
 

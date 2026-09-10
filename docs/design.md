@@ -501,6 +501,18 @@ Eighty-two of them, on the journal's fourth tab.
 - **The day streak takes the date as an argument.**  `sim/` may not read a clock — it is replayed thousands of times over during catch-up — so main.js passes today's date in and the simulation only ever compares two strings.  Miss a day and the streak restarts at one; opening the game twice in a day is still one day.
 - *Manual labor* is the one with teeth: it wants you to take an animal's produce **while a farmhand is already walking to it**, not merely while you employ one.  *Flower master* is the long game — every wild colour of all eight kinds, 192 in total, against the mushroom journal's 56.
 
+## Her birthday
+For nine days a year the farm throws a party. **Balloons drift up on it, and popping one is a present.**
+
+- **The week is worked out, not written down.**  The Saturday before the week of the 9th of September through the Sunday at the end of it — nine days, both weekends, whatever weekday the 9th happens to land on.  A hardcoded range would be right once and silently wrong every year after, in the direction where nothing happens at all; there is a test that walks fifteen years and checks each one starts on a Saturday and ends on a Sunday.
+- **The date is handed in, not read.**  `sim/` may not touch a clock, so main.js passes today's date to `noteParty` at boot and the spawner runs off the flag that sets — the same arrangement as the day streak.  Catch-up therefore replays the party exactly as if she had been watching.
+- **Once a day, the present is a mythical horse.**  The prize is armed on the first look of each day and given to whichever balloon she pops first, so it is never sitting in a balloon she leaves floating overnight.  Miss a day and nothing stacks — the present is for turning up.
+- **Four of them: a unicorn, a pegasus, a nightmare and a hippocampus,** and the first four go through the set before any repeats.  Everything else out of a balloon is eggs, mushrooms or a packet of flower seeds in one wild colour, generously sized: a present that reads as "oh, four eggs" is worse than no present.
+- **The mythicals are horses in every way the simulation cares about** — they eat, they drink, they graze off a bale, they make nothing.  The hippocampus is the exception, and `swims: true` is the whole of it: that one flag puts it on the water like a duck, and everything after — living out on the pond, coming ashore only when it wants feeding, drifting straight back — is behaviour the ducks already had.  It never lays, so nothing ever calls it back to dry land.
+- **They cannot be bought at any price,** and they **don't take a stall**.  A week of balloons can leave nine of them standing about, and on a small farm counting them against barn space would quietly mean "no more chickens until October" — a present that costs you something is not a present.
+- **A balloon only appears somewhere he can actually walk to.**  Dry, owned, empty ground with a real route to it, checked when it spawns.  This is the fish's island bug written down as a rule: a present you can see and can never open is worse than no present.
+- Popping is an ordinary task — he trots over and pops it — so the queue, the cancel tool and the away card all work on it without knowing what a balloon is.
+
 ## Coming back
 The farm keeps running with the tab closed — and now also while the tab is merely *hidden*. Nothing runs in a backgrounded tab, so the simulation falls behind; it catches up quietly the moment you look at it again, rather than staying behind until the next reload. A real absence (ten minutes or more) still gets the welcome-back card; glancing at another tab doesn't.
 

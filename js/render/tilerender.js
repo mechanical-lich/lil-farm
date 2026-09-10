@@ -13,6 +13,7 @@ import { hayAt, hayLeft, HAY_HELPINGS } from '../sim/hay.js';
 import { toolList } from '../sim/tools.js';
 import { potAt, potList } from '../sim/pots.js';
 import { fishList } from '../sim/fish.js';
+import { balloonList } from '../sim/balloons.js';
 import { shadowFor, SHADOW_ALPHA } from './fishart.js';
 import { flowerAt, isWatered } from '../sim/flowers.js';
 import { flowerCanvas } from './flowerart.js';
@@ -349,6 +350,7 @@ export function drawObjects(ctx, sheets, state, view, entityRows = null) {
 
   drawTroughs(ctx, sheets, state, view);
   drawTools(ctx, sheets, state, view);
+  drawBalloons(ctx, sheets, state, view);
 }
 
 /**
@@ -424,6 +426,30 @@ function drawPots(ctx, sheets, state, view) {
  * over the farmer's head, the tool simply yields for as long as he's there,
  * which reads as him standing in front of it.
  */
+/**
+ * Birthday balloons, over the top of everything.
+ *
+ * Last pass and lifted clear of the tile, because a balloon is the one thing on
+ * the farm that is genuinely above the ground rather than on it — drawn in the
+ * object layer it would be overlapped by the fence it is floating past. The
+ * drift is keyed off the tile as well as the tick so that two of them in shot
+ * are never in step.
+ */
+function drawBalloons(ctx, sheets, state, view) {
+  const sheet = sheets.balloons;
+  if (!sheet) return;
+  for (const { x, y, colour } of balloonList(state)) {
+    if (x < view.x0 || x > view.x1 || y < view.y0 || y > view.y1) continue;
+    const t = state.tickCount + x * 5 + y * 9;
+    const bob = Math.round(Math.sin(t / 3) * 1.5);
+    ctx.drawImage(sheet, (colour || 0) * TILE, 0, TILE, TILE,
+      x * TILE, y * TILE - LIFT + bob, TILE, TILE);
+  }
+}
+
+/** How far off the ground a balloon floats. */
+const LIFT = 6;
+
 function drawTools(ctx, sheets, state, view) {
   for (const { x, y, kind } of toolList(state)) {
     if (x < view.x0 || x > view.x1 || y < view.y0 || y > view.y1) continue;

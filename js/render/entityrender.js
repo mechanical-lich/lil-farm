@@ -158,8 +158,7 @@ function drawAnimal(ctx, sheets, state, a, pos) {
 
   const x = pos.x * TILE;
   const y = pos.y * TILE;
-  // Row picks the animal, column picks the colour it was born.
-  blit(ctx, sheets, [variantOf(a), def.row, 'animals'],
+  blit(ctx, sheets, animalSprite(def, variantOf(a)),
     Math.round(x), Math.round(y) - 1, a.facing === 'left');
 
   if (isReady(a)) {
@@ -209,7 +208,27 @@ export function drawHandSprite(ctx, sheets, at) {
 export function drawAnimalSprite(ctx, sheets, type, at, variant = 0) {
   const def = animalDef(type);
   if (!def) return;
-  blit(ctx, sheets, [variant, def.row, 'animals'], at.x * TILE, at.y * TILE - 1);
+  blit(ctx, sheets, animalSprite(def, variant), at.x * TILE, at.y * TILE - 1);
+}
+
+/**
+ * Which sprite an animal draws as: [column, row, sheet].
+ *
+ * One function because there are two places that draw an animal — the farm
+ * itself and the ghost while one is being sited — and they must never disagree
+ * about what a unicorn looks like. They did, briefly: the mythicals were taught
+ * to the ghost and not to the farm, so every one of them turned up as a sheep,
+ * which is what row 0 of the farm sheet happens to be. Nothing threw, nothing
+ * failed, and no test could see it, because a test has no canvas.
+ *
+ * The two layouts it reconciles: on assets/animals/farm.png a row is an animal
+ * and its columns are the colours it comes in, so the column is the variant. On
+ * assets/animals/mythical.png there is one row of four and the column says
+ * *which* animal it is, so the column is pinned by the definition and the
+ * variant is ignored.
+ */
+export function animalSprite(def, variant = 0) {
+  return [def.col ?? variant, def.row, def.sheet || 'animals'];
 }
 
 function drawBadge(ctx, x, y, fill, edge) {

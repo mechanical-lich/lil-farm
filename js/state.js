@@ -8,6 +8,7 @@ import { placeStructure, reconcileBuildings } from './sim/build.js';
 import { reconcileCrates } from './sim/crates.js';
 import { reconcileHay } from './sim/hay.js';
 import { reconcileFish } from './sim/fish.js';
+import { reconcileBalloons } from './sim/balloons.js';
 import { newAchievementRecord } from './sim/achievements.js';
 import { seedStartingMushrooms } from './sim/mushrooms.js';
 import { newMarket } from './sim/market.js';
@@ -50,6 +51,8 @@ export function newGame(seed = (Date.now() ^ 0x5f3759df) >>> 0) {
     fish: {},       // tile key -> fish id; see sim/fish.js
     fishJournal: {},   // fish id -> how many you have ever landed
     achievements: newAchievementRecord(),   // see sim/achievements.js
+    balloons: {},   // tile key -> {colour}; only during her birthday week
+    party: { on: false, day: null, prizePending: false, given: [] },
     tasks: [],
     nextTaskId: 1,
     // See TESTING in config.js — a real farm starts with just a few seeds.
@@ -102,6 +105,8 @@ export function serialize(state) {
     fish: state.fish,
     fishJournal: state.fishJournal,
     achievements: state.achievements,
+    balloons: state.balloons,
+    party: state.party,
     tasks: state.tasks,
     nextTaskId: state.nextTaskId,
     inventory: state.inventory,
@@ -166,6 +171,11 @@ export function deserialize(data) {
     // see. Everyone starts from zero; the standing ones (ten barns, a house)
     // come back the moment the next one goes up.
     achievements: data.achievements || newAchievementRecord(),
+    // Farms saved before the birthday week simply have neither. `on` is
+    // recomputed at boot from the real date (see noteParty), so a save carried
+    // across the end of the week never keeps the balloons flying.
+    balloons: data.balloons || {},
+    party: data.party || { on: false, day: null, prizePending: false, given: [] },
     tasks: data.tasks || [],
     nextTaskId: data.nextTaskId || 1,
     inventory: data.inventory || {},
@@ -188,6 +198,10 @@ export function deserialize(data) {
   if (swimming.dropped || swimming.forgotten) {
     console.warn(`fish cleared on load: ${swimming.dropped} of a species that no longer exists, `
       + `${swimming.forgotten} journal entries`);
+  }
+  const floating = reconcileBalloons(state);
+  if (floating.dropped) {
+    console.warn(`balloons cleared on load: ${floating.dropped} on land no longer owned`);
   }
   const bales = reconcileHay(state);
   if (bales.adopted || bales.dropped) {

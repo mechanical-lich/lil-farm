@@ -20,9 +20,11 @@ import { handAt, carriedTotal } from './farmhand.js';
 import { crateAt } from './crates.js';
 import { potAt } from './pots.js';
 import { fishAt, standFor } from './fish.js';
+import { balloonAt } from './balloons.js';
 
 /** Work is measured in ticks (1 tick = 1 second). */
 export const TASK_TYPES = {
+  pop: { label: 'Pop', verb: 'Popping' },
   clear: { label: 'Clear', verb: 'Clearing' },
   chop: { label: 'Chop', verb: 'Chopping' },
   untill: { label: 'Clear', verb: 'Clearing' },
@@ -60,6 +62,9 @@ export const WORK = {
   fish: 20,
   unload: 5,
   liftpot: 5,
+  // Barely any work at all. Walking over to it is the errand; a balloon does
+  // not need untying.
+  pop: 2,
 };
 
 /** A task the player cannot see the point of is a bug; keep labels concrete. */
@@ -329,6 +334,13 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
   // A shadow in the water. Worked from the bank, so the task carries the tile
   // to stand on — without a bank in reach there is no task to offer, which is
   // what stops the middle of a lake being tapped fruitlessly.
+  // A balloon beats everything else on its tile. It only sits on bare walkable
+  // ground, so in practice there is nothing to beat — but if the world changes
+  // under one, the present should still be the thing a tap offers.
+  const popTask = () => (balloonAt(state, x, y)
+    ? { type: 'pop', x, y, work: WORK.pop, detail: 'a balloon' }
+    : null);
+
   const fishTask = () => {
     const found = fishAt(state, x, y);
     if (!found) return null;
@@ -474,6 +486,9 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
     }
 
     case 'harvest': {
+      const present = popTask();
+      if (present) return present;
+
       const catchable = fishTask();
       if (catchable) return catchable;
 
@@ -507,6 +522,10 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
 
     case 'auto':
     default: {
+      // A present outranks the lot of it.
+      const present = popTask();
+      if (present) return present;
+
       // Tap-anywhere convenience: the most useful thing this tile needs.
       // Animals and troughs come first — they're what you tap them for.
       // A farmhand with a full satchel is the most useful thing on the tile.

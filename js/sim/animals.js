@@ -98,7 +98,48 @@ export const ANIMALS = {
     laysOnGround: true,
     swims: true,
   },
+
+  // --- the mythicals ------------------------------------------------------
+  //
+  // Horses in every respect the simulation cares about — they eat, they drink,
+  // they graze off a bale, they make nothing — and they cannot be bought at any
+  // price. The only way one arrives is out of a birthday balloon, which is what
+  // `gift` says: the shop filters them out of its list rather than knowing
+  // their names (see animalList).
+  //
+  // They live on a sheet of their own, assets/animals/mythical.png, which is
+  // one row of four rather than a colour ramp per animal. `col` pins which of
+  // the four this is, so the renderer draws the right one instead of treating
+  // the position as a colour variation — see drawAnimalSprite.
+  unicorn: {
+    name: 'Unicorn', gift: true, sheet: 'mythical', row: 0, col: 0,
+    eats: 1, drinks: 1, grazes: true,
+  },
+  pegasus: {
+    name: 'Pegasus', gift: true, sheet: 'mythical', row: 0, col: 1,
+    eats: 1, drinks: 1, grazes: true,
+  },
+  nightmare: {
+    name: 'Nightmare', gift: true, sheet: 'mythical', row: 0, col: 2,
+    eats: 1, drinks: 1, grazes: true,
+  },
+  // The one that isn't a horse underneath. `swims` is the whole of it: it puts
+  // the hippocampus on the water like a duck, and everything that follows —
+  // spending its day out on the pond, coming ashore only when it wants feeding,
+  // drifting back to the water the moment it doesn't — is behaviour the ducks
+  // already have. It never lays, so nothing ever calls it back to dry land of
+  // its own accord.
+  hippocampus: {
+    name: 'Hippocampus', gift: true, sheet: 'mythical', row: 0, col: 3,
+    eats: 1, drinks: 1, grazes: true,
+    swims: true,
+  },
 };
+
+/** The ones that cannot be bought, only given. */
+export const GIFT_ANIMALS = new Set(
+  Object.entries(ANIMALS).filter(([, def]) => def.gift).map(([type]) => type),
+);
 
 /**
  * How much a milked or sheared animal banks before it stops working.
@@ -132,6 +173,35 @@ const WANDER_CHANCE = 0.06;
 export const SWIMMERS = new Set(
   Object.entries(ANIMALS).filter(([, def]) => def.swims).map(([type]) => type),
 );
+
+/**
+ * Somewhere near a tile that this kind of animal could stand.
+ *
+ * Used when one arrives without the player having sited it — out of a birthday
+ * balloon, at present. Rings outward from the spot so it turns up next to
+ * whatever produced it, and answers null rather than guessing if there is
+ * genuinely nowhere, so the caller can decide what to do about it.
+ *
+ * @param {string} type which animal, since a hippocampus may stand on water
+ *   and a unicorn may not
+ */
+export function freeSpotNear(state, x, y, type, radius = 6) {
+  const actor = SWIMMERS.has(type) ? 'swimmer' : 'animal';
+  for (let r = 0; r <= radius; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (r > 0 && Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const nx = x + dx;
+        const ny = y + dy;
+        if (!state.grid.inBounds(nx, ny)) continue;
+        if (!state.grid.isWalkable(nx, ny, actor)) continue;
+        if ((state.animals || []).some((a) => a.x === nx && a.y === ny)) continue;
+        return { x: nx, y: ny };
+      }
+    }
+  }
+  return null;
+}
 
 /** How the grid should treat this animal when asked what it can walk on. */
 export function actorFor(animal) {

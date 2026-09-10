@@ -37,7 +37,7 @@
 // notePlayDay — precisely so this file never reads a clock.
 
 import { emitUnlessSuspended } from '../engine/events.js';
-import { ANIMALS } from './animals.js';
+import { ANIMALS, GIFT_ANIMALS } from './animals.js';
 import { CROPS } from './crops.js';
 import { SPECIES, MUSHROOMS, journalCount } from './mushrooms.js';
 import { FLOWER_KINDS, WILD_HUES } from './flowergenes.js';
@@ -279,12 +279,27 @@ export const ACHIEVEMENTS = [
     { at: 1, id: 'home_sweet_home', name: 'Home sweet home', blurb: 'Built a house' },
   ]),
 
+  // Only reachable during the week of her birthday — see sim/balloons.js — so
+  // this ladder is short and its top rung is a week's worth of popping rather
+  // than a year's.
+  ...ladder('balloons', (n) => `Popped ${n} balloons`, [
+    { at: 10, id: 'party_popper', name: 'Party popper' },
+    { at: 50, id: 'many_happy_returns', name: 'Many happy returns' },
+    { at: 100, id: 'birthday_girl', name: 'The birthday girl' },
+  ]),
+
   // --- the odd ones out: no ladder, no second helping ----------------------
   {
     id: 'noahs_ark',
     name: "Noah's ark",
     blurb: 'Bought two of every animal',
-    check: (s) => Object.keys(ANIMALS).every((type) => count(s, `bought:${type}`) >= 2),
+    // Every animal that can be *bought*. The mythicals live in the same table
+    // and are not for sale at any price, so counting them here would have made
+    // the ark quietly impossible the day they were added — which is precisely
+    // what the test caught.
+    check: (s) => Object.keys(ANIMALS)
+      .filter((type) => !GIFT_ANIMALS.has(type))
+      .every((type) => count(s, `bought:${type}`) >= 2),
   },
   {
     // The name is the condition: you got there before the hired help did.
@@ -477,6 +492,7 @@ export function noteTaskResult(state, task, gained) {
   else if (task.type === 'till') bump(state, 'tilled');
   else if (task.type === 'water') bump(state, 'watered');
   else if (task.type === 'clear' || task.type === 'chop') bump(state, 'cleared');
+  else if (task.type === 'pop') bump(state, 'balloons');
 
   // Only counts if a farmhand was actually on its way to that animal. Merely
   // employing somebody and doing your own milking is not beating them to it.

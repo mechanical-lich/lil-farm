@@ -13,7 +13,7 @@ import { CROPS, seedIdFor, isSeedId, cropFromSeedId } from './crops.js';
 import {
   ITEMS, ITEM_GROUPS, addItem, removeItem, countItem, itemName, itemGroup,
 } from './inventory.js';
-import { ANIMALS, animalDef, makeAnimal, SWIMMERS } from './animals.js';
+import { ANIMALS, animalDef, makeAnimal, SWIMMERS, GIFT_ANIMALS } from './animals.js';
 import { animalCapacity } from './build.js';
 import { priceOf, priceMultiplier, recordSale } from './market.js';
 import {
@@ -171,13 +171,29 @@ function growLabel(ticks) {
  * so we never send them off to choose a home for an animal they can't afford.
  * @returns {{ok: boolean, reason?: string}}
  */
+/**
+ * How many animals count against barn space.
+ *
+ * Gifts don't. A week of birthday balloons can leave nine mythicals standing
+ * about, and on a farm with two barns that would quietly mean "you may not buy
+ * another chicken until October" — a present that costs you something is not a
+ * present. They still eat, drink and need looking after; they just don't take
+ * a stall from an animal you paid for.
+ */
+export function stockCount(state) {
+  return (state.animals || []).filter((a) => !GIFT_ANIMALS.has(a.type)).length;
+}
+
 export function canBuyAnimal(state, type) {
   const def = animalDef(type);
   if (!def) return { ok: false, reason: 'no such animal' };
+  // Belt as well as braces: the list above hides these, and this stops one
+  // being bought by any other route, including a stale panel.
+  if (GIFT_ANIMALS.has(type)) return { ok: false, reason: 'that one is not for sale' };
 
   const capacity = animalCapacity(state);
   if (capacity === 0) return { ok: false, reason: 'build a barn first' };
-  if (state.animals.length >= capacity) return { ok: false, reason: 'your barns are full' };
+  if (stockCount(state) >= capacity) return { ok: false, reason: 'your barns are full' };
   if (state.money < def.price) return { ok: false, reason: 'not enough money' };
   return { ok: true };
 }
@@ -252,7 +268,10 @@ export function handRow(state) {
 
 export function animalList(state) {
   const capacity = animalCapacity(state);
-  return Object.entries(ANIMALS).map(([type, def]) => ({
+  // Gift animals never appear here. They have no price at all, so a row for one
+  // would offer a free unicorn — and the whole of what makes a mythical worth
+  // having is that it came out of a balloon.
+  return Object.entries(ANIMALS).filter(([type]) => !GIFT_ANIMALS.has(type)).map(([type, def]) => ({
     type,
     name: def.name,
     price: def.price,
@@ -260,7 +279,7 @@ export function animalList(state) {
     // asking itemName what undefined is called.
     produces: def.produces ? itemName(def.produces) : null,
     owned: state.animals.filter((a) => a.type === type).length,
-    affordable: state.money >= def.price && state.animals.length < capacity,
+    affordable: state.money >= def.price && stockCount(state) < capacity,
   }));
 }
 

@@ -36,7 +36,7 @@ import {
 import {
   ROTATION_TICKS, STAPLE_SEEDS, ROTATING_COUNT, ROTATING_TIERS, stockedSeedCrops, buyList, sellList,
   buy, sell, sellAll, buyAnimal, canBuyAnimal, canPlaceAnimal, MATERIALS,
-  hireHand, canHireHand, handRow, sellGroups, groupValue, animalList,
+  hireHand, canHireHand, handRow, sellGroups, groupValue, animalList, stockCount,
 } from '../js/sim/shop.js';
 import { ITEMS, ITEM_GROUPS, itemGroup, countItem } from '../js/sim/inventory.js';
 import {
@@ -57,12 +57,17 @@ import {
 } from '../js/sim/fish.js';
 import { movableAt, canMoveTo, moveTo } from '../js/sim/moving.js';
 import {
+  BALLOON_CAP, BALLOON_INTERVAL, BALLOON_COLOURS, MYTHICALS, partyWindow, isPartyDay,
+  noteParty, balloonAt, balloonList, spawnBalloon, popBalloon, updateBalloons,
+  canBalloonSpawn, reconcileBalloons, nextMythical,
+} from '../js/sim/balloons.js';
+import {
   ACHIEVEMENTS, count, isEarned, earnedCount, rows as awardRows, earnedSince,
   checkAchievements, noteTaskResult, notePlayDay, dayBefore, bump, achievementDef,
   notePet,
 } from '../js/sim/achievements.js';
 import {
-  ANIMALS, TROUGH_CAPACITY, FEED_COST, FOOD_DURATION, WATER_DURATION, SEEK_THRESHOLD,
+  ANIMALS, GIFT_ANIMALS, TROUGH_CAPACITY, FEED_COST, FOOD_DURATION, WATER_DURATION, SEEK_THRESHOLD,
   foodRate, waterRate, canGraze, TARGET_RECHECK,
   makeAnimal, collectFrom, isNeglected, fillWaterTrough, fillFeedTrough, pickFeed, animalDef,
   petAnimal, pickEmote, currentEmote, animalAt, isReady, PRODUCE_CAP,
@@ -107,6 +112,7 @@ import {
 } from '../js/engine/save.js';
 import { runCatchup, GameLoop, discardSkipped } from '../js/engine/loop.js';
 import { anythingMoving } from '../js/render/renderer.js';
+import { animalSprite } from '../js/render/entityrender.js';
 import {
   on, suspend, resume, startTally, stopTally, emitUnlessSuspended,
 } from '../js/engine/events.js';
@@ -5769,12 +5775,36 @@ test('the animal sheet and the animal definitions agree', () => {
   assertEqual(w % TILE, 0, 'the sheet is a whole number of tiles wide');
   assertEqual(h % TILE, 0, 'and tall');
 
-  for (const [type, def] of Object.entries(ANIMALS)) {
+  // Animals on the farm sheet get a row each, and the columns of that row are
+  // their colours. The mythicals are laid out the other way round — one row of
+  // four on a sheet of their own — so each of those pins a column instead, and
+  // both arrangements have to be checked against the sheet they actually use.
+  const farmAnimals = Object.entries(ANIMALS).filter(([, def]) => !def.sheet);
+  for (const [type, def] of farmAnimals) {
     assert(Number.isInteger(def.row), `${type} needs a row on the sheet`);
     assert(def.row < rows, `${type} wants row ${def.row}, the sheet has ${rows}`);
   }
-  assertEqual(new Set(Object.values(ANIMALS).map((d) => d.row)).size,
-    Object.keys(ANIMALS).length, 'every animal has its own row');
+  assertEqual(new Set(farmAnimals.map(([, d]) => d.row)).size, farmAnimals.length,
+    'every animal has its own row');
+
+  const bySheet = new Map();
+  for (const [type, def] of Object.entries(ANIMALS)) {
+    if (!def.sheet) continue;
+    if (!bySheet.has(def.sheet)) bySheet.set(def.sheet, []);
+    bySheet.get(def.sheet).push([type, def]);
+  }
+  for (const [sheet, entries] of bySheet) {
+    const size = pngSize(`assets/animals/${sheet}.png`);
+    for (const [type, def] of entries) {
+      assert(Number.isInteger(def.col), `${type} needs a column on ${sheet}.png`);
+      assert(def.col < size.w / TILE,
+        `${type} wants column ${def.col}, ${sheet}.png has ${size.w / TILE}`);
+      assert(def.row < size.h / TILE,
+        `${type} wants row ${def.row}, ${sheet}.png has ${size.h / TILE}`);
+    }
+    assertEqual(new Set(entries.map(([, d]) => `${d.row},${d.col}`)).size, entries.length,
+      `every animal on ${sheet}.png has its own sprite`);
+  }
 
   // Whatever the sheet's width, that's how many colours the game offers.
   setAnimalVariants(cols);
@@ -7504,7 +7534,10 @@ test("Noah's ark wants two of every animal, and the zoo wants a hundred of any",
     throw new Error('nowhere to put an animal');
   };
 
-  const types = Object.keys(ANIMALS);
+  // The ones that can be bought. The mythicals are in the same table and are
+  // not for sale, so an ark that wanted them would be an ark nobody could fill.
+  const types = Object.keys(ANIMALS).filter((t) => !GIFT_ANIMALS.has(t));
+  assert(types.length < Object.keys(ANIMALS).length, 'some animals are gifts only');
   for (const type of types) {
     const at = spot();
     assert(buyAnimal(s, type, at.x, at.y).ok, `bought one ${type}`);
@@ -7516,6 +7549,7 @@ test("Noah's ark wants two of every animal, and the zoo wants a hundred of any",
     assert(buyAnimal(s, type, at.x, at.y).ok, `bought a second ${type}`);
   }
   assert(isEarned(s, 'noahs_ark'), 'two of each does it');
+  assert(!buyAnimal(s, 'unicorn', s.farmer.x, s.farmer.y).ok, 'and no shop sells a unicorn');
   assertEqual(count(s, 'animals'), types.length * 2, 'and the total is kept too');
   assert(!isEarned(s, 'zoo'), 'twelve animals is not a zoo');
 });
@@ -7784,7 +7818,8 @@ test('no rung promises a number it does not want', () => {
 function keyBehind(id) {
   const keys = ['crops', 'eggs', 'produce', 'mushrooms', 'fish', 'flowers',
     'animals', 'hands', 'water', 'barns', 'houses', 'streak',
-    'sown', 'tilled', 'watered', 'cleared', 'feedFills', 'waterFills', 'pets', 'earned'];
+    'sown', 'tilled', 'watered', 'cleared', 'feedFills', 'waterFills', 'pets', 'earned',
+    'balloons'];
   for (const key of keys) {
     const probe = newGame(1);
     // Big enough to clear the top rung of every ladder — the takings ladder
@@ -7894,7 +7929,278 @@ test('buying is not earning', () => {
   assertEqual(count(s, 'earned'), 0, 'money going out is not money coming in');
 });
 
+// --- balloons -----------------------------------------------------------
+
+test('the birthday week is the Saturday before through the Sunday after', () => {
+  // Nine days, both weekends, whatever weekday the 9th lands on. Worked out
+  // rather than written down, so these are the years doing the checking.
+  assertEqual(partyWindow(2026), { from: '2026-09-05', to: '2026-09-13' },
+    'the 9th is a Wednesday in 2026');
+  assertEqual(partyWindow(2027), { from: '2027-09-04', to: '2027-09-12' },
+    'a Thursday in 2027');
+  assertEqual(partyWindow(2028), { from: '2028-09-02', to: '2028-09-10' },
+    'a Saturday in 2028');
+
+  for (let year = 2026; year <= 2040; year++) {
+    const { from, to } = partyWindow(year);
+    const days = (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`))
+      / (24 * 60 * 60 * 1000) + 1;
+    assertEqual(days, 9, `${year} should be nine days`);
+    assert(new Date(`${from}T00:00:00Z`).getUTCDay() === 6, `${year} starts on a Saturday`);
+    assert(new Date(`${to}T00:00:00Z`).getUTCDay() === 0, `${year} ends on a Sunday`);
+    assert(isPartyDay(`${year}-09-09`), `${year}'s birthday is inside its own week`);
+  }
+});
+
+test('the balloons are out for the week and no other day of the year', () => {
+  assert(isPartyDay('2026-09-09'), 'the day itself');
+  assert(isPartyDay('2026-09-05'), 'the Saturday before');
+  assert(isPartyDay('2026-09-13'), 'the Sunday after');
+  assert(!isPartyDay('2026-09-04'), 'the Friday before is too early');
+  assert(!isPartyDay('2026-09-14'), 'the Monday after is too late');
+  assert(!isPartyDay('2026-01-01'), 'and January is right out');
+});
+
+test('nothing spawns outside the week, however long the farm runs', () => {
+  const s = farmWithMaterials(9400);
+  noteParty(s, '2026-06-01');
+  for (let i = 0; i < BALLOON_INTERVAL * 50; i++) tick(s);
+  assertEqual(balloonList(s).length, 0, 'an ordinary June');
+});
+
+test('balloons appear during the week, up to the cap', () => {
+  const s = farmWithMaterials(9401);
+  noteParty(s, '2026-09-09');
+  for (let i = 0; i < BALLOON_INTERVAL * 200; i++) tick(s);
+
+  const out = balloonList(s);
+  assert(out.length > 0, 'the farm has balloons on it');
+  assertEqual(out.length, BALLOON_CAP, 'and never more than the cap');
+  for (const b of out) {
+    assert(b.colour >= 0 && b.colour < BALLOON_COLOURS, `colour ${b.colour} is on the sheet`);
+    assert(s.grid.isWalkable(b.x, b.y, 'farmer'), 'and every one can be walked to');
+  }
+});
+
+test('a balloon is never put somewhere the farmer cannot reach', () => {
+  // The fish had exactly this bug on a real farm: a thing you can see and never
+  // get to. Asked of the rule directly rather than watched for in a few hundred
+  // random spawns — the spawner picks tiles at random, so an island it happens
+  // not to choose proves nothing, and an earlier version of this test passed
+  // happily with the check deleted.
+  const { s, px, py } = pondFarm(9402, 9, 9);
+  const island = { x: px + 4, y: py + 4 };
+  s.grid.setGround(island.x, island.y, GROUND.GRASS);
+
+  assert(s.grid.isWalkable(island.x, island.y, 'farmer'), 'the island is dry land');
+  assertEqual(findPath(s.grid, { x: s.farmer.x, y: s.farmer.y }, island, { actor: 'farmer' }),
+    null, 'and there is no way to it');
+  assertEqual(canBalloonSpawn(s, island.x, island.y), false,
+    'so no balloon may be put there');
+
+  const shore = { x: s.farmer.x + 1, y: s.farmer.y };
+  assertEqual(canBalloonSpawn(s, shore.x, shore.y), true, 'but ground he can walk to is fine');
+
+  // And nothing unreachable turns up over a long run either.
+  noteParty(s, '2026-09-09');
+  for (let i = 0; i < BALLOON_INTERVAL * 60; i++) tick(s);
+  for (const b of balloonList(s)) {
+    assert(findPath(s.grid, { x: s.farmer.x, y: s.farmer.y }, { x: b.x, y: b.y },
+      { actor: 'farmer' }), `the balloon at ${b.x},${b.y} can be got to`);
+  }
+});
+
+test('the first balloon of the day is a mythical, the rest are presents', () => {
+  const s = farmWithMaterials(9403);
+  noteParty(s, '2026-09-09');
+
+  spawnBalloon(s, s.farmer.x + 1, s.farmer.y, 0);
+  const first = popBalloon(s, s.farmer.x + 1, s.farmer.y);
+  assert(MYTHICALS.includes(first.mythical), `the day's prize: ${first.mythical}`);
+  assertEqual(first.gained, null, 'and nothing in the bag for it');
+
+  spawnBalloon(s, s.farmer.x + 2, s.farmer.y, 0);
+  const second = popBalloon(s, s.farmer.x + 2, s.farmer.y);
+  assertEqual(second.mythical, null, 'the second is an ordinary present');
+  assert(Object.keys(second.gained).length > 0, 'with something in it');
+});
+
+test('a new day arms a new prize; opening the game twice does not', () => {
+  const s = farmWithMaterials(9404);
+  noteParty(s, '2026-09-09');
+  spawnBalloon(s, s.farmer.x + 1, s.farmer.y, 0);
+  assert(popBalloon(s, s.farmer.x + 1, s.farmer.y).mythical, 'day one');
+
+  noteParty(s, '2026-09-09');
+  spawnBalloon(s, s.farmer.x + 1, s.farmer.y, 0);
+  assertEqual(popBalloon(s, s.farmer.x + 1, s.farmer.y).mythical, null,
+    'looking again the same day earns nothing extra');
+
+  noteParty(s, '2026-09-10');
+  spawnBalloon(s, s.farmer.x + 1, s.farmer.y, 0);
+  assert(popBalloon(s, s.farmer.x + 1, s.farmer.y).mythical, 'the next day does');
+});
+
+test('the prizes go through all four kinds before repeating', () => {
+  const s = farmWithMaterials(9405);
+  const seen = [];
+  const days = ['2026-09-05', '2026-09-06', '2026-09-07', '2026-09-08'];
+  for (const day of days) {
+    noteParty(s, day);
+    spawnBalloon(s, s.farmer.x + 1, s.farmer.y, 0);
+    seen.push(popBalloon(s, s.farmer.x + 1, s.farmer.y).mythical);
+  }
+  assertEqual([...seen].sort(), [...MYTHICALS].sort(), 'one of each, in some order');
+
+  // Only four exist and the week is nine days, so day five starts again.
+  noteParty(s, '2026-09-09');
+  spawnBalloon(s, s.farmer.x + 1, s.farmer.y, 0);
+  const fifth = popBalloon(s, s.farmer.x + 1, s.farmer.y).mythical;
+  assert(MYTHICALS.includes(fifth), 'the fifth day repeats rather than giving nothing');
+});
+
+test('popping a balloon through the real queue delivers what was in it', () => {
+  const s = farmWithMaterials(9406);
+  noteParty(s, '2026-09-09');
+  const x = s.farmer.x + 3;
+  const y = s.farmer.y;
+  spawnBalloon(s, x, y, 3);
+
+  // The day's mythical first, so the second pop is an ordinary present.
+  const spec = taskForTile(s, x, y, 'auto');
+  assertEqual(spec.type, 'pop', 'a tap on a balloon pops it');
+  assertEqual(spec.detail, 'a balloon', 'and does not say what is inside');
+  addTask(s, spec);
+  let n = 0;
+  while (s.tasks.length && n < 4000) { tick(s); n++; }
+
+  assertEqual(balloonAt(s, x, y), null, 'the balloon is gone');
+  assertEqual(s.animals.length, 1, 'and a mythical is standing on the farm');
+  assert(MYTHICALS.includes(s.animals[0].type), `${s.animals[0].type} is a mythical`);
+  assertEqual(count(s, 'balloons'), 1, 'the popping counted');
+});
+
+test('an ordinary present goes into the bag', () => {
+  const s = farmWithMaterials(9407);
+  noteParty(s, '2026-09-09');
+  s.party.prizePending = false;          // the day's mythical is already given
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y;
+  spawnBalloon(s, x, y, 1);
+
+  const before = Object.values(s.inventory).reduce((a, b) => a + b, 0);
+  addTask(s, taskForTile(s, x, y, 'auto'));
+  let n = 0;
+  while (s.tasks.length && n < 4000) { tick(s); n++; }
+
+  const after = Object.values(s.inventory).reduce((a, b) => a + b, 0);
+  assert(after > before, `something arrived (${before} -> ${after})`);
+  assertEqual(s.animals.length, 0, 'and no animal came out of it');
+});
+
+test('every animal draws from the sheet its definition names', () => {
+  // This is the one the browser caught and the tests could not: the mythicals
+  // were taught to the placement ghost and not to the farm itself, so every
+  // unicorn on the ground turned up as a sheep — row 0 of the farm sheet.
+  // Nothing threw and nothing failed; it was simply the wrong picture. Both
+  // draw paths go through animalSprite now, so this holds them to the table.
+  for (const [type, def] of Object.entries(ANIMALS)) {
+    const [col, row, sheet] = animalSprite(def, 2);
+    if (def.sheet) {
+      assertEqual(sheet, def.sheet, `${type} draws from its own sheet`);
+      assertEqual(col, def.col, `${type} pins its column rather than taking the colour`);
+    } else {
+      assertEqual(sheet, 'animals', `${type} draws from the farm sheet`);
+      assertEqual(col, 2, `${type} takes its column from the colour it was born`);
+    }
+    assertEqual(row, def.row, `${type} draws from row ${def.row}`);
+  }
+
+  // And no two of them land on the same sprite, which is the failure that puts
+  // a pegasus where the unicorn should be.
+  const seen = Object.values(ANIMALS).map((def) => animalSprite(def, 0).join('/'));
+  assertEqual(new Set(seen).size, seen.length, 'every animal has a sprite of its own');
+});
+
+test('a stable full of mythicals does not use up the barn', () => {
+  // Nine days of balloons can leave nine of them standing about, and a present
+  // that stops her buying a chicken is not a present.
+  const s = barnyard(9411, 1);            // one barn: a handful of stalls
+  const capacity = animalCapacity(s);
+  assert(capacity > 0 && capacity < 20, `a small barn (${capacity})`);
+
+  for (let i = 0; i < capacity + 3; i++) {
+    makeAnimal(s, MYTHICALS[i % MYTHICALS.length], s.farmer.x, s.farmer.y + 3, 0);
+  }
+  assert(s.animals.length > capacity, 'more mythicals than there are stalls');
+  assertEqual(stockCount(s), 0, 'and none of them counts as stock');
+  assert(canBuyAnimal(s, 'chicken').ok, 'so a chicken can still be bought');
+
+  // Bought animals still fill it up the way they always did.
+  for (let i = 0; i < capacity; i++) makeAnimal(s, 'chicken', s.farmer.x, s.farmer.y + 4);
+  assertEqual(stockCount(s), capacity, 'the barn is full of chickens');
+  assert(!canBuyAnimal(s, 'chicken').ok, 'and now it is full');
+});
+
+test('a mythical is a real animal that eats, drinks and cannot be bought', () => {
+  for (const type of MYTHICALS) {
+    const def = ANIMALS[type];
+    assert(def, `${type} is in the animal table`);
+    assert(def.gift, `${type} is a gift, not stock`);
+    assert(GIFT_ANIMALS.has(type), `${type} is filtered out of the shop`);
+    assertEqual(def.produces, undefined, `${type} produces nothing, like a horse`);
+    assert(def.eats > 0 && def.drinks > 0, `${type} still wants feeding`);
+    assert(def.grazes, `${type} eats from a bale like a horse`);
+  }
+  assert(ANIMALS.hippocampus.swims, 'the hippocampus takes to the water');
+  for (const type of ['unicorn', 'pegasus', 'nightmare']) {
+    assert(!ANIMALS[type].swims, `a ${type} stays on dry land`);
+  }
+});
+
+test('a hippocampus makes for the water and stays there', () => {
+  const { s, px, py } = pondFarm(9408, 4, 4);
+  const horse = makeAnimal(s, 'hippocampus', s.farmer.x, s.farmer.y, 0);
+  horse.food = FOOD_DURATION;
+  horse.water = WATER_DURATION;
+
+  for (let i = 0; i < 400; i++) tick(s);
+  assert(isWater(s.grid.getGround(horse.x, horse.y)),
+    `it should be swimming, not standing at ${horse.x},${horse.y}`);
+
+  // And it stays put rather than drifting back inland the way a plain horse
+  // would if it wandered onto a pond.
+  for (let i = 0; i < 400; i++) tick(s);
+  assert(isWater(s.grid.getGround(horse.x, horse.y)), 'still in the water later on');
+});
+
+test('balloons survive a save and reload; the party flag does not', () => {
+  const s = farmWithMaterials(9409);
+  noteParty(s, '2026-09-09');
+  spawnBalloon(s, s.farmer.x + 1, s.farmer.y, 7);
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual(balloonAt(back, s.farmer.x + 1, s.farmer.y), { colour: 7 },
+    'the balloon is still there');
+  assertEqual(back.party.given, s.party.given, 'and so is what has been given');
+
+  // `on` is recomputed from the real date at boot, so a save carried past the
+  // end of the week must not keep spawning.
+  assertEqual(noteParty(back, '2026-11-01').on, false, 'November is not the week');
+  assertEqual(back.party.on, false);
+});
+
+test('a farm saved before the birthday week loads without one', () => {
+  const data = serialize(farmWithMaterials(9410));
+  delete data.balloons;
+  delete data.party;
+  const back = deserialize(JSON.parse(JSON.stringify(data)));
+  assertEqual(balloonList(back), [], 'no balloons');
+  assertEqual(noteParty(back, '2026-09-09').on, true, 'and the week still starts');
+});
+
 // --- offline shell ------------------------------------------------------
+
 
 
 

@@ -387,7 +387,8 @@ function loadImage(src) {
  *   flowers: HTMLImageElement}>}
  */
 export async function loadSheets() {
-  const [farm, town, emotes, shrooms, animals, battle, barn, flowers, decor, aquatic] = await Promise.all([
+  const [farm, town, emotes, shrooms, animals, battle, barn, flowers, decor, aquatic,
+    mythical, balloons] = await Promise.all([
     loadImage('assets/tilemap_packed.png'),
     loadImage('assets/town_tilemap_packed.png'),
     loadImage('assets/emotes.png'),
@@ -398,6 +399,8 @@ export async function loadSheets() {
     loadImage('assets/flora/flowers.png'),
     loadImage('assets/decorations.png'),
     loadImage('assets/animals/aquatic.png'),
+    loadImage('assets/animals/mythical.png'),
+    loadImage('assets/animals/balloons.png'),
   ]);
   buildCapsules(farm);
 
@@ -415,7 +418,12 @@ export async function loadSheets() {
   // from the first — see render/fishart.js.
   useAquaticSheet(aquatic);
 
-  return { farm, town, emotes, shrooms, animals, battle, barn, flowers, decor, aquatic };
+  return {
+    farm, town, emotes, shrooms, animals, battle, barn, flowers, decor, aquatic,
+    // One row of four, and one row of twelve. Neither is a colour ramp, so
+    // neither goes near setAnimalVariants above.
+    mythical, balloons,
+  };
 }
 
 /** Resolves which sheet image a sprite reference belongs to. */

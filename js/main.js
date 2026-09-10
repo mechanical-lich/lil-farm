@@ -21,6 +21,7 @@ import { canPlantAt } from './sim/flowers.js';
 import { cropAt, isRipe } from './sim/crops.js';
 import { fishAt } from './sim/fish.js';
 import { notePlayDay, earnedSince, achievementDef, notePet } from './sim/achievements.js';
+import { noteParty } from './sim/balloons.js';
 import { readSeedId, seedName } from './sim/flowergenes.js';
 import { drawAnimalSprite, drawHandSprite } from './render/entityrender.js';
 import { drawObjectSprite } from './render/tilerender.js';
@@ -259,6 +260,16 @@ async function boot() {
   // Opening the game at all is what the day streak counts, so this goes in
   // once per boot — after the toasts exist, since it can earn one outright.
   notePlayDay(state, today());
+
+  // And the balloons, which are only out for the week of her birthday. The
+  // simulation cannot read a clock, so the date is handed in here and the
+  // spawner runs off what this decides. See sim/balloons.js.
+  const party = noteParty(state, today());
+  if (party.fresh) {
+    toast(party.birthday
+      ? '🎈 Happy birthday! There are balloons out on the farm'
+      : '🎈 There are balloons out on the farm');
+  }
   registerServiceWorker();
 }
 
@@ -803,6 +814,18 @@ function wireToastFeedback() {
   // Deliberately the loudest thing the game says: an achievement is rare, and
   // it is the only toast that is worth interrupting whatever else is on screen.
   events.on('achievement:earned', ({ id }) => announceAward(achievementDef(id)));
+
+  // A mythical gets the achievement banner, because it is the same size of
+  // moment and the furniture already exists — it just says something other
+  // than "achievement" above the name.
+  events.on('balloon:mythical', ({ type }) => {
+    showAward({
+      icon: '🎈',
+      kicker: 'Happy birthday',
+      name: animalDef(type).name,
+      blurb: 'stepped out of a birthday balloon',
+    });
+  });
 
   events.on('mushroom:found', ({ name, first }) => {
     toast(first ? `New find: ${name}!` : `Picked a ${name.toLowerCase()}`);

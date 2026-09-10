@@ -6,7 +6,7 @@
 import { on, emit } from '../engine/events.js';
 import {
   buyList, sellList, sellGroups, groupValue, buy, sell, sellAll, ticksUntilRotation,
-  animalList, canBuyAnimal, handRow, canHireHand,
+  animalList, canBuyAnimal, handRow, canHireHand, stockCount,
 } from '../sim/shop.js';
 import { animalCapacity } from '../sim/build.js';
 import {
@@ -185,7 +185,9 @@ export function initShopPanel(state, {
       const cap = animalCapacity(state);
       note.textContent = cap === 0
         ? 'Build a barn to keep animals · $' + state.money
-        : `Space for ${state.animals.length}/${cap} animals · $${state.money}`;
+        // stockCount, not animals.length: gift animals don't take a stall, so
+        // the readout must not count them either or it reads "9/8 animals".
+        : `Space for ${stockCount(state)}/${cap} animals · $${state.money}`;
     } else if (tab === 'decor') {
       note.textContent = `Just for the look of the place · $${state.money}`;
     } else if (tab === 'land') {

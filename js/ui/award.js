@@ -44,7 +44,13 @@ export function initAwards() {
 
 /**
  * Shows one, or lines it up behind whatever is already on screen.
- * @param {{name: string, blurb: string}} award
+ *
+ * The kicker is what the little line above the name says. It is an achievement
+ * almost every time, which is why that is the default — but a mythical horse
+ * stepping out of a birthday balloon deserves the same fanfare and is not an
+ * achievement, so it says something else.
+ *
+ * @param {{name: string, blurb: string, kicker?: string, icon?: string}} award
  */
 export function showAward(award) {
   if (!host || !award) return;
@@ -69,9 +75,9 @@ function next() {
       <div class="award-rays"></div>
       <div class="award-sparks">${'<i></i>'.repeat(SPARKS)}</div>
       <div class="award-plate">
-        <div class="award-medal">🏆</div>
+        <div class="award-medal"></div>
         <div class="award-words">
-          <div class="award-kicker">Achievement</div>
+          <div class="award-kicker"></div>
           <div class="award-name"></div>
           <div class="award-blurb"></div>
         </div>
@@ -82,6 +88,8 @@ function next() {
   // textContent rather than interpolation: the names are ours, but this is the
   // only place a name is ever printed, and it costs nothing to make it a place
   // where markup can't arrive.
+  host.querySelector('.award-medal').textContent = award.icon || '🏆';
+  host.querySelector('.award-kicker').textContent = award.kicker || 'Achievement';
   host.querySelector('.award-name').textContent = award.name;
   host.querySelector('.award-blurb').textContent = award.blurb;
 
