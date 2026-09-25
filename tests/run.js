@@ -20,7 +20,7 @@ import {
   updateWeeds, canSprout, countWeeds, WEED_INTERVAL, WEED_MAX_FRACTION,
 } from '../js/sim/weeds.js';
 import {
-  MUSHROOMS, MUSHROOMS_BY_ID, SPECIES, MUSHROOM_MAX_FRACTION, sprout, forage,
+  MUSHROOMS, MUSHROOMS_BY_ID, SPECIES, MUSHROOM_MAX_FRACTION, MUSHROOM_INTERVAL, sprout, forage,
   mushroomAt, rollSpecies, journalCount, journalFound, journalRows,
   canSprout as canSproutShroom, COLOURS_PER_SPECIES, rollColour, isRainbow, mushroomDef,
 } from '../js/sim/mushrooms.js';
@@ -6580,6 +6580,29 @@ test('rarer mushrooms are worth more', () => {
     assert(byWeight[i].sell > byWeight[i - 1].sell,
       `${byWeight[i].name} is rarer than ${byWeight[i - 1].name}, so it must pay better`);
   }
+});
+
+test('the cap limits how many stand, not how fast they come', () => {
+  // The reason it was safe to raise it. A farm sitting at its cap looks stalled
+  // because it is — but picking one starts it again immediately, so somebody
+  // who forages is never slowed down by the ceiling however low it is set.
+  // Guard against a future "optimisation" that skips the spawner once the farm
+  // has ever been full.
+  const s = weedableFarm(9002);
+  const cap = Math.max(1, Math.floor(s.grid.owned.size * PLOT * PLOT * MUSHROOM_MAX_FRACTION));
+
+  for (let i = 0; i < MUSHROOM_INTERVAL * (cap + 20); i++) tick(s);
+  assertEqual(Object.keys(s.mushrooms).length, cap, 'the farm fills to its cap and stops');
+
+  // Pick the lot, then carry on: they come back at the usual rate.
+  for (const key of Object.keys(s.mushrooms)) {
+    const comma = key.indexOf(',');
+    forage(s, +key.slice(0, comma), +key.slice(comma + 1));
+  }
+  assertEqual(Object.keys(s.mushrooms).length, 0, 'an empty farm');
+
+  for (let i = 0; i < MUSHROOM_INTERVAL * 10; i++) tick(s);
+  assert(Object.keys(s.mushrooms).length > 0, 'and they start again straight away');
 });
 
 test('mushrooms come up on open grass, and are capped', () => {

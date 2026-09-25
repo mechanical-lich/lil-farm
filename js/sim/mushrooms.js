@@ -147,8 +147,26 @@ export function speciesDef(species) { return SPECIES[species] || null; }
 /** Ticks between attempts. Rarer than weeds: a find should feel like one. */
 export const MUSHROOM_INTERVAL = 300;
 
-/** Ceiling, as a fraction of the land you own — about six to a 40x40 cell. */
-export const MUSHROOM_MAX_FRACTION = 0.004;
+/**
+ * Ceiling, as a fraction of the land you own — about twenty-five to a 40x40
+ * cell.
+ *
+ * Raised from six, which turned out to be a ceiling on *decoration* rather than
+ * on foraging. A mushroom she likes the look of and leaves standing counts
+ * against this exactly as one she has not got to yet, so a farm with six
+ * pretty toadstools on it had quietly stopped growing mushrooms altogether —
+ * measured on a one-plot farm: six hours a day for six days, and not one new
+ * mushroom.
+ *
+ * Raising it costs nothing in foraging, which is the part worth being sure
+ * about: the spawner attempts at most one mushroom per MUSHROOM_INTERVAL
+ * whatever this says, so the cap limits how many may *stand* at once, not how
+ * fast they come. Measured over seven six-hour days with every mushroom picked
+ * the moment it appeared, at 0.004, 0.012 and 0.024: 503 picked in every case.
+ * What this number really decides is how much of the farm she is allowed to
+ * leave looking like a mushroom garden.
+ */
+export const MUSHROOM_MAX_FRACTION = 0.016;
 
 const TRIES = 4;
 
