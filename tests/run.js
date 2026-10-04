@@ -23,7 +23,9 @@ import {
   MUSHROOMS, MUSHROOMS_BY_ID, SPECIES, MUSHROOM_MAX_FRACTION, MUSHROOM_INTERVAL, sprout, forage,
   mushroomAt, rollSpecies, journalCount, journalFound, journalRows,
   canSprout as canSproutShroom, COLOURS_PER_SPECIES, rollColour, isRainbow, mushroomDef,
+  GENERATED_COLOURS, COLOUR_WEIGHT,
 } from '../js/sim/mushrooms.js';
+import { expandSheet, DRAWN, LIME_COLUMN, LIME } from '../tools/make-mushroom-colours.mjs';
 import {
   addTask, cancelTask, prioritizeTask, taskForTile, tillRow, queueTillRow, clearBuildSite,
   followTargets, taskCovering,
@@ -6432,7 +6434,7 @@ test('a solid field needs no wedges at all', () => {
 
 // --- mushrooms ----------------------------------------------------------
 
-test('the sheet is fully catalogued: seven kinds, five colours each', () => {
+test('the sheet is fully catalogued: every kind in every colour', () => {
   const kinds = Object.keys(SPECIES).length;
   const expected = kinds * COLOURS_PER_SPECIES;
   assertEqual(MUSHROOMS.length, expected, `${expected} mushrooms in the catalogue`);
@@ -6440,7 +6442,7 @@ test('the sheet is fully catalogued: seven kinds, five colours each', () => {
   assertEqual(new Set(MUSHROOMS.map((m) => m.id)).size, expected, 'and its own name');
   for (const [species, def] of Object.entries(SPECIES)) {
     assertEqual(MUSHROOMS.filter((m) => m.species === species).length, COLOURS_PER_SPECIES,
-      `${species} should have five colours`);
+      `${species} should have ${COLOURS_PER_SPECIES} colours`);
     assert(ITEMS[def.item], `${species} needs somewhere to go in the bag`);
     assert(def.sell > 0, `${species} needs to be worth something`);
   }
@@ -6525,9 +6527,100 @@ test('a farm that found mushrooms before the new colours still has them', () => 
   assertEqual(standing.id, 'rainbow_toadstool', 'the one in the ground is unchanged');
 
   // And it points at the rainbow column of the wider sheet, not the old one.
+  // Derived rather than pinned: this read `sprite 7` while there were eight
+  // colours, and would have read 4 before that — the number is the layout's,
+  // and the thing worth asserting is that the id follows it.
   const toadstool = SPECIES.toadstool.sprites;
-  assertEqual(standing.sprite, toadstool[toadstool.length - 1], 'now the eighth column');
-  assertEqual(standing.sprite, 7, 'which is sprite 7, where it used to be sprite 4');
+  assertEqual(standing.sprite, toadstool[toadstool.length - 1], 'the last column of its block');
+  assertEqual(standing.sprite, COLOURS_PER_SPECIES - 1,
+    'toadstools come first on the sheet, so its rainbow is the last of the first block');
+});
+
+test('the generated colours on the sheet are exactly the ones in the table', () => {
+  // The generated columns are built by a tool from GENERATED_COLOURS, and the
+  // two can drift: change a colour in the table and forget to rerun the tool,
+  // and the journal names one colour while the farm draws another. So read the
+  // sheet back and hold every generated sprite to being its kind's Lime sprite
+  // with exactly the two cap colours swapped — same outline, same stem, same
+  // spots, same transparency, pixel for pixel.
+  const sheet = decodePng('assets/flora/mushrooms.png');
+  const per = COLOURS_PER_SPECIES;
+  const kinds = Object.keys(SPECIES).length;
+  const px = (col, x, y) => {
+    const i = (y * sheet.width + col * TILE + x) * 4;
+    return [sheet.rgba[i], sheet.rgba[i + 1], sheet.rgba[i + 2], sheet.rgba[i + 3]];
+  };
+  const eq = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+
+  for (let k = 0; k < kinds; k++) {
+    const lime = k * per + LIME_COLUMN;
+    GENERATED_COLOURS.forEach((colour, i) => {
+      const col = k * per + DRAWN + i;
+      let cap = 0;
+      for (let y = 0; y < TILE; y++) {
+        for (let x = 0; x < TILE; x++) {
+          const want = px(lime, x, y);
+          const got = px(col, x, y);
+          assertEqual(got[3], want[3], `${colour.name} in block ${k} keeps Lime's shape at ${x},${y}`);
+          if (!want[3]) continue;
+          if (eq(want, LIME.base)) { cap++; assert(eq(got, colour.base), `${colour.name} base at ${x},${y}`); }
+          else if (eq(want, LIME.shade)) { cap++; assert(eq(got, colour.shade), `${colour.name} shade at ${x},${y}`); }
+          else assert(eq(got, want), `${colour.name} leaves the outline and stem alone at ${x},${y}`);
+        }
+      }
+      assert(cap > 0, `${colour.name} in block ${k} has a cap at all`);
+    });
+  }
+});
+
+test('the colour tool is safe to run again, on either shape of sheet', () => {
+  // Run on its own output, it must give back the same bytes — or every rerun
+  // would shift something. And run on the hand-drawn eight-to-a-kind layout it
+  // was first given, it must produce the sheet that is on disk now: which is
+  // what lets the artist edit in Aseprite, export either shape, and rerun.
+  const sheet = decodePng('assets/flora/mushrooms.png');
+  const again = expandSheet(sheet);
+  assertEqual(again.width, sheet.width, 'same width');
+  assert(Buffer.from(sheet.rgba).equals(again.rgba), 'and identical pixels');
+
+  // Rebuild the original layout: the seven drawn columns and the rainbow.
+  const per = COLOURS_PER_SPECIES;
+  const kinds = Object.keys(SPECIES).length;
+  const narrowW = kinds * (DRAWN + 1) * TILE;
+  const narrow = Buffer.alloc(narrowW * TILE * 4);
+  for (let k = 0; k < kinds; k++) {
+    const cols = [...Array(DRAWN).keys()].map((c) => k * per + c).concat(k * per + per - 1);
+    cols.forEach((from, j) => {
+      const to = k * (DRAWN + 1) + j;
+      for (let y = 0; y < TILE; y++) {
+        const si = (y * sheet.width + from * TILE) * 4;
+        const oi = (y * narrowW + to * TILE) * 4;
+        Buffer.from(sheet.rgba).copy(narrow, oi, si, si + TILE * 4);
+      }
+    });
+  }
+  const rebuilt = expandSheet({ width: narrowW, height: TILE, rgba: narrow });
+  assert(Buffer.from(sheet.rgba).equals(rebuilt.rgba), 'the hand-drawn sheet expands to this one');
+});
+
+test('the rainbow stays one find in twenty-five however many colours there are', () => {
+  // Derived, not tuned: with n ordinary colours at 24 each, a rainbow weighing
+  // n is exactly 1/25. Checked as arithmetic here; the rolled test above checks
+  // the roll agrees.
+  const n = COLOURS_PER_SPECIES - 1;
+  const share = COLOUR_WEIGHT.rainbow / (COLOUR_WEIGHT.ordinary * n + COLOUR_WEIGHT.rainbow);
+  assertEqual(share, 1 / 25, `rainbow weight ${COLOUR_WEIGHT.rainbow} against ${n} ordinary`);
+});
+
+test('no generated colour repeats a name a kind already uses', () => {
+  // Ids are built from the colour word, so a generated "Pink" would have
+  // collided with the toadstool and morel that are already Pink and merged two
+  // journal entries into one. The unique-id test catches the result; this says
+  // which colour did it.
+  for (const species of Object.keys(SPECIES)) {
+    const names = MUSHROOMS.filter((m) => m.species === species).map((m) => m.id.split('_')[0]);
+    assertEqual(new Set(names).size, names.length, `${species} has no colour twice`);
+  }
 });
 
 test('the journal css agrees with how many mushrooms there are', () => {

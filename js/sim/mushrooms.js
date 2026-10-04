@@ -23,7 +23,7 @@ import { addItem } from './inventory.js';
 import { isReserved } from './build.js';
 
 /**
- * Seven kinds, each in eight colours — the sheet is one row of fifty-six,
+ * Seven kinds, each in fourteen colours — the sheet is one row of ninety-eight,
  * grouped by shape, with the sprites of a kind running consecutively.
  *
  * Rarity is a spawn weight rather than a percentage, so adding a kind means
@@ -32,16 +32,61 @@ import { isReserved } from './build.js';
  * nothing depends on that.
  *
  * `sprites` is derived rather than written out: the sheet is laid out in
- * species order, eight to a kind, and typing fifty-six indices by hand is an
- * invitation to get one wrong in a way nothing would catch. Deriving them is
- * also what made adding three colours a one-number change — nothing stores a
- * sprite index, so every mushroom anyone has ever found re-points itself at the
- * right column of the wider sheet on load.
+ * species order, one block per kind, and typing ninety-eight indices by hand is
+ * an invitation to get one wrong in a way nothing would catch. Deriving them is
+ * also what makes adding colours safe — nothing stores a sprite index, so every
+ * mushroom anyone has ever found re-points itself at the right column of the
+ * wider sheet on load.
  */
 const SHEET_ORDER = ['toadstool', 'bolete', 'morel', 'button', 'chestnut', 'portobello', 'parasol'];
 
-/** How many colours each kind comes in. The last is always the rainbow one. */
-export const COLOURS_PER_SPECIES = 8;
+/**
+ * The colours drawn by hand on the sheet, after the four each kind started with.
+ *
+ * Lime, Cyan and Frost are the same three across every kind, because they are
+ * the same three on the sheet: (153,229,80), (95,205,228) and (203,219,252) in
+ * every row. Lime rather than Green because a toadstool is already Green, and
+ * two colours of one name would collide into a single journal entry — the ids
+ * are built from these words.
+ */
+const NEW_COLOURS = ['Lime', 'Cyan', 'Frost'];
+
+/**
+ * The colours that were *generated* rather than drawn.
+ *
+ * Every variant on the sheet is the same sprite with a different cap, and the
+ * cap of every Lime one is exactly two colours — a base and a shade — with the
+ * outline, the stem and the toadstool's white spots identical across all of
+ * them. So a new colour is a new pair, swapped into the Lime sprite, and it
+ * keeps every bit of the artist's shading. tools/make-mushroom-colours.mjs
+ * builds them into the sheet from this table, and a test reads the sheet back
+ * and holds it to these numbers, so the two cannot drift apart.
+ *
+ * Chosen by eye against the existing sheet, over grass, on all seven shapes —
+ * the ones that read as a colour the sheet did not already have. Silver,
+ * Crimson, Teal, Indigo, Bronze and a see-through Ghost were tried and dropped:
+ * each was too close to something already there on at least one shape, and a
+ * journal slot that looks like the one next to it is a disappointment rather
+ * than a find.
+ *
+ * Inserted before the rainbow, never after it, for the same reason as Lime,
+ * Cyan and Frost. Names must not repeat any colour already used by a kind.
+ */
+export const GENERATED_COLOURS = [
+  { name: 'Gold', base: [251, 242, 54], shade: [223, 170, 40] },
+  { name: 'Plum', base: [132, 72, 160], shade: [90, 48, 112] },
+  { name: 'Coral', base: [240, 120, 110], shade: [196, 78, 82] },
+  { name: 'Mint', base: [160, 236, 196], shade: [108, 196, 150] },
+  { name: 'Magenta', base: [236, 72, 186], shade: [178, 40, 140] },
+  { name: 'Shadow', base: [88, 86, 104], shade: [58, 56, 72] },
+];
+
+/**
+ * How many colours each kind comes in: the four it started with, the three
+ * drawn later, the generated ones, and the rainbow. The last is always the
+ * rainbow one.
+ */
+export const COLOURS_PER_SPECIES = 4 + NEW_COLOURS.length + GENERATED_COLOURS.length + 1;
 
 const spritesFor = (species) => {
   const first = SHEET_ORDER.indexOf(species) * COLOURS_PER_SPECIES;
@@ -86,48 +131,45 @@ export const SPECIES = {
  * order they have always been in, because a journal entry is keyed by colour
  * and species — reordering these would quietly rename every mushroom anybody
  * has ever found. The rainbow one stays last for the same reason, which is why
- * the three new colours are inserted *before* it rather than appended.
- *
- * Lime, Cyan and Frost are the same three across every kind, because they are
- * the same three on the sheet: (153,229,80), (95,205,228) and (203,219,252) in
- * every row. Lime rather than Green because a toadstool is already Green, and
- * two colours of one name would collide into a single journal entry — the ids
- * are built from these words.
+ * every colour added since has been inserted *before* it rather than appended.
  */
-const NEW_COLOURS = ['Lime', 'Cyan', 'Frost'];
+const ADDED = [...NEW_COLOURS, ...GENERATED_COLOURS.map((c) => c.name)];
 
 const COLOURS = {
-  button: ['Tan', 'Orange', 'Blue', 'Spotted', ...NEW_COLOURS, 'Rainbow'],
-  toadstool: ['Red', 'Green', 'Pink', 'Navy', ...NEW_COLOURS, 'Rainbow'],
-  bolete: ['Umber', 'Tan', 'Orange', 'Violet', ...NEW_COLOURS, 'Rainbow'],
-  morel: ['Orange', 'Brown', 'Pink', 'Ash', ...NEW_COLOURS, 'Rainbow'],
-  chestnut: ['Tan', 'Orange', 'Blue', 'Spotted', ...NEW_COLOURS, 'Rainbow'],
-  portobello: ['Tan', 'Orange', 'Blue', 'Spotted', ...NEW_COLOURS, 'Rainbow'],
-  parasol: ['Tan', 'Orange', 'Blue', 'Spotted', ...NEW_COLOURS, 'Rainbow'],
+  button: ['Tan', 'Orange', 'Blue', 'Spotted', ...ADDED, 'Rainbow'],
+  toadstool: ['Red', 'Green', 'Pink', 'Navy', ...ADDED, 'Rainbow'],
+  bolete: ['Umber', 'Tan', 'Orange', 'Violet', ...ADDED, 'Rainbow'],
+  morel: ['Orange', 'Brown', 'Pink', 'Ash', ...ADDED, 'Rainbow'],
+  chestnut: ['Tan', 'Orange', 'Blue', 'Spotted', ...ADDED, 'Rainbow'],
+  portobello: ['Tan', 'Orange', 'Blue', 'Spotted', ...ADDED, 'Rainbow'],
+  parasol: ['Tan', 'Orange', 'Blue', 'Spotted', ...ADDED, 'Rainbow'],
 };
 
 /**
- * How a colour is picked: the weight of the rainbow one against each of the
- * seven ordinary ones.
+ * How a colour is picked: the weight of the rainbow one against each ordinary
+ * one.
  *
- * Picking evenly would make an eighth of every find a rainbow, which would
- * leave the rarest-looking thing on the sheet among the most ordinary things in
- * the journal. Seven against twenty-four puts it at exactly one find in
- * twenty-five — often enough to happen, rare enough to be worth showing
- * somebody.
+ * Picking evenly would make one find in fourteen a rainbow, which would leave
+ * the rarest-looking thing on the sheet among the most ordinary things in the
+ * journal. The target is one find in twenty-five — often enough to happen, rare
+ * enough to be worth showing somebody.
  *
- * These are 6:1 rescaled. When three colours were added, leaving 6:1 alone
- * would have quietly taken the rainbow from one find in twenty-five to one in
- * forty-three, because the ordinary side of the scale grew and the rainbow side
- * didn't. The ratio is the thing being tuned, not the numbers.
+ * Derived rather than tuned, because it has already gone wrong once by hand.
+ * With n ordinary colours at 24 each and a rainbow weighing w, the rainbow's
+ * share is w / (24n + w); setting that to 1/25 gives w = n exactly. So the
+ * rainbow weighs as much as there are ordinary colours, and stays at one in
+ * twenty-five however many are added. When Lime, Cyan and Frost arrived the
+ * weights were fixed numbers, and leaving them alone would have quietly taken
+ * the rainbow from one in twenty-five to one in forty-three — the ordinary side
+ * of the scale grew and the rainbow side didn't.
  */
-export const COLOUR_WEIGHT = { ordinary: 24, rainbow: 7 };
+export const COLOUR_WEIGHT = { ordinary: 24, rainbow: COLOURS_PER_SPECIES - 1 };
 
 /** The rainbow one is always the last colour of its kind. */
 export const isRainbow = (id) => id.startsWith('rainbow_');
 
 /**
- * All fifty-six, flat. This is the journal's running order and the thing
+ * Every one, flat. This is the journal's running order and the thing
  * spawning picks from, so it's built once rather than derived at every call
  * site.
  */
