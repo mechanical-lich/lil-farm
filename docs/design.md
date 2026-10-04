@@ -77,7 +77,7 @@ The harvest tool gathers mushrooms as well as crops. A mushroom is found rather 
 Sprite indices are derived from the sheet's layout — species order, five to a kind — rather than written out by hand. Thirty-five indices typed one at a time is an invitation to get one wrong in a way nothing would catch, so a test also reads the sheet off disk and checks that every mushroom points at a sprite that actually exists.
 
 ## Flowers
-Eight flowers, and no list of variants anywhere. The sheet is drawn in three greys — 255, 198 and 141 — and every flower in the game is one of those eight with those greys replaced by colours worked out from its genome. Stems, the sunflower's brown eye and the daisy's dark one are not grey, so they survive the swap and a flower still reads as itself whatever colour it turns.
+Fourteen flowers, and no list of variants anywhere. The sheet is drawn in three greys — 255, 198 and 141 — and every flower in the game is one of those fourteen with those greys replaced by colours worked out from its genome. Stems, the sunflower's brown eye and the daisy's dark one are not grey, so they survive the swap and a flower still reads as itself whatever colour it turns.
 
 **Three greys, three genes.** The sheet gives three colours to replace, and each is inherited separately. That is what makes crossing worth doing: with one hue driving all three tones there was almost nothing to recombine — a child took "the colour" from one parent or the other and that was the whole of it. With three, a flower can have its mother's petals over its father's shadow, which is a thing neither parent was and neither could produce alone.
 
@@ -92,6 +92,14 @@ Wild flowers only come in a coarse ring of **24 hues**. Everything between them 
 **A seed carries its flower's genome in its own id** — `flowerseed_daisy_h135`. The inventory stays the flat map of counts it has always been: two seeds of the very same colour stack, two of nearly the same colour do not, and nothing about the save's shape had to change to hold a thousand possible colours. It is also why the seed drawer has to be grouped by flower — a collector ends up with dozens of ids.
 
 Recolouring means reading a sprite's pixels back and writing new ones, far too slow to do while drawing. Each genome is recoloured once into a little canvas and cached, so every draw after that is an ordinary blit and the renderer never learns anything unusual is happening. A 16x16 canvas is about a kilobyte, so a farm holding a few dozen colours costs a few dozen kilobytes.
+
+**Six of the fourteen were drawn as text.** The first eight are the artist's. Tulip, lily, rose, allium, hyacinth and forget-me-not are 16×16 grids of characters in `tools/make-flower-kinds.mjs`, which writes each into the column `FLOWERS` gives it — so a shape change is a readable diff rather than an opaque edit to a PNG, and a test holds every one of those columns to its drawing pixel for pixel.
+
+- **Only the inside is drawn; the outline is generated**, by the rule the artist's own outlines turn out to follow: every empty pixel within two of a coloured one, the four diagonal corners at exactly two left out. Measured against the eight hand-drawn kinds, that reproduces the sunflower and daisy exactly and the rest to within a handful of hand-tuned pixels — which is most of why a drawn-as-text flower looks like it belongs on the sheet.
+- **What it means for drawing:** any gap narrower than about four pixels fills in with outline. That is why there is a hyacinth rather than a lavender — a thin spike of buds came out looking like a thermometer.
+- **Each was chosen for a silhouette none of the others has.** The tulip's notched crown, the lily's five-point star, the allium's lollipop, the forget-me-not's three heads. The rose shares the peony's outline and is told apart by its spiral, which is the one compromise in the set.
+- **A kind's id must never contain an underscore,** because seed ids are split at the first one: `forget_me_not` would read back as a kind called "forget", and every one of its seeds would quietly become nothing. Hence `forgetmenot`; there is a test.
+- The cost is the length of the hunt. **Flower master went from 192 colour slots to 336**, and each existing kind now turns up wild a little over half as often as it did (eight in fourteen), since the wild spawner picks evenly among fourteen kinds rather than eight.
 
 Flowers do not sell and are never carried. Picking one gives a handful of its seeds and a line in the journal, which is the whole of what a flower is worth here.
 

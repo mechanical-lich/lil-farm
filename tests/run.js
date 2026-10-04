@@ -27,6 +27,10 @@ import {
 } from '../js/sim/mushrooms.js';
 import { expandSheet, DRAWN, LIME_COLUMN, LIME } from '../tools/make-mushroom-colours.mjs';
 import {
+  DESIGNS as FLOWER_DESIGNS, PALETTE as FLOWER_PALETTE, build as buildFlower,
+  drawKinds as drawFlowerKinds,
+} from '../tools/make-flower-kinds.mjs';
+import {
   addTask, cancelTask, prioritizeTask, taskForTile, tillRow, queueTillRow, clearBuildSite,
   followTargets, taskCovering,
 } from '../js/sim/tasks.js';
@@ -93,7 +97,7 @@ import {
 } from '../js/sim/market.js';
 import { barnGrid, houseGrid } from '../js/render/tilerender.js';
 import {
-  FLOWER_KINDS, WILD_HUES, HUE_STEP, makeGenome, rollWildGenome, readSeedId, isFlowerSeed,
+  FLOWERS, FLOWER_KINDS, WILD_HUES, HUE_STEP, makeGenome, rollWildGenome, readSeedId, isFlowerSeed,
   seedIdFor as flowerSeedId, blendHue, crossGenomes, isCross, seedName, petalHue, toneCount,
 } from '../js/sim/flowergenes.js';
 import {
@@ -1569,6 +1573,70 @@ test('the sheet is still drawn in the three greys the genome replaces', () => {
   }
 });
 
+test('the drawn-as-text flowers on the sheet are exactly their drawings', () => {
+  // Six kinds were drawn as character grids in tools/make-flower-kinds.mjs and
+  // written into the sheet by it. Edit a grid and forget to rerun the tool,
+  // and the game draws the old flower under the new name — so read the sheet
+  // back and hold every one of those columns to its drawing, pixel for pixel.
+  const sheet = decodePng('assets/flora/flowers.png');
+  for (const [kind, rows] of Object.entries(FLOWER_DESIGNS)) {
+    const want = buildFlower(rows);
+    const col = FLOWERS[kind].sprite;
+    for (let y = 0; y < TILE; y++) {
+      for (let x = 0; x < TILE; x++) {
+        const si = (y * sheet.width + col * TILE + x) * 4;
+        const wi = (y * TILE + x) * 4;
+        for (let k = 0; k < 4; k++) {
+          assertEqual(sheet.rgba[si + k], want[wi + k], `${kind} at ${x},${y}`);
+        }
+      }
+    }
+  }
+});
+
+test('every kind past the hand-drawn eight has a drawing, and every drawing a kind', () => {
+  const drawnByHand = 8;
+  for (const [kind, def] of Object.entries(FLOWERS)) {
+    if (def.sprite < drawnByHand) continue;
+    assert(FLOWER_DESIGNS[kind], `${kind} lives in column ${def.sprite} but nothing draws it`);
+  }
+  for (const kind of Object.keys(FLOWER_DESIGNS)) {
+    assert(FLOWERS[kind], `${kind} is drawn but is not a kind`);
+  }
+});
+
+test('every drawn flower takes colour in all three tones', () => {
+  // A flower with no greys in it would never change colour, whatever its
+  // genome said, and one missing a tone would come out flat. The fixed colours
+  // must also never *be* one of the greys, or they would be recoloured too.
+  for (const [kind, rows] of Object.entries(FLOWER_DESIGNS)) {
+    const used = new Set(rows.join(''));
+    for (const tone of ['W', 'M', 'S']) assert(used.has(tone), `${kind} uses ${tone}`);
+  }
+  for (const [c, rgb] of Object.entries(FLOWER_PALETTE)) {
+    if ('WMS'.includes(c)) continue;
+    assert(!KEYS.some((k) => k.join() === rgb.join()), `${c} must not be one of the greys`);
+  }
+});
+
+test('the flower tool is safe to run again and never touches the drawn eight', () => {
+  const sheet = decodePng('assets/flora/flowers.png');
+  const again = drawFlowerKinds(sheet);
+  assertEqual(again.width, sheet.width, 'same width');
+  assert(Buffer.from(sheet.rgba).equals(again.rgba), 'identical pixels on a second run');
+});
+
+test('no flower kind has an underscore in its id', () => {
+  // Seed ids are flowerseed_<kind>_<genome>, split at the first underscore.
+  // A kind called forget_me_not would read back as "forget", which is not a
+  // kind, and every one of its seeds would quietly become nothing.
+  for (const kind of FLOWER_KINDS) {
+    assert(!kind.includes('_'), `${kind} has an underscore`);
+    const id = flowerSeedId(kind, makeGenome(120));
+    assertEqual(readSeedId(id)?.kind, kind, `${kind}'s seeds read back as ${kind}`);
+  }
+});
+
 test('a genome survives the round trip through a seed id', () => {
   // The id *is* the storage: a seed carries its colour in its own name so the
   // inventory can stay a flat map of counts. If that trip is lossy, a player's
@@ -3017,6 +3085,26 @@ test('a flower in a pot is an ordinary flower in every way that matters', () => 
   assert(isWatered(s, x, y), 'a potted flower waters like any other');
 });
 
+test('every kind drawn as text breeds the way the hand-drawn ones do', () => {
+  // Nothing in breeding names a kind, so this should hold by construction —
+  // which is exactly why it's worth one test: the six new kinds are the first
+  // that arrived from a tool rather than an artist, and a kind that grew and
+  // coloured but never crossed would look fine until somebody tried.
+  for (const kind of Object.keys(FLOWER_DESIGNS)) {
+    const s = farmWithMaterials(8900);
+    const y = s.farmer.y + 2;
+    const a = { x: s.farmer.x + 2, y };
+    const b = { x: s.farmer.x + 3, y };
+    plantFlower(s, a.x, a.y, kind, makeGenome(30));
+    plantFlower(s, b.x, b.y, kind, makeGenome(90));
+
+    const bred = breedKeptWatered(s, a, b);
+    assert(bred, `two ${kind}s crossed`);
+    assertEqual(bred.kind, kind, `and the child is a ${kind}`);
+    assertEqual(flowerAt(s, bred.x, bred.y)?.kind, kind, `and a ${kind} is what grew there`);
+  }
+});
+
 test('potted flowers breed with the ones in the ground beside them', () => {
   // "Acts like it is planted in that tile" is the whole requirement, and this
   // is the part of it that would be easiest to get wrong.
@@ -3030,16 +3118,39 @@ test('potted flowers breed with the ones in the ground beside them', () => {
   placeDecor(s, 'pot', a.x, a.y);
   plantFlower(s, a.x, a.y, 'poppy', makeGenome(30));
   plantFlower(s, b.x, b.y, 'poppy', makeGenome(90));
-  waterFlower(s, a.x, a.y);
-  waterFlower(s, b.x, b.y);
 
-  let child = null;
-  for (let i = 0; i < BREED_INTERVAL * 60 && !child; i++) {
-    tick(s);
-    child = Object.keys(s.flowers).find((k) => k !== `${a.x},${a.y}` && k !== `${b.x},${b.y}`);
-  }
-  assert(child, 'the potted poppy crossed with the one in the ground');
+  const bred = breedKeptWatered(s, a, b);
+  assert(bred, 'the potted poppy crossed with the one in the ground');
+  assertEqual(bred.kind, 'poppy', 'and the child is a poppy');
 });
+
+/**
+ * Runs until a pair breeds, watering them both every interval the way a
+ * gardener who wants a cross does.
+ *
+ * Both halves of this were learned the hard way. The child is *listened* for,
+ * because wild flowers keep sprouting through a run this long and an earlier
+ * version took the first stranger it found for the child — this test was
+ * passing on a wild phlox for months, with a seed whose pair never bred. And
+ * the pair is *kept watered*, because only wet flowers breed and a single
+ * watering dries out: watered once, one pair in ten never crosses at all,
+ * which is the mechanic working rather than a bug. Kept watered, a hundred
+ * pairs out of a hundred cross — potted or not, identically — the slowest in
+ * 17 intervals, which is what the 40 below is measured against.
+ *
+ * @returns {{kind: string, x: number, y: number}|null} the bred event
+ */
+function breedKeptWatered(s, a, b, intervals = 40) {
+  let bred = null;
+  const off = on('flower:bred', (e) => { if (!bred) bred = e; });
+  try {
+    for (let t = 0; t < BREED_INTERVAL * intervals && !bred; t++) {
+      if (t % BREED_INTERVAL === 0) { waterFlower(s, a.x, a.y); waterFlower(s, b.x, b.y); }
+      tick(s);
+    }
+  } finally { off(); }
+  return bred;
+}
 
 test('picking a potted flower leaves the pot behind', () => {
   const s = farmWithMaterials(8804);

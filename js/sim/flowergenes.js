@@ -19,10 +19,18 @@
 // wheel already full is a shelf.
 
 /**
- * The eight on the sheet, in sheet order. `sprite` is the column.
+ * Every kind on the sheet, in sheet order. `sprite` is the column.
  *
  * They are told apart by shape alone, since colour belongs to the genome — so
  * the names describe silhouettes, not petals.
+ *
+ * The first eight were drawn by hand. The rest were drawn as text in
+ * tools/make-flower-kinds.mjs, which writes each into the column given here;
+ * a test holds the sheet to those drawings pixel for pixel.
+ *
+ * A kind's id must never contain an underscore: seed ids are
+ * `flowerseed_<kind>_<genome>` and are split at the first one, so
+ * `forget_me_not` would read back as a kind called "forget".
  */
 export const FLOWERS = {
   sunflower: { name: 'Sunflower', sprite: 0 },
@@ -33,6 +41,12 @@ export const FLOWERS = {
   bluebell: { name: 'Bluebell', sprite: 5 },
   crocus: { name: 'Crocus', sprite: 6 },
   phlox: { name: 'Phlox', sprite: 7 },
+  tulip: { name: 'Tulip', sprite: 8 },
+  lily: { name: 'Lily', sprite: 9 },
+  rose: { name: 'Rose', sprite: 10 },
+  allium: { name: 'Allium', sprite: 11 },
+  hyacinth: { name: 'Hyacinth', sprite: 12 },
+  forgetmenot: { name: 'Forget-me-not', sprite: 13 },
 };
 
 export const FLOWER_KINDS = Object.keys(FLOWERS);
