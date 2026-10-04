@@ -8,13 +8,10 @@
 // rather than an opaque change to a PNG.
 //
 // The grids are the *inside* of each flower only. The heavy dark outline every
-// sprite on the sheet wears is generated, by the same rule the artist's turns
-// out to follow: every empty pixel within two of a coloured one, except the
-// four diagonal corners at exactly two. Measured against the eight hand-drawn
-// kinds, that rule reproduces the sunflower and daisy pixel for pixel and the
-// rest to within a handful of hand-tuned pixels — so a generated flower wears
-// the same outline as a drawn one, which is most of what makes it look like it
-// belongs on the sheet.
+// sprite on the sheet wears is generated, by the rule in tools/outline.mjs that
+// the artist's turns out to follow. Measured against the eight hand-drawn
+// kinds, it reproduces the sunflower and daisy pixel for pixel and the rest to
+// within a handful of hand-tuned pixels.
 //
 // The one thing this means for drawing: any gap narrower than about four
 // pixels fills in with outline. That is why there is a hyacinth here rather
@@ -35,6 +32,7 @@
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { decodePng, encodePng } from './png.mjs';
+import { isOutline } from './outline.mjs';
 import { FLOWERS } from '../js/sim/flowergenes.js';
 
 const T = 16;
@@ -174,14 +172,7 @@ export function build(rows) {
     for (let x = 0; x < T; x++) {
       let c = grid[y][x];
       if (c === '.') {
-        let near = false;
-        for (let dy = -2; dy <= 2 && !near; dy++) {
-          for (let dx = -2; dx <= 2 && !near; dx++) {
-            if (Math.abs(dx) === 2 && Math.abs(dy) === 2) continue;   // round the corners
-            if (inside(x + dx, y + dy)) near = true;
-          }
-        }
-        if (!near) continue;
+        if (!isOutline(inside, x, y)) continue;
         c = 'o';
       }
       const [r, g, b] = PALETTE[c];

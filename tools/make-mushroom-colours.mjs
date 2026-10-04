@@ -1,6 +1,12 @@
-// Builds the generated mushroom colours into assets/flora/mushrooms.png.
+// Builds the generated mushroom colours, and the generated kinds, into
+// assets/flora/mushrooms.png.
 //
 //   node tools/make-mushroom-colours.mjs
+//
+// Two jobs. The hand-drawn kinds get their generated colours, as below. Then
+// the kinds drawn as text in tools/mushroom-kinds.mjs get a whole block each,
+// every colour built fresh from the design — they have no drawn columns at all,
+// so there is nothing on the sheet to preserve for them.
 //
 // Every colour on the sheet is the same sprite with a different cap, and the
 // cap of each kind's Lime sprite is exactly two colours: a base and a shade.
@@ -10,11 +16,13 @@
 // it for free. The pairs live in GENERATED_COLOURS in js/sim/mushrooms.js,
 // which is the one place to add or change one.
 //
-// Safe to run on either shape of sheet, any number of times:
+// Safe to run on any shape of sheet, any number of times:
 //
 //   * the hand-drawn one, eight to a kind (four originals, Lime, Cyan, Frost,
 //     rainbow) — as exported from art/mushrooms.aseprite before any of this;
-//   * the widened one this writes, fourteen to a kind.
+//   * the hand-drawn kinds widened to fourteen, as this wrote before there
+//     were generated kinds;
+//   * the full sheet this writes now.
 //
 // Each block is rebuilt as: the first seven columns as they are (drawn by
 // hand), then one column per generated colour made fresh from Lime, then the
@@ -30,7 +38,8 @@
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { decodePng, encodePng } from './png.mjs';
-import { GENERATED_COLOURS, COLOURS_PER_SPECIES, SPECIES } from '../js/sim/mushrooms.js';
+import { GENERATED_COLOURS, COLOURS_PER_SPECIES, SHEET_ORDER, COLOURS } from '../js/sim/mushrooms.js';
+import { DESIGNS, buildKind } from './mushroom-kinds.mjs';
 
 const T = 16;
 
@@ -43,7 +52,15 @@ export const LIME_COLUMN = 4;
 /** Lime's two cap colours. Art facts, read off the sheet. */
 export const LIME = { base: [153, 229, 80], shade: [106, 190, 48] };
 
-const KINDS = Object.keys(SPECIES).length;
+/** The kinds drawn as text, in sheet order. They always come after the drawn ones. */
+export const GENERATED_KINDS = SHEET_ORDER.filter((k) => DESIGNS[k]);
+
+/** How many kinds at the front of the sheet were drawn by hand. */
+export const DRAWN_KINDS = SHEET_ORDER.length - GENERATED_KINDS.length;
+
+if (SHEET_ORDER.slice(DRAWN_KINDS).some((k) => !DESIGNS[k])) {
+  throw new Error('generated mushroom kinds must come after every hand-drawn one in SHEET_ORDER');
+}
 
 const is = (d, i, c) => d[i] === c[0] && d[i + 1] === c[1] && d[i + 2] === c[2];
 
@@ -56,13 +73,17 @@ const is = (d, i, c) => d[i] === c[0] && d[i + 1] === c[1] && d[i + 2] === c[2];
 export function expandSheet(src) {
   if (src.height !== T) throw new Error(`the mushroom sheet should be one row of ${T}px, not ${src.height}px`);
   const columns = src.width / T;
-  const per = columns / KINDS;
+  // The full sheet, or just the hand-drawn kinds at some width. Only the
+  // hand-drawn blocks are read either way.
+  const per = columns === SHEET_ORDER.length * COLOURS_PER_SPECIES
+    ? COLOURS_PER_SPECIES
+    : columns / DRAWN_KINDS;
   if (!Number.isInteger(per) || per < DRAWN + 1) {
-    throw new Error(`expected ${KINDS} blocks of at least ${DRAWN + 1} columns, found ${columns} columns`);
+    throw new Error(`expected ${DRAWN_KINDS} blocks of at least ${DRAWN + 1} columns, found ${columns} columns`);
   }
 
   const outPer = COLOURS_PER_SPECIES;
-  const width = KINDS * outPer * T;
+  const width = SHEET_ORDER.length * outPer * T;
   const rgba = Buffer.alloc(width * T * 4);
 
   const copy = (fromCol, toCol, swap) => {
@@ -81,7 +102,7 @@ export function expandSheet(src) {
     }
   };
 
-  for (let k = 0; k < KINDS; k++) {
+  for (let k = 0; k < DRAWN_KINDS; k++) {
     const inBlock = k * per;
     const outBlock = k * outPer;
     assertLime(src, inBlock + LIME_COLUMN, k);
@@ -90,6 +111,15 @@ export function expandSheet(src) {
     GENERATED_COLOURS.forEach((colour, i) => copy(inBlock + LIME_COLUMN, outBlock + DRAWN + i, colour));
     copy(inBlock + per - 1, outBlock + outPer - 1, null);               // the rainbow
   }
+
+  GENERATED_KINDS.forEach((kind, g) => {
+    const outBlock = (DRAWN_KINDS + g) * outPer;
+    buildKind(kind, COLOURS[kind]).forEach((sprite, c) => {
+      for (let y = 0; y < T; y++) {
+        sprite.copy(rgba, (y * width + (outBlock + c) * T) * 4, y * T * 4, (y + 1) * T * 4);
+      }
+    });
+  });
   return { width, height: T, rgba };
 }
 
@@ -119,6 +149,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const out = expandSheet(src);
   writeFileSync(path, encodePng(out.width, out.height, out.rgba));
   console.log(`mushrooms.png: ${src.width / T} -> ${out.width / T} sprites `
-    + `(${KINDS} kinds x ${COLOURS_PER_SPECIES} colours; generated: `
-    + `${GENERATED_COLOURS.map((c) => c.name).join(', ')})`);
+    + `(${SHEET_ORDER.length} kinds x ${COLOURS_PER_SPECIES} colours; generated colours: `
+    + `${GENERATED_COLOURS.map((c) => c.name).join(', ')}; generated kinds: ${GENERATED_KINDS.join(', ')})`);
 }

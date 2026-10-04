@@ -3,7 +3,7 @@
 //   'farm'   — assets/tilemap_packed.png       crops, soil beds, animals, barn
 //   'town'   — assets/town_tilemap_packed.png  grass, dirt, paving, fences, trees
 //   'emotes' — assets/emotes.png               speech bubbles over the animals
-//   'shrooms' — assets/flora/mushrooms.png           one row of 35 foraged mushrooms
+//   'shrooms' — assets/flora/mushrooms.png           one row of foraged mushrooms, every kind in every colour
 //   'animals' — assets/animals/farm.png              a row per animal, a column per colour
 //   'battle'  — assets/battle_tilemap_packed.png  water: ponds and rivers
 //   'barn'    — assets/barn.png                  the barn, gathered and extended

@@ -23,13 +23,15 @@ import { addItem } from './inventory.js';
 import { isReserved } from './build.js';
 
 /**
- * Seven kinds, each in fourteen colours — the sheet is one row of ninety-eight,
+ * Thirteen kinds, each in fourteen colours — the sheet is one row of 182,
  * grouped by shape, with the sprites of a kind running consecutively.
  *
  * Rarity is a spawn weight rather than a percentage, so adding a kind means
- * picking one number rather than re-balancing all the others. The weights below
- * happen to sum to a hundred, which makes them readable as percentages, but
- * nothing depends on that.
+ * picking one number rather than re-balancing all the others. Every kind has a
+ * weight of its own and the rarer one always pays better — there is a test.
+ * Adding the six generated kinds took the total from 100 to 145, so the seven
+ * drawn ones each turn up about a third less often than they did; a morel is
+ * still one find in 145.
  *
  * `sprites` is derived rather than written out: the sheet is laid out in
  * species order, one block per kind, and typing ninety-eight indices by hand is
@@ -38,7 +40,12 @@ import { isReserved } from './build.js';
  * mushroom anyone has ever found re-points itself at the right column of the
  * wider sheet on load.
  */
-const SHEET_ORDER = ['toadstool', 'bolete', 'morel', 'button', 'chestnut', 'portobello', 'parasol'];
+export const SHEET_ORDER = [
+  'toadstool', 'bolete', 'morel', 'button', 'chestnut', 'portobello', 'parasol',
+  // Drawn as text rather than by hand: see tools/mushroom-kinds.mjs. Always
+  // after the hand-drawn seven, so adding one never moves a drawn column.
+  'chanterelle', 'inkcap', 'puffball', 'coral', 'earthstar', 'bonnet',
+];
 
 /**
  * The colours drawn by hand on the sheet, after the four each kind started with.
@@ -122,6 +129,32 @@ export const SPECIES = {
     name: 'Morel', item: 'mushroom_morel',
     sell: 150, weight: 1, sprites: spritesFor('morel'),
   },
+
+  // The generated kinds, slotted between the drawn ones by rarity.
+  puffball: {
+    name: 'Puffball', item: 'mushroom_puffball',
+    sell: 32, weight: 14, sprites: spritesFor('puffball'),
+  },
+  bonnet: {
+    name: 'Bonnet', item: 'mushroom_bonnet',
+    sell: 38, weight: 11, sprites: spritesFor('bonnet'),
+  },
+  chanterelle: {
+    name: 'Chanterelle', item: 'mushroom_chanterelle',
+    sell: 50, weight: 8, sprites: spritesFor('chanterelle'),
+  },
+  inkcap: {
+    name: 'Shaggy inkcap', item: 'mushroom_inkcap',
+    sell: 58, weight: 6, sprites: spritesFor('inkcap'),
+  },
+  earthstar: {
+    name: 'Earthstar', item: 'mushroom_earthstar',
+    sell: 80, weight: 4, sprites: spritesFor('earthstar'),
+  },
+  coral: {
+    name: 'Coral fungus', item: 'mushroom_coral',
+    sell: 120, weight: 2, sprites: spritesFor('coral'),
+  },
 };
 
 /**
@@ -135,7 +168,7 @@ export const SPECIES = {
  */
 const ADDED = [...NEW_COLOURS, ...GENERATED_COLOURS.map((c) => c.name)];
 
-const COLOURS = {
+export const COLOURS = {
   button: ['Tan', 'Orange', 'Blue', 'Spotted', ...ADDED, 'Rainbow'],
   toadstool: ['Red', 'Green', 'Pink', 'Navy', ...ADDED, 'Rainbow'],
   bolete: ['Umber', 'Tan', 'Orange', 'Violet', ...ADDED, 'Rainbow'],
@@ -143,6 +176,16 @@ const COLOURS = {
   chestnut: ['Tan', 'Orange', 'Blue', 'Spotted', ...ADDED, 'Rainbow'],
   portobello: ['Tan', 'Orange', 'Blue', 'Spotted', ...ADDED, 'Rainbow'],
   parasol: ['Tan', 'Orange', 'Blue', 'Spotted', ...ADDED, 'Rainbow'],
+
+  // The generated kinds' first four are borrowed from the drawn ones — the
+  // same base-and-shade pairs, by the same names, so a Violet coral is the
+  // violet of a Violet bolete. The pairs are in tools/mushroom-kinds.mjs.
+  chanterelle: ['Orange', 'Tan', 'Red', 'Violet', ...ADDED, 'Rainbow'],
+  inkcap: ['Ash', 'Tan', 'Navy', 'Pink', ...ADDED, 'Rainbow'],
+  puffball: ['Tan', 'Umber', 'Spotted', 'Blue', ...ADDED, 'Rainbow'],
+  coral: ['Pink', 'Violet', 'Red', 'Green', ...ADDED, 'Rainbow'],
+  earthstar: ['Brown', 'Tan', 'Umber', 'Navy', ...ADDED, 'Rainbow'],
+  bonnet: ['Tan', 'Pink', 'Blue', 'Orange', ...ADDED, 'Rainbow'],
 };
 
 /**

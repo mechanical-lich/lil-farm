@@ -22,10 +22,13 @@ import {
 import {
   MUSHROOMS, MUSHROOMS_BY_ID, SPECIES, MUSHROOM_MAX_FRACTION, MUSHROOM_INTERVAL, sprout, forage,
   mushroomAt, rollSpecies, journalCount, journalFound, journalRows,
-  canSprout as canSproutShroom, COLOURS_PER_SPECIES, rollColour, isRainbow, mushroomDef,
+  canSprout as canSproutShroom, COLOURS_PER_SPECIES, rollColour, isRainbow, mushroomDef, COLOURS as SHROOM_COLOURS,
   GENERATED_COLOURS, COLOUR_WEIGHT,
 } from '../js/sim/mushrooms.js';
-import { expandSheet, DRAWN, LIME_COLUMN, LIME } from '../tools/make-mushroom-colours.mjs';
+import { expandSheet, DRAWN, LIME_COLUMN, LIME, DRAWN_KINDS, GENERATED_KINDS } from '../tools/make-mushroom-colours.mjs';
+import {
+  DESIGNS as MUSHROOM_DESIGNS, buildKind, RAINBOW as MUSHROOM_RAINBOW, CAPS as MUSHROOM_CAPS,
+} from '../tools/mushroom-kinds.mjs';
 import {
   DESIGNS as FLOWER_DESIGNS, PALETTE as FLOWER_PALETTE, build as buildFlower,
   drawKinds as drawFlowerKinds,
@@ -6801,24 +6804,91 @@ test('the colour tool is safe to run again, on either shape of sheet', () => {
   assertEqual(again.width, sheet.width, 'same width');
   assert(Buffer.from(sheet.rgba).equals(again.rgba), 'and identical pixels');
 
-  // Rebuild the original layout: the seven drawn columns and the rainbow.
+  // Rebuild the earlier layouts from the hand-drawn kinds alone: the original
+  // eight to a kind (seven drawn columns and the rainbow), and the fourteen to
+  // a kind this tool wrote before there were generated kinds. Either must grow
+  // back into the whole sheet, generated kinds and all.
   const per = COLOURS_PER_SPECIES;
-  const kinds = Object.keys(SPECIES).length;
-  const narrowW = kinds * (DRAWN + 1) * TILE;
-  const narrow = Buffer.alloc(narrowW * TILE * 4);
-  for (let k = 0; k < kinds; k++) {
-    const cols = [...Array(DRAWN).keys()].map((c) => k * per + c).concat(k * per + per - 1);
-    cols.forEach((from, j) => {
-      const to = k * (DRAWN + 1) + j;
+  const layout = (cols) => {
+    const w = DRAWN_KINDS * cols.length * TILE;
+    const out = Buffer.alloc(w * TILE * 4);
+    for (let k = 0; k < DRAWN_KINDS; k++) {
+      cols.forEach((c, j) => {
+        const from = k * per + c;
+        const to = k * cols.length + j;
+        for (let y = 0; y < TILE; y++) {
+          const si = (y * sheet.width + from * TILE) * 4;
+          Buffer.from(sheet.rgba).copy(out, (y * w + to * TILE) * 4, si, si + TILE * 4);
+        }
+      });
+    }
+    return { width: w, height: TILE, rgba: out };
+  };
+  const narrow = layout([...Array(DRAWN).keys(), per - 1]);
+  assert(Buffer.from(sheet.rgba).equals(expandSheet(narrow).rgba), 'the hand-drawn sheet expands to this one');
+  const before = layout([...Array(per).keys()]);
+  assertEqual(before.width / TILE, 98, 'the sheet as it was before the generated kinds');
+  assert(Buffer.from(sheet.rgba).equals(expandSheet(before).rgba), 'and so does the sheet before the new kinds');
+});
+
+test('the generated mushroom kinds on the sheet are exactly their designs', () => {
+  // Same guard as the generated colours: the grids in tools/mushroom-kinds.mjs
+  // are the source, and a grid edited without rerunning the tool would leave
+  // the farm drawing the old shape. Every colour of every generated kind,
+  // pixel for pixel.
+  const sheet = decodePng('assets/flora/mushrooms.png');
+  for (const kind of GENERATED_KINDS) {
+    const sprites = buildKind(kind, SHROOM_COLOURS[kind]);
+    MUSHROOMS.filter((m) => m.species === kind).forEach((m, c) => {
       for (let y = 0; y < TILE; y++) {
-        const si = (y * sheet.width + from * TILE) * 4;
-        const oi = (y * narrowW + to * TILE) * 4;
-        Buffer.from(sheet.rgba).copy(narrow, oi, si, si + TILE * 4);
+        const si = (y * sheet.width + m.sprite * TILE) * 4;
+        const row = Buffer.from(sheet.rgba.subarray(si, si + TILE * 4));
+        assert(row.equals(sprites[c].subarray(y * TILE * 4, (y + 1) * TILE * 4)),
+          `${m.id} row ${y} matches its design`);
       }
     });
   }
-  const rebuilt = expandSheet({ width: narrowW, height: TILE, rgba: narrow });
-  assert(Buffer.from(sheet.rgba).equals(rebuilt.rgba), 'the hand-drawn sheet expands to this one');
+});
+
+test('the generated kinds come after the drawn ones, and are all drawn', () => {
+  // A generated kind slotted in among the hand-drawn ones would shift every
+  // drawn column after it, and the tool would then read the wrong block as
+  // that kind's Lime. Sprite indices follow SHEET_ORDER, so no save would
+  // break — but the art would.
+  assertEqual(DRAWN_KINDS, 7, 'the artist drew seven');
+  assertEqual(GENERATED_KINDS.length, Object.keys(MUSHROOM_DESIGNS).length, 'every design is on the sheet');
+  for (const kind of GENERATED_KINDS) assert(SPECIES[kind], `${kind} is a kind the farm grows`);
+});
+
+test('a generated mushroom keeps its outline on the sprite', () => {
+  // The outline is grown two pixels out from the design, so anything coloured
+  // within two of the edge loses its outline off the side of the sprite.
+  for (const [kind, rows] of Object.entries(MUSHROOM_DESIGNS)) {
+    rows.forEach((row, y) => [...row].forEach((c, x) => {
+      if (c === '.') return;
+      assert(x >= 2 && x <= 13 && y >= 2 && y <= 13, `${kind} has colour at ${x},${y}, too near the edge`);
+    }));
+  }
+});
+
+test('the generated rainbows are rainbows', () => {
+  // The rainbow is laid across each cap in diagonal bands sized to the cap,
+  // so a small cap must still get most of the spectrum rather than two stripes.
+  const key = (rgb) => rgb.join(',');
+  const spectrum = new Set(MUSHROOM_RAINBOW.map(key));
+  for (const kind of GENERATED_KINDS) {
+    const sprite = buildKind(kind, ['Rainbow'])[0];
+    const seen = new Set();
+    for (let i = 0; i < sprite.length; i += 4) {
+      const k = key([sprite[i], sprite[i + 1], sprite[i + 2]]);
+      if (sprite[i + 3] && spectrum.has(k)) seen.add(k);
+    }
+    assertEqual(seen.size, MUSHROOM_RAINBOW.length, `${kind}'s rainbow has every colour`);
+  }
+  // And the cap colours of the drawn names are the drawn ones: Lime is the
+  // template the colour tool swaps from, so the two tables must agree.
+  assertEqual(MUSHROOM_CAPS.Lime.base, LIME.base, 'Lime base');
+  assertEqual(MUSHROOM_CAPS.Lime.shade, LIME.shade, 'Lime shade');
 });
 
 test('the rainbow stays one find in twenty-five however many colours there are', () => {

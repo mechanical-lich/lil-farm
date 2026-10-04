@@ -64,9 +64,15 @@ export const ITEMS = {
   mushroom_button: { name: 'Button mushrooms', sell: 12, group: 'foraged' },
   mushroom_chestnut: { name: 'Chestnut mushrooms', sell: 20, group: 'foraged' },
   mushroom_toadstool: { name: 'Toadstools', sell: 28, group: 'foraged' },
+  mushroom_puffball: { name: 'Puffballs', sell: 32, group: 'foraged' },
+  mushroom_bonnet: { name: 'Bonnets', sell: 38, group: 'foraged' },
   mushroom_portobello: { name: 'Portobellos', sell: 45, group: 'foraged' },
+  mushroom_chanterelle: { name: 'Chanterelles', sell: 50, group: 'foraged' },
+  mushroom_inkcap: { name: 'Shaggy inkcaps', sell: 58, group: 'foraged' },
   mushroom_bolete: { name: 'Boletes', sell: 65, group: 'foraged' },
+  mushroom_earthstar: { name: 'Earthstars', sell: 80, group: 'foraged' },
   mushroom_parasol: { name: 'Parasols', sell: 95, group: 'foraged' },
+  mushroom_coral: { name: 'Coral fungi', sell: 120, group: 'foraged' },
   mushroom_morel: { name: 'Morels', sell: 150, group: 'foraged' },
 };
 
