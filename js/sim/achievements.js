@@ -37,12 +37,13 @@
 // notePlayDay — precisely so this file never reads a clock.
 
 import { emitUnlessSuspended } from '../engine/events.js';
-import { ANIMALS, GIFT_ANIMALS } from './animals.js';
+import { ANIMALS, NOT_FOR_SALE } from './animals.js';
 import { CROPS } from './crops.js';
 import { SPECIES, MUSHROOMS, journalCount } from './mushrooms.js';
 import { FLOWER_KINDS, WILD_HUES } from './flowergenes.js';
 import { FISH_IDS, caughtBefore, itemFor } from './fish.js';
 import { handTargeting } from './farmhand.js';
+import { WILD_KINDS, WILD_IDS } from './wildkinds.js';
 
 /**
  * Which bag items count toward which tally, built from the tables that own
@@ -60,6 +61,14 @@ const FISH_ITEMS = new Set(FISH_IDS.map(itemFor));
 const PRODUCE_ITEMS = new Set(
   Object.values(ANIMALS).map((a) => a.produces).filter((id) => id && id !== 'egg'),
 );
+
+/** Wild kinds from each sheet, for the collection awards. */
+const LOCAL_WILD = WILD_IDS.filter((id) => WILD_KINDS[id].sheet === 'wildlife');
+const EXOTIC_WILD = WILD_IDS.filter((id) => WILD_KINDS[id].sheet === 'exotic');
+
+/** Read off the wildlife journal, which is the record of who was met and won. */
+const befriended = (s, id) => (((s.wildJournal || {})[id] || {}).befriended || 0) > 0;
+const met = (s, id) => (((s.wildJournal || {})[id] || {}).met || 0) > 0;
 
 /** How many wild colours there are to find in total, across every kind. */
 export const FLOWER_SLOTS = FLOWER_KINDS.length * WILD_HUES;
@@ -288,6 +297,55 @@ export const ACHIEVEMENTS = [
     { at: 100, id: 'birthday_girl', name: 'The birthday girl' },
   ]),
 
+  // --- wild animals -------------------------------------------------------
+  //
+  // Befriended ones are counted as they are won over; the collections read the
+  // wildlife journal. Five arrivals a day at most and up to fifteen fusses
+  // apiece for the big ones, so the top of the ladder is weeks of patience.
+  ...ladder('befriended', (n) => `Befriended ${n} wild animals`, [
+    { at: 1, id: 'making_friends', name: 'Making friends', blurb: 'Befriended your first wild animal' },
+    { at: 5, id: 'animal_magnetism', name: 'Animal magnetism' },
+    { at: 10, id: 'pied_piper', name: 'Pied Piper' },
+    { at: 25, id: 'snow_white', name: 'Snow White' },
+    { at: 50, id: 'doctor_dolittle', name: 'Doctor Dolittle' },
+  ]),
+  {
+    id: 'long_way_from_home',
+    name: 'A long way from home',
+    blurb: 'Befriended an animal from far away',
+    check: (s) => EXOTIC_WILD.some((id) => befriended(s, id)),
+  },
+  {
+    id: 'lion_tamer',
+    name: 'Lion tamer',
+    blurb: 'Befriended a lion',
+    check: (s) => befriended(s, 'lion'),
+  },
+  {
+    id: 'field_guide',
+    name: 'Field guide',
+    blurb: `Met all ${WILD_IDS.length} wild animals`,
+    check: (s) => WILD_IDS.every((id) => met(s, id)),
+  },
+  {
+    id: 'local_legend',
+    name: 'Local legend',
+    blurb: `Befriended one of every animal from round here`,
+    check: (s) => LOCAL_WILD.every((id) => befriended(s, id)),
+  },
+  {
+    id: 'globetrotter',
+    name: 'Globetrotter',
+    blurb: `Befriended one of every animal from far away`,
+    check: (s) => EXOTIC_WILD.every((id) => befriended(s, id)),
+  },
+  {
+    id: 'peaceable_kingdom',
+    name: 'Peaceable kingdom',
+    blurb: `Befriended one of all ${WILD_IDS.length} wild animals`,
+    check: (s) => WILD_IDS.every((id) => befriended(s, id)),
+  },
+
   // --- the odd ones out: no ladder, no second helping ----------------------
   {
     id: 'noahs_ark',
@@ -298,7 +356,7 @@ export const ACHIEVEMENTS = [
     // the ark quietly impossible the day they were added — which is precisely
     // what the test caught.
     check: (s) => Object.keys(ANIMALS)
-      .filter((type) => !GIFT_ANIMALS.has(type))
+      .filter((type) => !NOT_FOR_SALE.has(type))
       .every((type) => count(s, `bought:${type}`) >= 2),
   },
   {
@@ -566,6 +624,19 @@ export function notePet(state, gained) {
 /** Money in from selling. The farm as a business, rather than as a garden. */
 export function noteSale(state, earned) {
   bump(state, 'earned', earned);
+}
+
+/**
+ * A wild animal won over. Called by sim/wildlife.js once the journal already
+ * says so, so the collection awards see the new friend in the same check.
+ */
+export function noteBefriended(state) {
+  bump(state, 'befriended');
+}
+
+/** A wild kind met for the first time — the only thing Field guide waits on. */
+export function noteMet(state) {
+  checkAchievements(state);
 }
 
 /** An animal bought. Counted by type as well as in total, for the ark. */

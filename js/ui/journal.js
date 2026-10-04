@@ -24,6 +24,8 @@ import { journalRows as fishJournalRows, kindsCaught, FISH_IDS } from '../sim/fi
 import { makeGenome, hueName, isCross, petalHue } from '../sim/flowergenes.js';
 import { flowerDataUrl } from '../render/flowerart.js';
 import { rows as awardRows, earnedCount, ACHIEVEMENTS } from '../sim/achievements.js';
+import { journalRows as wildJournalRows, kindsMet } from '../sim/wildlife.js';
+import { WILD_IDS } from '../sim/wildkinds.js';
 import { esc } from './esc.js';
 
 export function initJournal(state, { onPlantFlower } = {}) {
@@ -61,11 +63,13 @@ export function initJournal(state, { onPlantFlower } = {}) {
     }
     title.textContent = tab === 'mushrooms' ? 'Mushroom journal'
       : tab === 'flowers' ? 'Flower journal'
-        : tab === 'fish' ? 'Fish journal' : 'Achievements';
+        : tab === 'fish' ? 'Fish journal'
+          : tab === 'wild' ? 'Wildlife journal' : 'Achievements';
 
     if (tab === 'mushrooms') renderMushrooms();
     else if (tab === 'flowers') renderFlowers();
     else if (tab === 'fish') renderFish();
+    else if (tab === 'wild') renderWild();
     else renderAwards();
   }
 
@@ -107,6 +111,33 @@ export function initJournal(state, { onPlantFlower } = {}) {
            <figcaption>?</figcaption></figure>`)).join('');
 
     list.innerHTML = `<li class="journal"><div class="fish-grid">${cells}</div></li>`;
+  }
+
+  /**
+   * Everything that has wandered onto the farm and been met, in two shelves:
+   * what lives round here, and what had to come a long way.
+   *
+   * A kind is *met* the first time it is tapped, not the first time it turns
+   * up — the same rule as a mushroom being found when it is picked rather
+   * than when it grows. Something that came and went while nobody was looking
+   * hasn't been met. The heart count is how many of that kind are now friends.
+   */
+  function renderWild() {
+    note.textContent = `${kindsMet(state)} of ${WILD_IDS.length} animals met`;
+
+    const cell = (a) => (a.met > 0
+      ? `<figure class="wild" title="${esc(a.name)}">
+           <div class="wild-art sheet-${a.sheet}" style="background-position:0 -${a.row * 48}px"></div>
+           <figcaption>${esc(a.name)}<b>${a.befriended ? `♥ ${a.befriended}` : '—'}</b></figcaption>
+         </figure>`
+      : `<figure class="wild unmet"><div class="wild-art"></div><figcaption>?</figcaption></figure>`);
+
+    const rows = wildJournalRows(state);
+    const shelf = (sheet, heading) => `
+      <li class="sell-head"><span>${heading}</span></li>
+      <li class="journal"><div class="wild-grid">${rows.filter((r) => r.sheet === sheet).map(cell).join('')}</div></li>`;
+
+    list.innerHTML = shelf('wildlife', 'From round here') + shelf('exotic', 'From far away');
   }
 
   /**
@@ -189,6 +220,8 @@ export function initJournal(state, { onPlantFlower } = {}) {
   on('mushroom:found', refresh);
   on('flower:picked', refresh);
   on('achievement:earned', refresh);
+  on('wild:met', refresh);
+  on('wild:befriended', refresh);
 
   return { render };
 }

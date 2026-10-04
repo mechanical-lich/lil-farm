@@ -71,8 +71,17 @@ export function fishDef(id) { return FISH[id] || null; }
 /** How far the farmer will cast. Beyond this a fish is somebody else's. */
 export const CAST_RANGE = 5;
 
-/** Ticks between spawn attempts. Rarer than mushrooms: water is scarcer. */
-export const FISH_INTERVAL = 420;
+/**
+ * Ticks between spawns: one every half hour, about forty-eight a day.
+ *
+ * This was 420, but for most of the game's life that number didn't describe
+ * what happened — spawns hunted across all owned land for water and mostly
+ * missed, so fish came at a small fraction of it. Once they were placed on the
+ * water directly, 420 meant a fish every seven minutes, two hundred a day, and
+ * a pond that never stopped asking to be fished. Half an hour keeps a catch
+ * something you notice.
+ */
+export const FISH_INTERVAL = 1800;
 
 /**
  * Ceiling, as a fraction of the water you own.
@@ -145,20 +154,53 @@ export function fishCap(state) {
   return Math.min(Math.floor(waterTiles(state) * FISH_MAX_FRACTION), FISH_HARD_CAP);
 }
 
+/**
+ * Every owned water tile with nothing in it yet.
+ *
+ * A scan of the land she owns, once per FISH_INTERVAL — at most the whole
+ * valley's 14,400 tiles every seven minutes, which is nothing.
+ */
+export function openWater(state) {
+  const out = [];
+  const grid = state.grid;
+  for (const plot of grid.owned) {
+    const { px, py } = plotCoords(plot, grid.w);
+    for (let y = 0; y < PLOT; y++) {
+      for (let x = 0; x < PLOT; x++) {
+        const tx = px * PLOT + x;
+        const ty = py * PLOT + y;
+        if (canFishSpawn(state, tx, ty)) out.push({ x: tx, y: ty });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * One new fish, on water she can actually fish.
+ *
+ * Picked from the water itself. This used to try a few random tiles of owned
+ * *land* and keep the fish only if one happened to be water — so the more of
+ * the valley she bought, the rarer fish became, with nothing about the pond
+ * changing at all. Measured over a day with every fish caught as it appeared:
+ * a 3x3 pond gave five or six on a one-plot farm, and none or one once the
+ * whole valley was owned.
+ *
+ * And only where there is a bank she can reach within a cast — see standFor.
+ * Fish never swim off, so one spawned in the middle of a big lake would sit
+ * there for good holding a place under the cap; with a big enough lake, all six
+ * places, and fishing would quietly stop. Checked here, once per spawn, rather
+ * than on every water tile, because each check is a few route searches.
+ */
 export function updateFish(state) {
   if (state.tickCount % FISH_INTERVAL !== 0) return;
-
-  const plots = Array.from(state.grid.owned);
-  if (plots.length === 0) return;
   if (Object.keys(state.fish || {}).length >= fishCap(state)) return;
 
-  for (let i = 0; i < TRIES; i++) {
-    const { px, py } = plotCoords(plots[state.rng.int(plots.length)], state.grid.w);
-    const x = px * PLOT + state.rng.int(PLOT);
-    const y = py * PLOT + state.rng.int(PLOT);
-    if (!canFishSpawn(state, x, y)) continue;
-
-    spawnFish(state, x, y, rollFish(state));
+  const open = openWater(state);
+  for (let i = 0; i < TRIES && open.length; i++) {
+    const at = open.splice(state.rng.int(open.length), 1)[0];
+    if (!standFor(state, at.x, at.y)) continue;
+    spawnFish(state, at.x, at.y, rollFish(state));
     return;
   }
 }

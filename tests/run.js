@@ -62,6 +62,12 @@ import {
   FISH_HARD_CAP,
 } from '../js/sim/fish.js';
 import { movableAt, canMoveTo, moveTo } from '../js/sim/moving.js';
+import { WILD_KINDS, WILD_IDS } from '../js/sim/wildkinds.js';
+import {
+  WILD_CAP, WILD_STAY, WILD_INTERVAL, WILD_PER_DAY, LEAVE_TIMEOUT, wildOnes, spawnWild, befriend, shoo,
+  arrivalsToday, intimidate, fleeRange, triggerRadius,
+  hasMet, kindsMet, journalRows as wildJournalRows, reconcileWildlife,
+} from '../js/sim/wildlife.js';
 import {
   BALLOON_CAP, BALLOON_INTERVAL, BALLOON_COLOURS, MYTHICALS, partyWindow, isPartyDay,
   noteParty, balloonAt, balloonList, spawnBalloon, popBalloon, updateBalloons,
@@ -73,7 +79,7 @@ import {
   notePet,
 } from '../js/sim/achievements.js';
 import {
-  ANIMALS, GIFT_ANIMALS, TROUGH_CAPACITY, FEED_COST, FOOD_DURATION, WATER_DURATION, SEEK_THRESHOLD,
+  ANIMALS, GIFT_ANIMALS, NOT_FOR_SALE, TROUGH_CAPACITY, FEED_COST, FOOD_DURATION, WATER_DURATION, SEEK_THRESHOLD,
   foodRate, waterRate, canGraze, TARGET_RECHECK,
   makeAnimal, collectFrom, isNeglected, fillWaterTrough, fillFeedTrough, pickFeed, animalDef,
   petAnimal, pickEmote, currentEmote, animalAt, isReady, PRODUCE_CAP,
@@ -119,6 +125,7 @@ import {
 import { runCatchup, GameLoop, discardSkipped } from '../js/engine/loop.js';
 import { anythingMoving } from '../js/render/renderer.js';
 import { animalSprite } from '../js/render/entityrender.js';
+import { EMOTES } from '../js/render/sprites.js';
 import {
   on, suspend, resume, startTally, stopTally, emitUnlessSuspended,
 } from '../js/engine/events.js';
@@ -3450,7 +3457,10 @@ test('animals never die, no matter how long they are neglected', () => {
 
   for (let i = 0; i < 7 * 24 * 60 * 60; i++) tick(s);
 
-  assertEqual(s.animals.length, 1, 'the cow is still here after a week');
+  // Asked of this cow, not of the headcount: wild animals now wander onto any
+  // farm left running this long, and a deer arriving is not the cow surviving.
+  assert(s.animals.includes(animal), 'the cow is still here after a week');
+  assertEqual(s.animals.filter((a) => !a.wild).length, 1, 'and nothing of yours went missing');
   assert(s.animals[0] === animal, 'and it is the same animal');
   assert(isNeglected(animal), 'it is hungry and thirsty');
   assert(!('health' in animal), 'there should be no health value to drain');
@@ -3650,7 +3660,7 @@ test('a fenced-in animal cannot reach an outside trough, but still survives', ()
   for (let i = 0; i < 5000; i++) tick(s);
 
   assert(isNeglected(animal), 'it cannot reach the troughs');
-  assertEqual(s.animals.length, 1, 'but it is emphatically still alive');
+  assert(s.animals.includes(animal), 'but it is emphatically still alive');
   assert(animal.x > 10 && animal.x < 14 && animal.y > 10 && animal.y < 14,
     'and it stayed inside the pen');
 });
@@ -4535,11 +4545,18 @@ test('a farmhand that cannot make progress gives up and looks elsewhere', () => 
   assertEqual(hand.target, null, 'it let the job go rather than holding it for ever');
 });
 
-test('idle farmhands wait by a barn rather than wherever they stopped', () => {
+test('farmhands with goods and nowhere to stow them wait by a barn', () => {
   // They used to simply halt where the last job left them, which looked less
   // like hired help on a break than like someone loitering in a hedge.
+  //
+  // Only the ones carrying something now: an empty-handed hand goes for a
+  // stroll instead (see the test below). One with a full satchel and no crate
+  // to put it in waits where the player knows to find it.
   const { s, hands } = farmWithCrew(9922);
-  for (const hand of hands) { hand.x = s.farmer.x + 9; hand.y = s.farmer.y + 9; }
+  for (const hand of hands) {
+    hand.x = s.farmer.x + 9; hand.y = s.farmer.y + 9;
+    hand.carrying = { egg: 3 };
+  }
 
   for (let i = 0; i < 300; i++) tick(s);
 
@@ -4689,6 +4706,57 @@ test('a hand keeps what the crate will not take and finds another for it', () =>
   assertEqual(crateAt(s, mx, my).item, 'milk', 'the milk found its own');
   assertEqual(crateAt(s, mx, my).qty, 8, 'all of it');
   assertEqual(carriedTotal(hand), 0, 'and the hand is empty');
+});
+
+test('a full farmhand waits by the barn too, rather than strolling', () => {
+  // Only an empty hand goes for a stroll. One that is partly full is covered
+  // above; one that is full is the case that matters most, since it is the one
+  // the player has to come and take things off.
+  const { s, hands } = farmWithCrew(9925);
+  const hand = hands[0];
+  s.hands = [hand];
+  s.crates = {};
+  hand.x = s.farmer.x + 9; hand.y = s.farmer.y + 9;
+  hand.carrying = { egg: HAND_CAPACITY };
+  assert(isFull(hand), 'a full satchel');
+
+  for (let i = 0; i < 300; i++) tick(s);
+  const barn = s.buildings.find((b) => besideBox(b.x, b.y, 3, 2, hand.x, hand.y));
+  assert(barn, `the full hand is waiting by a barn, not at ${hand.x},${hand.y}`);
+
+  const at = `${hand.x},${hand.y}`;
+  for (let i = 0; i < 600; i++) tick(s);
+  assertEqual(`${hand.x},${hand.y}`, at, 'and stays put');
+});
+
+test('an empty-handed farmhand strolls about rather than standing by the barn', () => {
+  // A hand looks for eggs within thirty tiles of wherever it is standing, so a
+  // hand that always went back to the barn could only ever see the eggs near
+  // the barn — measured, one 35, 50 or 70 tiles out was never fetched in six
+  // hours. Strolling carries that circle round the farm.
+  const { s, hands } = farmWithCrew(9923);
+  const hand = hands[0];
+  s.hands = [hand];
+  const seen = new Set();
+  for (let i = 0; i < 2 * 60 * 60; i++) {
+    tick(s);
+    seen.add(`${hand.x},${hand.y}`);
+  }
+  assertEqual(carriedTotal(hand), 0, 'it had nothing to carry');
+  assert(seen.size > 100, `it got about — ${seen.size} different tiles in two hours`);
+});
+
+test('a strolling farmhand finds eggs far from any barn', () => {
+  const { s, hands } = farmWithCrew(9924);
+  s.hands = [hands[0]];
+  const barn = s.buildings[0];
+  const ex = barn.x + 50;
+  const ey = barn.y + 2;
+  s.grid.setObject(ex, ey, OBJ.EGG);
+
+  let t = 0;
+  for (; t < 6 * 60 * 60 && s.grid.getObject(ex, ey) === OBJ.EGG; t++) tick(s);
+  assert(s.grid.getObject(ex, ey) !== OBJ.EGG, 'an egg fifty tiles from the barn was fetched');
 });
 
 test('with no crate that will take it, a hand waits by the barn as it always did', () => {
@@ -5371,6 +5439,34 @@ test('the farmer lands a fish without ever standing on water', () => {
   assertEqual(fishAt(s, mid.x, mid.y), null, 'the fish is out of the water');
   assertEqual(countItem(s, itemFor('big_carp')), 1, 'and in the bag');
   assertEqual(caughtCount(s, 'big_carp'), 1, 'and in the journal');
+});
+
+test('a small pond on a big farm still gets its fish', () => {
+  // The bug this guards: spawns used to try random tiles of owned *land* and
+  // keep the fish only if one landed on water, so buying more of the valley
+  // made fish rarer without anything about the pond changing. A 3x3 pond went
+  // from five or six fish a day on one plot to none or one on the whole valley,
+  // and this very test passed on half its seeds. Now the first spawn has to
+  // land on the pond, however much land there is.
+  const { s } = pondFarm(9010, 3, 3);
+  assert(s.grid.owned.size > 1, 'the whole valley is owned');
+  for (let i = 0; i <= FISH_INTERVAL; i++) tick(s);
+  assertEqual(fishList(s).length, 1, 'one fish at the first chance');
+});
+
+test('fish only appear where there is a bank to fish them from', () => {
+  // Fish never swim off, so one put in the middle of a lake wider than two
+  // casts would sit there for ever holding a place under the cap — and enough
+  // of them would stop fishing altogether. Measured before this rule: one or
+  // two stranded fish in a day on a 14x14 lake.
+  const { s } = pondFarm(9011, 2 * CAST_RANGE + 5, 2 * CAST_RANGE + 5);
+  for (let i = 0; i < FISH_INTERVAL * 300; i++) {
+    tick(s);
+    for (const f of fishList(s)) {
+      assert(standFor(s, f.x, f.y), `the fish at ${f.x},${f.y} can be cast to from a bank`);
+      landFish(s, f.x, f.y);            // keep the cap clear so spawning carries on
+    }
+  }
 });
 
 test('a fish out of casting reach is not offered at all', () => {
@@ -6266,8 +6362,19 @@ test('an animal drinks from a pond it can reach', () => {
 test('a pond never runs dry, unlike a trough', () => {
   // The reward for digging one: an animal that can reach water stops needing
   // you to carry any.
+  //
+  // Penned in with it. Left loose, the sheep sometimes wandered further from a
+  // one-tile pond than an animal looks for water before it got thirsty — this
+  // passed on fifteen seeds in twenty and was on a lucky one. That is a real
+  // property of a single puddle in a big field, but it is not what this test
+  // is about, which is that the pond itself never empties.
   const { s, animal } = farmWithAnimal('sheep', 9506);
   s.troughs = {};
+  const [cx, cy] = [animal.x, animal.y];
+  for (let d = -3; d <= 3; d++) {
+    s.grid.setObject(cx + d, cy - 3, OBJ.FENCE); s.grid.setObject(cx + d, cy + 3, OBJ.FENCE);
+    s.grid.setObject(cx - 3, cy + d, OBJ.FENCE); s.grid.setObject(cx + 3, cy + d, OBJ.FENCE);
+  }
   s.grid.setGround(animal.x + 2, animal.y, GROUND.WATER);
 
   for (let i = 0; i < 6 * 60 * 60; i++) tick(s);
@@ -7761,10 +7868,11 @@ test("Noah's ark wants two of every animal, and the zoo wants a hundred of any",
     throw new Error('nowhere to put an animal');
   };
 
-  // The ones that can be bought. The mythicals are in the same table and are
-  // not for sale, so an ark that wanted them would be an ark nobody could fill.
-  const types = Object.keys(ANIMALS).filter((t) => !GIFT_ANIMALS.has(t));
-  assert(types.length < Object.keys(ANIMALS).length, 'some animals are gifts only');
+  // The ones that can be bought. The mythicals and the wild ones are in the
+  // same table and are not for sale, so an ark that wanted them would be an
+  // ark nobody could fill.
+  const types = Object.keys(ANIMALS).filter((t) => !NOT_FOR_SALE.has(t));
+  assert(types.length < Object.keys(ANIMALS).length, 'some animals are not for sale');
   for (const type of types) {
     const at = spot();
     assert(buyAnimal(s, type, at.x, at.y).ok, `bought one ${type}`);
@@ -8046,7 +8154,7 @@ function keyBehind(id) {
   const keys = ['crops', 'eggs', 'produce', 'mushrooms', 'fish', 'flowers',
     'animals', 'hands', 'water', 'barns', 'houses', 'streak',
     'sown', 'tilled', 'watered', 'cleared', 'feedFills', 'waterFills', 'pets', 'earned',
-    'balloons'];
+    'balloons', 'befriended'];
   for (const key of keys) {
     const probe = newGame(1);
     // Big enough to clear the top rung of every ladder — the takings ladder
@@ -8426,7 +8534,495 @@ test('a farm saved before the birthday week loads without one', () => {
   assertEqual(noteParty(back, '2026-09-09').on, true, 'and the week still starts');
 });
 
+// --- wild animals -------------------------------------------------------
+
+/** A farm with nothing wandering about, so a test can put down exactly what it means to. */
+function quietFarm(seed) {
+  const s = farmWithMaterials(seed);
+  s.animals = [];
+  return s;
+}
+
+/** Runs until a wild animal has finished running, so the next tap can count. */
+function letSettle(s, a, limit = 400) {
+  for (let i = 0; i < limit && a.fleeing; i++) tick(s);
+}
+
+test('every wild kind has a sprite, a price in patience, and a weight', () => {
+  for (const [id, k] of Object.entries(WILD_KINDS)) {
+    assert(ANIMALS[id], `${id} is a real animal kind`);
+    assert(ANIMALS[id].wild, `${id} is marked wild`);
+    assert(k.tame > 0 && Number.isInteger(k.tame), `${id} needs a whole number of fusses`);
+    assert(k.weight > 0, `${id} needs to be able to turn up`);
+    assert(['wildlife', 'exotic'].includes(k.sheet), `${id} is on one of the two sheets`);
+  }
+});
+
+test('the animals from far away take longer to win over than the ones from round here', () => {
+  const tames = (sheet) => Object.values(WILD_KINDS).filter((k) => k.sheet === sheet).map((k) => k.tame);
+  const hardestLocal = Math.max(...tames('wildlife'));
+  const easiestExotic = Math.min(...tames('exotic'));
+  assert(easiestExotic >= hardestLocal,
+    `the easiest exotic (${easiestExotic}) should be at least the hardest local (${hardestLocal})`);
+});
+
+test('a wild kind never shares an id with a farm animal', () => {
+  const farm = ['chicken', 'cow', 'goat', 'horse', 'sheep', 'duck', 'unicorn', 'pegasus',
+    'nightmare', 'hippocampus'];
+  for (const id of WILD_IDS) assert(!farm.includes(id), `${id} collides with a farm animal`);
+});
+
+test('wild animals arrive by themselves, and never more than a few at once', () => {
+  const s = quietFarm(9600);
+  for (let i = 0; i < WILD_INTERVAL * 40; i++) tick(s);
+  const out = wildOnes(s);
+  assert(out.length > 0, 'something has wandered in');
+  assert(out.length <= WILD_CAP, `no more than ${WILD_CAP} at once (${out.length})`);
+  for (const a of out) {
+    assert(WILD_KINDS[a.type], `${a.type} is a wild kind`);
+    assert(s.grid.isOwned(a.x, a.y), 'and it is on the farm');
+  }
+});
+
+test('no more than five arrive in any day, however fast they are sent away', () => {
+  // The case the daily limit is for: a player shooing every visitor on sight.
+  // Without it the farm refilled on every interval and the whole list could be
+  // met in a week.
+  const s = quietFarm(9614);
+  const times = [];
+  const off = on('wild:arrived', () => times.push(s.tickCount));
+  try {
+    for (let t = 0; t < 3 * 24 * 60 * 60; t++) {
+      tick(s);
+      for (const a of wildOnes(s)) s.animals.splice(s.animals.indexOf(a), 1);
+    }
+  } finally { off(); }
+
+  assert(times.length > 0, 'they still come');
+  for (let i = 0; i < times.length; i++) {
+    const inWindow = times.filter((t) => t > times[i] - 24 * 60 * 60 && t <= times[i]).length;
+    assert(inWindow <= WILD_PER_DAY, `${inWindow} arrivals in the 24 hours up to tick ${times[i]}`);
+  }
+  assertEqual(times.length, 3 * WILD_PER_DAY, 'and five a day is what they get');
+  for (let i = 1; i < times.length; i++) {
+    assert(times[i] - times[i - 1] >= WILD_INTERVAL, 'never two inside an hour');
+  }
+});
+
+test('the daily limit survives a save and reload', () => {
+  const s = quietFarm(9615);
+  s.wildArrivals = [s.tickCount - 10, s.tickCount - 20, s.tickCount - 30, s.tickCount - 40, s.tickCount - 50];
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual(arrivalsToday(back), WILD_PER_DAY, 'five already today, after a reload too');
+});
+
+test('an untamed animal moves on after a day', () => {
+  const s = quietFarm(9601);
+  const a = spawnWild(s, 'deer', s.farmer.x + 3, s.farmer.y);
+  for (let i = 0; i < WILD_STAY - 10; i++) tick(s);
+  assert(s.animals.includes(a), 'still here just short of a day');
+  for (let i = 0; i < 20; i++) tick(s);
+  assert(!s.animals.includes(a), 'and gone once the day is up');
+});
+
+test('a wild animal wants nothing from the troughs while it is wild', () => {
+  // Nobody is responsible for it yet, so it must never turn up neglected.
+  const s = quietFarm(9602);
+  const a = spawnWild(s, 'fox', s.farmer.x + 3, s.farmer.y);
+  const { food, water } = a;
+  for (let i = 0; i < 4 * 60 * 60; i++) tick(s);
+  assertEqual([a.food, a.water], [food, water], 'it never got hungry or thirsty');
+  assert(!isNeglected(a), 'and never shows as neglected');
+});
+
+test('a tap counts only when it catches the animal standing still', () => {
+  const s = quietFarm(9603);
+  const a = spawnWild(s, 'squirrel', s.farmer.x + 3, s.farmer.y);
+
+  const first = befriend(s, a);
+  assert(first.counted, 'the first tap counts');
+  assertEqual(a.trust, 1);
+  assert(a.fleeing && a.path.length > 0, 'and sends it running');
+
+  const second = befriend(s, a);
+  assert(!second.counted, 'a tap while it runs does not');
+  assertEqual(a.trust, 1, 'so its trust has not moved');
+
+  letSettle(s, a);
+  assert(!a.fleeing, 'it stops eventually');
+  assert(befriend(s, a).counted, 'and a tap then counts again');
+});
+
+test('a wild animal fussed over before it trusts you looks annoyed about it', () => {
+  const s = quietFarm(9620);
+  const a = spawnWild(s, 'deer', s.farmer.x + 3, s.farmer.y);
+  befriend(s, a);
+  assertEqual(currentEmote(a, s.tickCount), 'annoyed', 'a counted fuss it did not want');
+  befriend(s, a);                                   // still running
+  assertEqual(currentEmote(a, s.tickCount), 'annoyed', 'and a tap while it runs');
+});
+
+test('every emote the simulation shows has a sprite', () => {
+  // Emotes are named in sim/ and drawn by name in render/; a name with no entry
+  // in EMOTES draws nothing at all, silently.
+  // Every quoted word inside a showEmote(...) call, including both arms of a
+  // ternary — and nothing outside one.
+  const used = new Set();
+  for (const file of shippedFiles('js/sim', ['.js'])) {
+    for (const call of readFileSync(file, 'utf8').matchAll(/showEmote\(([^;]*?)\);/g)) {
+      for (const m of call[1].matchAll(/'(\w+)'/g)) used.add(m[1]);
+    }
+  }
+  for (const id of ['annoyed', 'heart', 'sweat', 'hearts', 'smile']) {
+    assert(used.has(id), `expected to find "${id}" in use; found ${[...used].join(', ')}`);
+  }
+  for (const id of used) assert(EMOTES[id], `"${id}" is shown but has no sprite`);
+});
+
+test('a wild animal catches its breath when it stops running', () => {
+  const s = quietFarm(9621);
+  const a = spawnWild(s, 'deer', s.farmer.x + 3, s.farmer.y);
+  befriend(s, a);
+  let stoppedAt = null;
+  for (let i = 0; i < 400 && stoppedAt === null; i++) {
+    tick(s);
+    if (!a.fleeing) stoppedAt = s.tickCount;
+  }
+  assert(stoppedAt !== null, 'the run ends');
+  assertEqual(currentEmote(a, s.tickCount), 'sweat', 'with a moment to catch its breath');
+});
+
+test('a fuss sends it a long way, not to the next tile', () => {
+  const s = quietFarm(9604);
+  const a = spawnWild(s, 'rabbit', s.farmer.x + 3, s.farmer.y);
+  const from = { x: a.x, y: a.y };
+  befriend(s, a);
+  const to = a.path[a.path.length - 1];
+  const run = Math.abs(to.x - from.x) + Math.abs(to.y - from.y);
+  assert(run >= 20, `it ran ${run} tiles — "the other side of the farm" should be a real distance`);
+});
+
+test('enough fusses and it stays for good, living like a horse', () => {
+  const s = quietFarm(9605);
+  const a = spawnWild(s, 'deer', s.farmer.x + 3, s.farmer.y);
+  let res;
+  for (let i = 0; i < WILD_KINDS.deer.tame; i++) {
+    letSettle(s, a);
+    res = befriend(s, a);
+  }
+  assert(res.befriended, 'it trusts you now');
+  assert(!a.wild, 'and is no longer wild');
+  assertEqual(currentEmote(a, s.tickCount), 'heart', 'and says so with a heart');
+
+  // It stays past the day a wild one would have gone, and now gets hungry like
+  // anything else that lives here.
+  const food = a.food;
+  for (let i = 0; i < WILD_STAY + 100; i++) tick(s);
+  assert(s.animals.includes(a), 'still here a day and more later');
+  assert(a.food < food, 'and eating like the horses');
+});
+
+test('a wild animal is more restless than one that trusts you', () => {
+  const s = quietFarm(9606);
+  const wild = spawnWild(s, 'deer', s.farmer.x + 4, s.farmer.y + 4);
+  const tame = spawnWild(s, 'deer', s.farmer.x - 4, s.farmer.y - 4);
+  tame.wild = false;
+  tame.food = 1e9; tame.water = 1e9;             // nothing to go looking for
+
+  let wildSteps = 0;
+  let tameSteps = 0;
+  for (let i = 0; i < 3000; i++) {
+    const w = [wild.x, wild.y];
+    const t = [tame.x, tame.y];
+    tick(s);
+    if (wild.x !== w[0] || wild.y !== w[1]) wildSteps++;
+    if (tame.x !== t[0] || tame.y !== t[1]) tameSteps++;
+  }
+  assert(wildSteps > tameSteps * 2, `wild moved ${wildSteps} times, tame ${tameSteps}`);
+});
+
+test('shooing a wild animal sends it off the farm for good', () => {
+  const s = quietFarm(9607);
+  const a = spawnWild(s, 'fox', s.farmer.x + 3, s.farmer.y);
+  const res = shoo(s, a);
+  assert(res.leaving, 'it is leaving');
+  for (let i = 0; i < LEAVE_TIMEOUT + 2; i++) tick(s);
+  assert(!s.animals.includes(a), 'and it has gone');
+});
+
+test('shooing never loses the player an animal they own', () => {
+  // Bought, or won over: either way, Shoo makes it run and nothing more.
+  const s = quietFarm(9608);
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 3, s.farmer.y);
+  const friend = spawnWild(s, 'fox', s.farmer.x - 3, s.farmer.y);
+  friend.wild = false;
+
+  for (const a of [cow, friend]) {
+    const res = shoo(s, a);
+    assert(!res.leaving, `the ${a.type} is not leaving`);
+  }
+  for (let i = 0; i < WILD_STAY + LEAVE_TIMEOUT; i++) tick(s);
+  assert(s.animals.includes(cow), 'the cow is still here');
+  assert(s.animals.includes(friend), 'and so is the fox that trusts you');
+});
+
+test('the journal remembers who was met, and who was won over', () => {
+  const s = quietFarm(9609);
+  assert(!hasMet(s, 'owl'), 'nobody met yet');
+  const a = spawnWild(s, 'owl', s.farmer.x + 3, s.farmer.y);
+  befriend(s, a);
+  assert(hasMet(s, 'owl'), 'tapping it is meeting it');
+  assertEqual(kindsMet(s), 1);
+
+  for (let i = 1; i < WILD_KINDS.owl.tame; i++) { letSettle(s, a); befriend(s, a); }
+  const row = wildJournalRows(s).find((r) => r.id === 'owl');
+  assertEqual(row.befriended, 1, 'and it is down as a friend');
+});
+
+test('something that came and went unseen has not been met', () => {
+  const s = quietFarm(9610);
+  spawnWild(s, 'tiger', s.farmer.x + 3, s.farmer.y);
+  for (let i = 0; i < WILD_STAY + 10; i++) tick(s);
+  assert(!hasMet(s, 'tiger'), 'a tiger nobody tapped is not in the journal');
+});
+
+test('wild animals are not for sale and take no stall when befriended', () => {
+  const s = quietFarm(9611);
+  assert(!animalList(s).some((r) => WILD_KINDS[r.type]), 'none in the shop');
+  assert(!canBuyAnimal(s, 'lion').ok, 'and none can be bought');
+  const a = spawnWild(s, 'lion', s.farmer.x + 3, s.farmer.y);
+  a.wild = false;
+  assertEqual(stockCount(s), 0, 'a lion that trusts you does not take a stall');
+});
+
+test('wild animals and the journal survive a save and reload', () => {
+  const s = quietFarm(9612);
+  const a = spawnWild(s, 'raccoon', s.farmer.x + 3, s.farmer.y);
+  befriend(s, a);
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  const again = back.animals.find((x) => x.id === a.id);
+  assert(again && again.wild, 'the raccoon is still here, still wild');
+  assertEqual(again.trust, 1, 'and remembers the fuss');
+  assert(hasMet(back, 'raccoon'), 'and so does the journal');
+});
+
+test('a wild kind that no longer exists is cleared on load, and nothing else is', () => {
+  const s = quietFarm(9613);
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 3, s.farmer.y);
+  const ghost = spawnWild(s, 'fox', s.farmer.x - 3, s.farmer.y);
+  ghost.type = 'jackalope';                      // a renamed id, say
+  s.wildJournal = { jackalope: { met: 1, befriended: 0 }, fox: { met: 1, befriended: 0 } };
+  const res = reconcileWildlife(s);
+  assertEqual(res.dropped, 1, 'the animal of no kind is gone');
+  assert(s.animals.includes(cow), 'the cow is untouched');
+  assert(!s.wildJournal.jackalope && s.wildJournal.fox, 'and only the stray journal line went');
+});
+
+/** Wins one over the way a player does: fuss, let it settle, fuss again. */
+function winOver(s, a) {
+  let res = null;
+  while (a.wild) { letSettle(s, a); res = befriend(s, a); }
+  return res;
+}
+
+test('winning over a wild animal earns the first award', () => {
+  const s = quietFarm(9616);
+  assert(!isEarned(s, 'making_friends'), 'nothing yet');
+  winOver(s, spawnWild(s, 'rabbit', s.farmer.x + 3, s.farmer.y));
+  assert(isEarned(s, 'making_friends'), 'one friend made');
+  assertEqual(count(s, 'befriended'), 1, 'and counted once');
+  assert(!isEarned(s, 'long_way_from_home'), 'a rabbit is not from far away');
+});
+
+test('a lion is a long way from home, and taming one says so', () => {
+  const s = quietFarm(9617);
+  winOver(s, spawnWild(s, 'lion', s.farmer.x + 3, s.farmer.y));
+  assert(isEarned(s, 'lion_tamer'), 'a lion tamer');
+  assert(isEarned(s, 'long_way_from_home'), 'and a lion is from far away');
+});
+
+test('the wild collections read the journal, sheet by sheet', () => {
+  const s = quietFarm(9618);
+  const local = WILD_IDS.filter((id) => WILD_KINDS[id].sheet === 'wildlife');
+  const exotic = WILD_IDS.filter((id) => WILD_KINDS[id].sheet === 'exotic');
+  s.wildJournal = Object.fromEntries(local.map((id) => [id, { met: 1, befriended: 1 }]));
+  checkAchievements(s);
+  assert(isEarned(s, 'local_legend'), 'every local one befriended');
+  assert(!isEarned(s, 'globetrotter') && !isEarned(s, 'peaceable_kingdom'), 'but none from abroad');
+
+  for (const id of exotic) s.wildJournal[id] = { met: 1, befriended: 1 };
+  checkAchievements(s);
+  assert(isEarned(s, 'globetrotter'), 'every exotic one too');
+  assert(isEarned(s, 'peaceable_kingdom'), 'which is all of them');
+});
+
+test('meeting every wild animal is its own award, and meeting is enough', () => {
+  const s = quietFarm(9619);
+  for (const id of WILD_IDS.slice(1)) s.wildJournal[id] = { met: 1, befriended: 0 };
+  checkAchievements(s);
+  assert(!isEarned(s, 'field_guide'), 'one short');
+
+  // The last one met by a real tap, which is what has to trigger the check.
+  const a = spawnWild(s, WILD_IDS[0], s.farmer.x + 3, s.farmer.y);
+  befriend(s, a);
+  assert(isEarned(s, 'field_guide'), 'the last tap completes the guide');
+});
+
+/** Counts scares while running f(). */
+function scaresDuring(f) {
+  const seen = [];
+  const off = on('animal:scared', (e) => seen.push(e));
+  try { f(); } finally { off(); }
+  return seen;
+}
+
+test('every wild kind says how intimidating it is', () => {
+  for (const [id, k] of Object.entries(WILD_KINDS)) {
+    assert(typeof k.intimidating === 'number', `${id} needs an intimidating stat`);
+    assert(k.intimidating >= 0 && k.intimidating <= 1, `${id}'s is a chance, 0 to 1`);
+  }
+  assertEqual(WILD_KINDS.lion.intimidating, 1, 'a lion always scares');
+  assertEqual(WILD_KINDS.rabbit.intimidating, 0, 'a rabbit never does');
+});
+
+test('the more intimidating, the further they run — and always out of reach', () => {
+  const r = (id) => fleeRange(WILD_KINDS[id].intimidating);
+  assert(r('lion') > r('fox') && r('fox') > r('crow'), `lion ${r('lion')}, fox ${r('fox')}, crow ${r('crow')}`);
+  for (const id of WILD_IDS) {
+    const k = WILD_KINDS[id].intimidating;
+    assert(fleeRange(k) > triggerRadius(k),
+      `${id} sends them ${fleeRange(k)} tiles, beyond the ${triggerRadius(k)} it scares from`);
+  }
+});
+
+test('the more intimidating, the further away it can scare from', () => {
+  const t = (id) => triggerRadius(WILD_KINDS[id].intimidating);
+  assertEqual([t('crow'), t('fox'), t('lion')], [4, 6, 8], 'four, six and eight tiles');
+
+  // Seven tiles off: inside a lion's reach, outside a fox's.
+  for (const [kind, expected] of [['lion', 1], ['fox', 0]]) {
+    const s = quietFarm(9637);
+    const cow = makeAnimal(s, 'cow', s.farmer.x + 6, s.farmer.y + 6);
+    const w = spawnWild(s, kind, cow.x + 7, cow.y);
+    const scares = scaresDuring(() => {
+      // A fox at seven tiles must not even get a roll, so give it every chance:
+      // roll repeatedly, stepping away and back, and it still never scares.
+      for (let i = 0; i < 20; i++) { intimidate(s); w.x = cow.x + 20; intimidate(s); w.x = cow.x + 7; }
+    });
+    if (expected) assert(scares.length > 0, `a ${kind} at seven tiles is close enough`);
+    else assertEqual(scares.length, 0, `a ${kind} at seven tiles is not`);
+  }
+});
+
+test('a lion that comes close sends a cow running clear of it', () => {
+  const s = quietFarm(9630);
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 6, s.farmer.y + 6);
+  const lion = spawnWild(s, 'lion', cow.x + 2, cow.y);
+
+  const scares = scaresDuring(() => intimidate(s));
+  assertEqual(scares.length, 1, 'the cow was frightened');
+  assertEqual(currentEmote(cow, s.tickCount), 'alarm', 'and says so');
+  const end = cow.path[cow.path.length - 1];
+  const gap = Math.max(Math.abs(end.x - lion.x), Math.abs(end.y - lion.y));
+  assert(gap >= fleeRange(1), `it runs to ${gap} tiles away, at least ${fleeRange(1)}`);
+});
+
+test('one try per approach, and another if it leaves and comes back', () => {
+  const s = quietFarm(9631);
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 6, s.farmer.y + 6);
+  const lion = spawnWild(s, 'lion', cow.x + 2, cow.y);
+
+  assertEqual(scaresDuring(() => intimidate(s)).length, 1, 'it comes close: one scare');
+  cow.path = [];
+  assertEqual(scaresDuring(() => { intimidate(s); intimidate(s); intimidate(s); }).length, 0,
+    'staying close is not another try');
+
+  lion.x = cow.x + triggerRadius(1) + 5;             // wanders off
+  intimidate(s);
+  lion.x = cow.x + 2;                                // and comes back
+  assertEqual(scaresDuring(() => intimidate(s)).length, 1, 'coming back is a fresh try');
+});
+
+test('a wild animal running from a fuss or a shoo frightens nobody', () => {
+  const s = quietFarm(9635);
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 6, s.farmer.y + 6);
+
+  const petted = spawnWild(s, 'lion', cow.x + 2, cow.y);
+  befriend(s, petted);
+  assert(petted.fleeing, 'the petted lion is running');
+  petted.x = cow.x + 2; petted.y = cow.y;            // and its route passes the cow
+  assertEqual(scaresDuring(() => intimidate(s)).length, 0, 'it scares nothing on the way');
+  s.animals.splice(s.animals.indexOf(petted), 1);
+
+  const shooed = spawnWild(s, 'tiger', cow.x - 2, cow.y);
+  shoo(s, shooed);
+  shooed.x = cow.x - 2; shooed.y = cow.y;
+  assertEqual(scaresDuring(() => intimidate(s)).length, 0, 'nor does one that has been shooed');
+});
+
+test('stopping beside an animal it ran past is not a fresh approach', () => {
+  const s = quietFarm(9636);
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 6, s.farmer.y + 6);
+  const lion = spawnWild(s, 'lion', cow.x + 2, cow.y);
+  lion.fleeing = true;
+  intimidate(s);                                     // runs past the cow
+  lion.fleeing = false;                              // and stops right there
+  assertEqual(scaresDuring(() => intimidate(s)).length, 0, 'the cow had its turn as the lion went by');
+
+  lion.x = cow.x + triggerRadius(1) + 5;             // wanders off
+  intimidate(s);
+  lion.x = cow.x + 2;                                // and comes back, not running
+  assertEqual(scaresDuring(() => intimidate(s)).length, 1, 'coming back properly is a fresh try');
+});
+
+test('harmless things, and wild things that trust you, scare nobody', () => {
+  const s = quietFarm(9632);
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 6, s.farmer.y + 6);
+  spawnWild(s, 'rabbit', cow.x + 1, cow.y);
+  const friend = spawnWild(s, 'lion', cow.x - 1, cow.y);
+  friend.wild = false;                               // won over
+  assertEqual(scaresDuring(() => intimidate(s)).length, 0, 'neither a rabbit nor a tame lion');
+});
+
+test('wild animals do not frighten each other', () => {
+  const s = quietFarm(9633);
+  spawnWild(s, 'rabbit', s.farmer.x + 6, s.farmer.y + 6);
+  spawnWild(s, 'lion', s.farmer.x + 7, s.farmer.y + 6);
+  assertEqual(scaresDuring(() => intimidate(s)).length, 0, 'the rabbit is not one of yours');
+});
+
+test('a scared animal actually gets clear when the farm is left running', () => {
+  // Through the real tick: the scare, the run, and the cow standing outside the
+  // lion's range once it stops — measured from where the lion was.
+  const s = quietFarm(9634);
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 6, s.farmer.y + 6);
+  cow.food = 1e9; cow.water = 1e9;                   // nothing else to go and do
+  const lion = spawnWild(s, 'lion', cow.x + 2, cow.y);
+  const from = { x: lion.x, y: lion.y };
+  intimidate(s);
+  const run = cow.path.length;
+  for (let i = 0; i < run; i++) tick(s);
+  const gap = Math.max(Math.abs(cow.x - from.x), Math.abs(cow.y - from.y));
+  assert(gap >= fleeRange(1), `the cow ended ${gap} tiles from where the lion was`);
+});
+
+test('the wildlife journal css agrees with both sheets', () => {
+  // Same failure the mushroom journal guards: name the wrong height and every
+  // entry quietly shows the animal above or below it.
+  const css = readFileSync('css/style.css', 'utf8');
+  for (const sheet of ['wildlife', 'exotic']) {
+    const { h } = pngSize(`assets/animals/${sheet}.png`);
+    const rows = h / TILE;
+    const match = css.match(new RegExp(`\\.wild-art\\.sheet-${sheet}\\s*\\{[^}]*background-size:\\s*48px\\s+(\\d+)px`));
+    assert(match, `${sheet} sets a background-size`);
+    assertEqual(+match[1], rows * 48, `${sheet}: the css height is the sheet's ${rows} rows`);
+    const inTable = Object.values(WILD_KINDS).filter((k) => k.sheet === sheet).length;
+    assertEqual(inTable, rows, `${sheet}: one kind per row on the sheet`);
+  }
+});
+
 // --- offline shell ------------------------------------------------------
+
 
 
 

@@ -20,6 +20,7 @@ import { addItem, countItem, removeItem, ITEMS } from './inventory.js';
 import { CROPS } from './crops.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 import { hayList, hayLeft, eatFrom } from './hay.js';
+import { WILD_KINDS } from './wildkinds.js';
 
 /**
  * `swims` is what lets an animal onto water, via SWIMMERS below. A duck spends
@@ -134,11 +135,36 @@ export const ANIMALS = {
     eats: 1, drinks: 1, grazes: true,
     swims: true,
   },
+
+  // --- the wild ones ------------------------------------------------------
+  //
+  // Forty-odd kinds that wander onto the farm by themselves — see
+  // sim/wildkinds.js for the list and sim/wildlife.js for how they behave.
+  // Made into ordinary entries here so that one which has been won over is a
+  // real animal in every respect: it eats, drinks, grazes and is drawn by the
+  // same code as a horse, and none of that code has to know where it came from.
+  // `wild` on the *kind* says it can't be bought; `wild` on an *animal* says
+  // this particular one hasn't been won over yet.
+  ...Object.fromEntries(Object.entries(WILD_KINDS).map(([type, k]) => [type, {
+    name: k.name, wild: true, sheet: k.sheet, row: k.row, col: 0,
+    eats: 1, drinks: 1, grazes: true,
+    ...(k.swims ? { swims: true } : {}),
+  }])),
 };
 
 /** The ones that cannot be bought, only given. */
 export const GIFT_ANIMALS = new Set(
   Object.entries(ANIMALS).filter(([, def]) => def.gift).map(([type]) => type),
+);
+
+/**
+ * Every kind the shop doesn't sell: balloon gifts and wild animals.
+ *
+ * None of them take a stall, either — see stockCount in sim/shop.js. A fox you
+ * spent a fortnight winning over should not be the reason you can't buy a hen.
+ */
+export const NOT_FOR_SALE = new Set(
+  Object.entries(ANIMALS).filter(([, def]) => def.gift || def.wild).map(([type]) => type),
 );
 
 /**
@@ -168,6 +194,15 @@ export const FEED_COST = 3;           // crops consumed to fill a feed trough
 
 /** Per-tick chance an idle, contented animal ambles a tile. */
 const WANDER_CHANCE = 0.06;
+
+/**
+ * The same, for something still wild: four times as restless.
+ *
+ * The one visible difference between an animal that trusts you and one that
+ * doesn't, before you have tapped either. A fox that is forever on the move is
+ * a fox that hasn't settled; once it has, it ambles like the horses.
+ */
+export const WILD_WANDER_CHANCE = WANDER_CHANCE * 4;
 
 /** Animals that can cross water. Read off the table above. */
 export const SWIMMERS = new Set(
@@ -396,6 +431,22 @@ export function variantOf(animal) {
   return Math.min(animal.variant || 0, variantCount - 1);
 }
 
+/**
+ * The animal a tap on this tile was aimed at.
+ *
+ * An animal is drawn sliding from where it was last tick (`px`,`py`) to where
+ * it is now, so for most of a second its picture sits on the tile it is
+ * leaving. A restless wild one is mid-step most of the time, and asking only
+ * where it logically *is* made tapping one a matter of luck — so a tap counts
+ * on either end of the step. Exact matches still win, so this never steals a
+ * tap from an animal standing still on that tile.
+ */
+export function animalShownAt(state, x, y) {
+  return animalAt(state, x, y)
+    || (state.animals || []).find((a) => a.px === x && a.py === y)
+    || null;
+}
+
 export function animalAt(state, x, y) {
   return (state.animals || []).find((a) => a.x === x && a.y === y) || null;
 }
@@ -524,6 +575,17 @@ export function updateAnimals(state) {
   for (const a of state.animals) {
     a.px = a.x;
     a.py = a.y;
+
+    // Not yet won over: a wild thing that happens to be standing on the farm.
+    // It wants nothing from the troughs, makes nothing, and never goes hungry
+    // — nobody is responsible for it yet. All it does is roam, and more
+    // restlessly than a contented animal, which is the visible clue that it
+    // is still wild.
+    if (a.wild) {
+      updateEmote(state, a);
+      moveWild(state, a);
+      continue;
+    }
 
     // Fractional drain, so affection and appetite can move upkeep by a fraction
     // without needing a separate clock. Stored rounded to keep saves tidy.
@@ -923,8 +985,45 @@ function seekDryLand(state, a) {
   return false;
 }
 
-function wander(state, a) {
-  if (!state.rng.chance(WANDER_CHANCE)) return;
+/**
+ * How something still wild gets about: along a route if it has one — running
+ * from a tap, or being shooed — and otherwise restlessly.
+ *
+ * `fleeing` lasts exactly as long as the route does. It is what makes a run
+ * worth the name: an animal mid-flight can't be fussed over (see befriend in
+ * sim/wildlife.js), so every tap that counts is one that had to catch it
+ * standing still somewhere new.
+ */
+function moveWild(state, a) {
+  const actor = actorFor(a);
+  const wasFleeing = !!a.fleeing;
+  if (a.path && a.path.length > 0) {
+    const next = a.path.shift();
+    if (state.grid.isWalkable(next.x, next.y, actor)) {
+      if (next.x !== a.x) a.facing = next.x > a.x ? 'right' : 'left';
+      a.x = next.x;
+      a.y = next.y;
+      if (a.path.length === 0) a.fleeing = false;
+      catchBreath(state, a, wasFleeing);
+      return;
+    }
+    a.path = [];   // something was built across the route
+  }
+  a.fleeing = false;
+  catchBreath(state, a, wasFleeing);
+  wander(state, a, WILD_WANDER_CHANCE);
+}
+
+/**
+ * The end of a run: a moment to catch its breath, which is also the sign that
+ * it can be approached again. A shooed one doesn't stop — it's leaving.
+ */
+function catchBreath(state, a, wasFleeing) {
+  if (wasFleeing && !a.fleeing && !a.leaving) showEmote(a, state, 'sweat');
+}
+
+function wander(state, a, chance = WANDER_CHANCE) {
+  if (!state.rng.chance(chance)) return;
 
   const actor = actorFor(a);
   const open = ORTHO

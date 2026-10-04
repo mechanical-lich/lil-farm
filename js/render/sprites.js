@@ -321,6 +321,13 @@ export const EMOTES = {
   heart: [1, 5, 'emotes'],
   droplets: [2, 5, 'emotes'],
   angry: [4, 5, 'emotes'],
+  // The red anger mark. A wild animal that's been fussed over and didn't care
+  // for it — see befriend in sim/wildlife.js.
+  annoyed: [4, 3, 'emotes'],
+  // The blue droplet: a wild animal catching its breath at the end of a run.
+  sweat: [3, 0, 'emotes'],
+  // The red exclamation mark: one of yours, frightened by something wild.
+  alarm: [2, 4, 'emotes'],
 };
 
 /** Source rect in the sheet for a [col,row] pair. */
@@ -388,7 +395,7 @@ function loadImage(src) {
  */
 export async function loadSheets() {
   const [farm, town, emotes, shrooms, animals, battle, barn, flowers, decor, aquatic,
-    mythical, balloons] = await Promise.all([
+    mythical, balloons, wildlife, exotic] = await Promise.all([
     loadImage('assets/tilemap_packed.png'),
     loadImage('assets/town_tilemap_packed.png'),
     loadImage('assets/emotes.png'),
@@ -401,6 +408,8 @@ export async function loadSheets() {
     loadImage('assets/animals/aquatic.png'),
     loadImage('assets/animals/mythical.png'),
     loadImage('assets/animals/balloons.png'),
+    loadImage('assets/animals/wildlife.png'),
+    loadImage('assets/animals/exotic.png'),
   ]);
   buildCapsules(farm);
 
@@ -423,6 +432,8 @@ export async function loadSheets() {
     // One row of four, and one row of twelve. Neither is a colour ramp, so
     // neither goes near setAnimalVariants above.
     mythical, balloons,
+    // The wild animals: one column each, an animal per row. See sim/wildkinds.js.
+    wildlife, exotic,
   };
 }
 

@@ -54,6 +54,20 @@ const SCAN_INTERVAL = 20;
 /** Ticks a hand may hold a job without getting any closer before giving up. */
 const STUCK_LIMIT = 30;
 
+/**
+ * How far an empty-handed hand strolls in one go, and how long it lingers
+ * where it stops before setting off again.
+ *
+ * A hand looks for eggs within EGG_RADIUS of wherever it is standing, so where
+ * it stands decides what it can see. Waiting by the barn, that was everything
+ * within thirty tiles of the barn and nothing else: measured, an egg 35, 50 or
+ * 70 tiles out was never fetched in six hours. A stroll of a dozen or two tiles
+ * at a time, with a look round every SCAN_INTERVAL as it goes, carries that
+ * thirty-tile circle across the whole farm.
+ */
+const ROAM_RADIUS = 20;
+const LINGER = 15;
+
 export function makeHand(state, x, y) {
   const hand = {
     id: state.nextHandId++,
@@ -170,8 +184,55 @@ function stepHand(state, hand) {
     return;
   }
 
-  // Nothing to do, or nowhere to put it: wait by a barn.
+  // Nothing to do and nothing carried: go for a stroll and keep looking. A
+  // hand with goods and nowhere to put them still waits by a barn, where the
+  // player knows to find them and take them off it.
+  if (carriedTotal(hand) === 0) {
+    roam(state, hand);
+    return;
+  }
   rest(state, hand);
+}
+
+/**
+ * A stroll: walk to somewhere nearby, stand a moment, pick somewhere else.
+ *
+ * Nothing about it is a job. It only exists to move the hand's line of sight
+ * about, so it stops the instant findWork turns something up — that runs every
+ * SCAN_INTERVAL whatever the hand is doing, and a new target clears the route.
+ */
+function roam(state, hand) {
+  hand.restSpot = null;
+
+  if (hand.path.length > 0) {
+    step(state, hand);
+    if (hand.path.length === 0) {
+      hand.lingerUntil = state.tickCount + LINGER + state.rng.int(LINGER);
+    }
+    return;
+  }
+  if (state.tickCount < (hand.lingerUntil || 0)) return;
+
+  for (let i = 0; i < 4; i++) {
+    const spot = pickRoamSpot(state, hand);
+    if (spot && walkTo(state, hand, { kind: 'spot', x: spot.x, y: spot.y })) return;
+  }
+  // Boxed in somewhere with nowhere to go. Try again in a little while rather
+  // than searching for a route on every tick.
+  hand.lingerUntil = state.tickCount + LINGER;
+}
+
+/** Somewhere open within a stroll, on land the player owns. */
+function pickRoamSpot(state, hand) {
+  const dx = state.rng.int(2 * ROAM_RADIUS + 1) - ROAM_RADIUS;
+  const dy = state.rng.int(2 * ROAM_RADIUS + 1) - ROAM_RADIUS;
+  const x = hand.x + dx;
+  const y = hand.y + dy;
+  if (dx === 0 && dy === 0) return null;
+  if (!state.grid.inBounds(x, y) || !state.grid.isOwned(x, y)) return null;
+  if (!state.grid.isWalkable(x, y, 'farmer')) return null;
+  if (standingHere(state, hand, x, y)) return null;
+  return { x, y };
 }
 
 /** An egg is picked up from its own tile; an animal is worked on from beside. */

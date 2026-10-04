@@ -9,6 +9,7 @@ import { reconcileCrates } from './sim/crates.js';
 import { reconcileHay } from './sim/hay.js';
 import { reconcileFish } from './sim/fish.js';
 import { reconcileBalloons } from './sim/balloons.js';
+import { reconcileWildlife } from './sim/wildlife.js';
 import { newAchievementRecord } from './sim/achievements.js';
 import { seedStartingMushrooms } from './sim/mushrooms.js';
 import { newMarket } from './sim/market.js';
@@ -52,6 +53,8 @@ export function newGame(seed = (Date.now() ^ 0x5f3759df) >>> 0) {
     fishJournal: {},   // fish id -> how many you have ever landed
     achievements: newAchievementRecord(),   // see sim/achievements.js
     balloons: {},   // tile key -> {colour}; only during her birthday week
+    wildJournal: {},   // wild kind -> {met, befriended}; see sim/wildlife.js
+    wildArrivals: [],  // ticks of recent arrivals, for the daily limit
     party: { on: false, day: null, prizePending: false, given: [] },
     tasks: [],
     nextTaskId: 1,
@@ -106,6 +109,8 @@ export function serialize(state) {
     fishJournal: state.fishJournal,
     achievements: state.achievements,
     balloons: state.balloons,
+    wildJournal: state.wildJournal,
+    wildArrivals: state.wildArrivals,
     party: state.party,
     tasks: state.tasks,
     nextTaskId: state.nextTaskId,
@@ -175,6 +180,9 @@ export function deserialize(data) {
     // recomputed at boot from the real date (see noteParty), so a save carried
     // across the end of the week never keeps the balloons flying.
     balloons: data.balloons || {},
+    // Farms saved before wild animals existed have met nobody yet.
+    wildJournal: data.wildJournal || {},
+    wildArrivals: data.wildArrivals || [],
     party: data.party || { on: false, day: null, prizePending: false, given: [] },
     tasks: data.tasks || [],
     nextTaskId: data.nextTaskId || 1,
@@ -198,6 +206,10 @@ export function deserialize(data) {
   if (swimming.dropped || swimming.forgotten) {
     console.warn(`fish cleared on load: ${swimming.dropped} of a species that no longer exists, `
       + `${swimming.forgotten} journal entries`);
+  }
+  const strays = reconcileWildlife(state);
+  if (strays.dropped) {
+    console.warn(`wild animals cleared on load: ${strays.dropped} of a kind that no longer exists`);
   }
   const floating = reconcileBalloons(state);
   if (floating.dropped) {

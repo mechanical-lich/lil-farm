@@ -578,6 +578,59 @@ li.market.glut .market-top small { color: #a33d2e; }
 
 .fish.uncaught figcaption { color: #a08d78; }
 
+/* --- the wildlife journal ---------------------------------------------- */
+
+/* Two sheets, each a single column with an animal per row, so like the fish
+   these slide *down* — and each background-size names its own sheet's height.
+   There is a test holding both numbers to the sheets, because getting one wrong
+   doesn't fail loudly, it just shows the animal above or below. */
+.wild-art {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 2px;
+  image-rendering: pixelated;
+  background-color: rgba(132, 198, 105, 0.45);
+  border: 2px solid var(--panel-edge);
+  border-radius: 8px;
+}
+
+.wild-art.sheet-wildlife {
+  background-image: url(../assets/animals/wildlife.png);
+  background-size: 48px 1008px;   /* 21 animals at 48px */
+}
+
+.wild-art.sheet-exotic {
+  background-image: url(../assets/animals/exotic.png);
+  background-size: 48px 864px;    /* 18 animals at 48px */
+}
+
+.wild.unmet .wild-art {
+  background-color: rgba(185, 138, 84, 0.16);
+  border-style: dashed;
+}
+
+.wild.unmet figcaption {
+  font-size: 18px;
+  font-weight: 700;
+  opacity: 0.45;
+}
+
+.wild-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.wild {
+  margin: 0;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.wild figcaption { color: #7a604a; }
+.wild figcaption b { display: block; color: var(--ink); font-size: 13px; }
+
 /* --- the mushroom journal ---------------------------------------------- */
 
 .panel li.journal {
@@ -827,11 +880,19 @@ li.market.glut .market-top small { color: #a33d2e; }
    looking unselected. `#ui .tabs button` outranks `#ui button` on specificity
    just as well, and there is nothing left to keep in step. */
 #ui .tabs button {
-  flex: 1;
+  /* Sized by its word, then sharing what's left. Five to a row now the journal
+     has a Wildlife tab: at the old padding five words came to about 412px
+     against 369 on her phone and the last tab ran off the edge, and equal
+     widths fixed that only by clipping "Mushrooms" instead. Content-sized tabs
+     at this padding total about 330px, so every word fits whole. */
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  font-size: 14px;
   border-radius: 10px 10px 0 0;
   border-bottom: none;
   margin-bottom: -2px;
-  padding: 8px 10px;
+  padding: 8px 4px;
   box-shadow: none;
   background: rgba(185, 138, 84, 0.18);
   border-color: transparent;

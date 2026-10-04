@@ -22,13 +22,14 @@ import { cropAt, isRipe } from './sim/crops.js';
 import { fishAt } from './sim/fish.js';
 import { notePlayDay, earnedSince, achievementDef, notePet } from './sim/achievements.js';
 import { noteParty } from './sim/balloons.js';
+import { befriend, shoo } from './sim/wildlife.js';
 import { readSeedId, seedName } from './sim/flowergenes.js';
 import { drawAnimalSprite, drawHandSprite } from './render/entityrender.js';
 import { drawObjectSprite } from './render/tilerender.js';
 import { DECOR, decorDef, canPlaceDecor, placeDecor } from './sim/decor.js';
 import { movableAt, canMoveTo, moveTo } from './sim/moving.js';
 import {
-  animalDef, animalAt, petAnimal, isReady, animalVariantCount,
+  animalDef, animalAt, animalShownAt, petAnimal, isReady, animalVariantCount,
 } from './sim/animals.js';
 import { buyAnimal, canPlaceAnimal, hireHand } from './sim/shop.js';
 import { PLOT, plotBounds } from './world/land.js';
@@ -682,6 +683,26 @@ function queueTileTask(state, toolbar, x, y, { announce }) {
     return;
   }
 
+  // Shoo acts on an animal rather than a tile, and acts at once — it is the
+  // player waving their arms, not a job for the farmer. Works under a drag
+  // too, so a sweep across a field clears it, but only a deliberate tap talks.
+  if (tool === 'shoo') {
+    const animal = animalShownAt(state, x, y);
+    if (!animal) {
+      if (announce) toast('Nothing there to shoo');
+      return;
+    }
+    const name = animalDef(animal.type).name.toLowerCase();
+    const wasWild = !!animal.wild;
+    const res = shoo(state, animal);
+    if (announce) {
+      toast(wasWild
+        ? `Shoo! The ${name} runs off the farm`
+        : res.ran ? `The ${name} bolts, then settles` : `The ${name} has nowhere to run`);
+    }
+    return;
+  }
+
   if (tool === 'till') {
     // Painting is meaningless here; the row gesture replaces it entirely.
     if (announce) handleTillTap(state, x, y);
@@ -719,6 +740,18 @@ function queueTileTask(state, toolbar, x, y, { announce }) {
   // animal with something to give still hands it over first — you'd rather have
   // the egg than the cuddle, and the cuddle is still there afterwards.
   if (tool === 'auto' && announce) {
+    // Wild ones first, and looked for where they are drawn rather than only
+    // where they logically stand — a restless one is mid-step most of the time.
+    const wild = animalShownAt(state, x, y);
+    if (wild && wild.wild) {
+      const name = animalDef(wild.type).name.toLowerCase();
+      const res = befriend(state, wild);
+      if (!res.counted) toast(`The ${name} is too skittish — wait for it to settle`);
+      else if (!res.befriended) toast(`The ${name} bolts! It trusts you a little more (${res.trust}/${res.tame})`);
+      // Befriending gets the banner; see 'wild:befriended' in wireToastFeedback.
+      return;
+    }
+
     const animal = animalAt(state, x, y);
     if (animal && !isReady(animal)) {
       const name = animalDef(animal.type).name.toLowerCase();
@@ -814,6 +847,25 @@ function wireToastFeedback() {
   // Deliberately the loudest thing the game says: an achievement is rare, and
   // it is the only toast that is worth interrupting whatever else is on screen.
   events.on('achievement:earned', ({ id }) => announceAward(achievementDef(id)));
+
+  // Something wild has wandered in. Said out loud because the farm is large and
+  // a visitor nobody noticed is a visitor who leaves a day later unmet.
+  events.on('wild:arrived', ({ type }) => {
+    const name = animalDef(type).name.toLowerCase();
+    // "An elephant", not "a elephant" — and the same for the emu and the owl.
+    const article = /^[aeiou]/.test(name) ? 'An' : 'A';
+    toast(`${article} ${name} has wandered onto the farm`);
+  });
+  events.on('wild:met', ({ name }) => toast(`New find: ${name}! It's in your journal`));
+  // Winning one over is a moment, so it gets the banner rather than a toast.
+  events.on('wild:befriended', ({ name, first }) => {
+    showAward({
+      icon: '❤️',
+      kicker: first ? 'New friend' : 'Another friend',
+      name,
+      blurb: 'has decided you are all right, and is staying',
+    });
+  });
 
   // A mythical gets the achievement banner, because it is the same size of
   // moment and the furniture already exists — it just says something other

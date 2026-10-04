@@ -37,6 +37,9 @@ export const TOOLS = [
   // Last, because calling work off is rarer than putting it on — but it drags
   // like the others, so a mis-drag is undone the same way it was made.
   { id: 'cancel', icon: '🚫', name: 'Cancel', hint: 'Tap queued work to call it off' },
+  // Sends an animal running. A wild one keeps going and leaves the farm; one
+  // that lives here — bought, given, or won over — only bolts and settles.
+  { id: 'shoo', icon: '👋', name: 'Shoo', hint: 'Send an animal running; wild ones leave' },
   // Not a mode: it does its thing and leaves whichever tool you were holding
   // selected. `action` is what says so — the bar is where a player's thumb
   // already is, so a one-shot button belongs here even though nothing about it

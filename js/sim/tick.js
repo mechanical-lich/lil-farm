@@ -16,6 +16,7 @@ import { updateWeeds } from './weeds.js';
 import { updateMushrooms } from './mushrooms.js';
 import { updateFish } from './fish.js';
 import { updateBalloons } from './balloons.js';
+import { updateWildlife } from './wildlife.js';
 import { updateMarket } from './market.js';
 import { updateFlowers, updateBreeding } from './flowers.js';
 
@@ -35,6 +36,7 @@ export function tick(state) {
   updateMushrooms(state);
   updateFish(state);
   updateBalloons(state);
+  updateWildlife(state);
   updateFlowers(state);
   updateBreeding(state);
   updateMarket(state);

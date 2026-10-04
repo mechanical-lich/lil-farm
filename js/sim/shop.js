@@ -13,7 +13,7 @@ import { CROPS, seedIdFor, isSeedId, cropFromSeedId } from './crops.js';
 import {
   ITEMS, ITEM_GROUPS, addItem, removeItem, countItem, itemName, itemGroup,
 } from './inventory.js';
-import { ANIMALS, animalDef, makeAnimal, SWIMMERS, GIFT_ANIMALS } from './animals.js';
+import { ANIMALS, animalDef, makeAnimal, SWIMMERS, NOT_FOR_SALE } from './animals.js';
 import { animalCapacity } from './build.js';
 import { priceOf, priceMultiplier, recordSale } from './market.js';
 import {
@@ -181,7 +181,7 @@ function growLabel(ticks) {
  * a stall from an animal you paid for.
  */
 export function stockCount(state) {
-  return (state.animals || []).filter((a) => !GIFT_ANIMALS.has(a.type)).length;
+  return (state.animals || []).filter((a) => !NOT_FOR_SALE.has(a.type)).length;
 }
 
 export function canBuyAnimal(state, type) {
@@ -189,7 +189,7 @@ export function canBuyAnimal(state, type) {
   if (!def) return { ok: false, reason: 'no such animal' };
   // Belt as well as braces: the list above hides these, and this stops one
   // being bought by any other route, including a stale panel.
-  if (GIFT_ANIMALS.has(type)) return { ok: false, reason: 'that one is not for sale' };
+  if (NOT_FOR_SALE.has(type)) return { ok: false, reason: 'that one is not for sale' };
 
   const capacity = animalCapacity(state);
   if (capacity === 0) return { ok: false, reason: 'build a barn first' };
@@ -271,7 +271,7 @@ export function animalList(state) {
   // Gift animals never appear here. They have no price at all, so a row for one
   // would offer a free unicorn — and the whole of what makes a mythical worth
   // having is that it came out of a balloon.
-  return Object.entries(ANIMALS).filter(([type]) => !GIFT_ANIMALS.has(type)).map(([type, def]) => ({
+  return Object.entries(ANIMALS).filter(([type]) => !NOT_FOR_SALE.has(type)).map(([type, def]) => ({
     type,
     name: def.name,
     price: def.price,
