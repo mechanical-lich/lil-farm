@@ -26,6 +26,9 @@ import { emptyCrate } from './crates.js';
 import { removePot } from './pots.js';
 import { landFish, standFor } from './fish.js';
 import { popBalloon } from './balloons.js';
+import { popLantern, lanternAt } from './lanterns.js';
+import { recordHarvest, recordLantern, recordMythical } from './events.js';
+import { clearGourd } from './gourddecor.js';
 import { makeAnimal, freeSpotNear } from './animals.js';
 import { noteTaskResult, noteBuild, noteTroughFilled } from './achievements.js';
 import { emitUnlessSuspended } from '../engine/events.js';
@@ -218,6 +221,11 @@ function applyTaskResult(state, task) {
     case 'clear':
     case 'chop':
     case 'pickup': {
+      // A gourd set out on the farm: clearing it breaks it open for its seed.
+      if (task.gourd) {
+        gained = clearGourd(state, task.x, task.y);
+        break;
+      }
       const obj = grid.getObject(task.x, task.y);
       const def = objDef(obj);
       gained = def.yields || null;
@@ -282,6 +290,8 @@ function applyTaskResult(state, task) {
 
     case 'harvest':
       gained = harvestCrop(state, task.x, task.y);
+      // A gourd goes in the Events journal as grown; see sim/events.js.
+      for (const [id, n] of Object.entries(gained || {})) recordHarvest(state, id, n);
       break;
 
     case 'fill': {
@@ -330,6 +340,16 @@ function applyTaskResult(state, task) {
     }
 
     case 'pop': {
+      if (task.lantern) {
+        // Which face it was, before it goes — the Events journal collects them.
+        const face = lanternAt(state, task.x, task.y)?.face;
+        gained = popLantern(state, task.x, task.y);
+        if (gained) {
+          addItems(state, gained);
+          recordLantern(state, face ?? 0);
+        }
+        break;
+      }
       const present = popBalloon(state, task.x, task.y);
       if (!present) break;
 
@@ -342,6 +362,7 @@ function applyTaskResult(state, task) {
         const spot = freeSpotNear(state, task.x, task.y, present.mythical)
           || { x: task.x, y: task.y };
         const animal = makeAnimal(state, present.mythical, spot.x, spot.y, 0);
+        recordMythical(state, present.mythical);
         emitUnlessSuspended('balloon:mythical', { type: present.mythical, id: animal.id });
         break;
       }

@@ -1,7 +1,7 @@
 // Entry point: load or create a farm, replay the time you were away, then run.
 
 import { TILE, TICK_MS, START_INVENTORY, TESTING } from './config.js';
-import { loadSheets } from './render/sprites.js';
+import { loadSheets, GOURD_DECOR } from './render/sprites.js';
 import { Renderer } from './render/renderer.js';
 import { Camera } from './render/camera.js';
 import { GameLoop, runCatchup, discardSkipped } from './engine/loop.js';
@@ -18,14 +18,16 @@ import { drawBuilding } from './render/tilerender.js';
 import { flowerCanvas } from './render/flowerart.js';
 import { addCatch } from './render/effects.js';
 import { canPlantAt } from './sim/flowers.js';
-import { cropAt, isRipe } from './sim/crops.js';
+import { cropAt, isRipe, CROPS } from './sim/crops.js';
+import { canPlaceGourd, placeGourd } from './sim/gourddecor.js';
 import { fishAt } from './sim/fish.js';
 import { notePlayDay, earnedSince, achievementDef, notePet } from './sim/achievements.js';
 import { noteParty } from './sim/balloons.js';
+import { noteHalloween } from './sim/lanterns.js';
 import { befriend, shoo } from './sim/wildlife.js';
 import { readSeedId, seedName } from './sim/flowergenes.js';
 import { drawAnimalSprite, drawHandSprite } from './render/entityrender.js';
-import { drawObjectSprite } from './render/tilerender.js';
+import { drawObjectSprite, blit } from './render/tilerender.js';
 import { DECOR, decorDef, canPlaceDecor, placeDecor } from './sim/decor.js';
 import { movableAt, canMoveTo, moveTo } from './sim/moving.js';
 import {
@@ -95,7 +97,15 @@ async function boot() {
   initToasts();
   initAwards();
   const autosaver = new Autosaver(() => serialize(state));
-  const hud = initHud(state);
+  const hud = initHud(state, {
+    // A gourd from the bag, set out on the farm. Starts where you are looking,
+    // like everything else that gets put down.
+    onPlaceGourd: (type, reopen) => {
+      const at = camera.centreTile();
+      beginPlacement(gourdPlacement(state, type, reopen), at.x, at.y);
+      toast(`Tap where the ${CROPS[type].name.toLowerCase()} should go`);
+    },
+  });
   initJournal(state, {
     // From the seed drawer straight out to the map: the journal steps aside,
     // the flower is sited, and the drawer comes back exactly as it was left.
@@ -270,6 +280,13 @@ async function boot() {
     toast(party.birthday
       ? '🎈 Happy birthday! There are balloons out on the farm'
       : '🎈 There are balloons out on the farm');
+  }
+  // And October's jack-o'-lanterns, the same way. See sim/lanterns.js.
+  const spooky = noteHalloween(state, today());
+  if (spooky.fresh) {
+    toast(spooky.halloween
+      ? "🎃 Happy Halloween! There are jack-o'-lanterns out on the farm"
+      : "🎃 There are jack-o'-lanterns out on the farm");
   }
   registerServiceWorker();
 }
@@ -590,6 +607,24 @@ function animalPlacement(state, type) {
       const res = buyAnimal(state, type, x, y);
       return res.ok
         ? { ok: true, message: `${def.name} bought for $${res.spent}` }
+        : { ok: false, reason: res.reason };
+    },
+  };
+}
+
+/** Setting a gourd out. It leaves the bag only when it is put down. */
+function gourdPlacement(state, type, onPlaced) {
+  const name = CROPS[type].name.toLowerCase();
+  return {
+    w: 1, h: 1,
+    after: onPlaced,
+    confirmLabel: `✓ Put the ${name} here`,
+    validate: (x, y) => canPlaceGourd(state, x, y),
+    draw: (ctx, sheets, at) => blit(ctx, sheets, GOURD_DECOR[type], at.x * TILE, at.y * TILE),
+    confirm: (x, y) => {
+      const res = placeGourd(state, type, x, y);
+      return res.ok
+        ? { ok: true, message: `Set out a ${name}` }
         : { ok: false, reason: res.reason };
     },
   };

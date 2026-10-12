@@ -79,6 +79,9 @@ export function canSprout(state, x, y) {
   if (cropAt(state, x, y)) return false;
   // Ground a queued build is standing on is spoken for; see build.js.
   if (isReserved(state, x, y)) return false;
+  // Nor up through a jack-o'-lantern (see sim/lanterns.js).
+  if ((state.lanterns || {})[`${x},${y}`]) return false;
+  if ((state.gourdDecor || {})[`${x},${y}`]) return false;   // nor a gourd set out
   // Not underfoot: sprouting on top of the farmer or an animal looks wrong even
   // though weeds don't block anyone.
   if (state.farmer.x === x && state.farmer.y === y) return false;

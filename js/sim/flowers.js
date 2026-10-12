@@ -148,6 +148,8 @@ function bareGround(state, x, y) {
   if (grid.getObject(x, y) !== OBJ.NONE) return false;
   if ((state.flowers || {})[`${x},${y}`]) return false;
   if (cropAt(state, x, y)) return false;
+  // A gourd set out as a decoration, or a jack-o'-lantern, is sitting there.
+  if ((state.gourdDecor || {})[`${x},${y}`] || (state.lanterns || {})[`${x},${y}`]) return false;
   return !isReserved(state, x, y);
 }
 

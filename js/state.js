@@ -9,8 +9,11 @@ import { reconcileCrates } from './sim/crates.js';
 import { reconcileHay } from './sim/hay.js';
 import { reconcileFish } from './sim/fish.js';
 import { reconcileBalloons } from './sim/balloons.js';
+import { reconcileLanterns } from './sim/lanterns.js';
+import { reconcileGourdDecor } from './sim/gourddecor.js';
 import { reconcileWildlife } from './sim/wildlife.js';
 import { newAchievementRecord } from './sim/achievements.js';
+import { newEventRecord, backfillBirthday } from './sim/events.js';
 import { seedStartingMushrooms } from './sim/mushrooms.js';
 import { newMarket } from './sim/market.js';
 import { reconcileFlowers } from './sim/flowers.js';
@@ -52,10 +55,14 @@ export function newGame(seed = (Date.now() ^ 0x5f3759df) >>> 0) {
     fish: {},       // tile key -> fish id; see sim/fish.js
     fishJournal: {},   // fish id -> how many you have ever landed
     achievements: newAchievementRecord(),   // see sim/achievements.js
+    events: newEventRecord(),   // what each seasonal event turned up; see sim/events.js
     balloons: {},   // tile key -> {colour}; only during her birthday week
     wildJournal: {},   // wild kind -> {met, befriended}; see sim/wildlife.js
     wildArrivals: [],  // ticks of recent arrivals, for the daily limit
     party: { on: false, day: null, prizePending: false, given: [] },
+    lanterns: {},   // tile key -> {face}; only in October, see sim/lanterns.js
+    halloween: { on: false, day: null },
+    gourdDecor: {},   // tile key -> gourd type; see sim/gourddecor.js
     tasks: [],
     nextTaskId: 1,
     // See TESTING in config.js — a real farm starts with just a few seeds.
@@ -108,10 +115,14 @@ export function serialize(state) {
     fish: state.fish,
     fishJournal: state.fishJournal,
     achievements: state.achievements,
+    events: state.events,
     balloons: state.balloons,
     wildJournal: state.wildJournal,
     wildArrivals: state.wildArrivals,
     party: state.party,
+    lanterns: state.lanterns,
+    halloween: state.halloween,
+    gourdDecor: state.gourdDecor,
     tasks: state.tasks,
     nextTaskId: state.nextTaskId,
     inventory: state.inventory,
@@ -176,6 +187,9 @@ export function deserialize(data) {
     // see. Everyone starts from zero; the standing ones (ten barns, a house)
     // come back the moment the next one goes up.
     achievements: data.achievements || newAchievementRecord(),
+    // Farms saved before the Events journal start it empty, and the birthday
+    // section is filled in once from the animals on the farm — see below.
+    events: data.events || { ...newEventRecord(), birthdayChecked: false },
     // Farms saved before the birthday week simply have neither. `on` is
     // recomputed at boot from the real date (see noteParty), so a save carried
     // across the end of the week never keeps the balloons flying.
@@ -184,6 +198,11 @@ export function deserialize(data) {
     wildJournal: data.wildJournal || {},
     wildArrivals: data.wildArrivals || [],
     party: data.party || { on: false, day: null, prizePending: false, given: [] },
+    // Farms saved before the first October have neither. `on` is recomputed
+    // at boot from the real date, the same as the balloons'.
+    lanterns: data.lanterns || {},
+    halloween: data.halloween || { on: false, day: null },
+    gourdDecor: data.gourdDecor || {},
     tasks: data.tasks || [],
     nextTaskId: data.nextTaskId || 1,
     inventory: data.inventory || {},
@@ -214,6 +233,20 @@ export function deserialize(data) {
   const floating = reconcileBalloons(state);
   if (floating.dropped) {
     console.warn(`balloons cleared on load: ${floating.dropped} on land no longer owned`);
+  }
+  // One-off: a farm that had its birthday week before the Events journal
+  // existed gets its mythical horses counted from the ones standing on it.
+  if (backfillBirthday(state)) {
+    const found = Object.values(state.events.birthday.mythicals).reduce((a, b) => a + b, 0);
+    if (found) console.info(`events journal: counted ${found} mythical horses already on the farm`);
+  }
+  const lit = reconcileLanterns(state);
+  if (lit.dropped) {
+    console.warn(`jack-o'-lanterns cleared on load: ${lit.dropped} on land no longer owned`);
+  }
+  const setOut = reconcileGourdDecor(state);
+  if (setOut.dropped) {
+    console.warn(`gourd decorations cleared on load: ${setOut.dropped}`);
   }
   const bales = reconcileHay(state);
   if (bales.adopted || bales.dropped) {

@@ -7,7 +7,7 @@
 import { emitUnlessSuspended } from '../engine/events.js';
 import { addItems, itemName } from './inventory.js';
 import { OBJ, GROUND, objDef, isTilled, isWater } from '../world/tiledefs.js';
-import { cropAt, isRipe, isStalled, cropDef } from './crops.js';
+import { cropAt, isRipe, isStalled, cropDef, CROPS } from './crops.js';
 import {
   buildDef, canPlaceAt, structureAt, demolishWork, troughAnchorAt, isReserved,
   footprint, workOf, sizeOf,
@@ -21,6 +21,8 @@ import { crateAt } from './crates.js';
 import { potAt } from './pots.js';
 import { fishAt, standFor } from './fish.js';
 import { balloonAt } from './balloons.js';
+import { lanternAt } from './lanterns.js';
+import { decorGourdAt } from './gourddecor.js';
 
 /** Work is measured in ticks (1 tick = 1 second). */
 export const TASK_TYPES = {
@@ -337,9 +339,14 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
   // A balloon beats everything else on its tile. It only sits on bare walkable
   // ground, so in practice there is nothing to beat — but if the world changes
   // under one, the present should still be the thing a tap offers.
-  const popTask = () => (balloonAt(state, x, y)
-    ? { type: 'pop', x, y, work: WORK.pop, detail: 'a balloon' }
-    : null);
+  // A jack-o'-lantern is the same errand in October.
+  const popTask = () => {
+    if (balloonAt(state, x, y)) return { type: 'pop', x, y, work: WORK.pop, detail: 'a balloon' };
+    if (lanternAt(state, x, y)) {
+      return { type: 'pop', x, y, work: WORK.pop, detail: "a jack-o'-lantern", lantern: true };
+    }
+    return null;
+  };
 
   const fishTask = () => {
     const found = fishAt(state, x, y);
@@ -376,6 +383,15 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
     ? { type: 'liftpot', x, y, work: WORK.liftpot, detail: 'flower pot' }
     : null);
 
+  // A gourd set out as a decoration, broken open for its seed. First of all,
+  // since it sits on top of whatever the ground is — a road, a bed.
+  const gourdTask = () => {
+    const type = decorGourdAt(state, x, y);
+    return type
+      ? { type: 'clear', x, y, work: WORK.clearDead, detail: CROPS[type].name.toLowerCase(), gourd: true }
+      : null;
+  };
+
   // Undoing a bed. Only offered when the bed is empty: a growing crop is worth
   // real waiting time, so it must be harvested or cleared deliberately rather
   // than destroyed by a stray tap of the clear tool.
@@ -407,7 +423,7 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
 
   switch (tool) {
     case 'clear':
-      return clearTask() || potTask() || demolishTask() || untillTask();
+      return gourdTask() || clearTask() || potTask() || demolishTask() || untillTask();
 
     case 'till':
       // Only bare, unplanted, unobstructed ground can be ploughed.

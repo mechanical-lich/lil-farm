@@ -48,7 +48,32 @@ export const CROPS = {
   tomato:   { name: 'Tomato',   growTicks: 1200, seedCost: 20, yield: [3, 5] },   // 20 min
   cabbage:  { name: 'Cabbage',  growTicks: 2400, seedCost: 30, yield: [3, 4] },   // 40 min
   eggplant: { name: 'Eggplant', growTicks: 5400, seedCost: 45, yield: [4, 6] },   // 90 min
+
+  // Gourds. Grown exactly like everything above, but never sold as seed: the
+  // only way to get them is out of a jack-o'-lantern in October (see
+  // sim/lanterns.js), and once she has the seeds they grow any time of year.
+  // seedCost is what a packet resells for (half of it, like every seed) and
+  // what the profit test weighs them against; nobody pays it.
+  //
+  // Priced to sit with the long crops — a gourd is a keepsake, and a month-long
+  // event should hand out something worth planting. Slower ones pay more.
+  spaghetti:    { name: 'Spaghetti squash', growTicks: 1800, seedCost: 16, yield: [2, 4], gourd: true },  // 30 min
+  acorn:        { name: 'Acorn squash',     growTicks: 1800, seedCost: 16, yield: [2, 4], gourd: true },  // 30 min
+  pumpkin:      { name: 'Pumpkin',          growTicks: 2400, seedCost: 20, yield: [2, 3], gourd: true },  // 40 min
+  birdhouse:    { name: 'Birdhouse gourd',  growTicks: 3600, seedCost: 26, yield: [2, 3], gourd: true },  // 60 min
+  wintersquash: { name: 'Winter squash',    growTicks: 3600, seedCost: 26, yield: [2, 3], gourd: true },  // 60 min
+  swan:         { name: 'Swan gourd',       growTicks: 4800, seedCost: 34, yield: [2, 3], gourd: true },  // 80 min
+  turban:       { name: 'Turban squash',    growTicks: 5400, seedCost: 40, yield: [2, 3], gourd: true },  // 90 min
+  ghostpumpkin: { name: 'Ghost pumpkin',    growTicks: 5400, seedCost: 45, yield: [2, 3], gourd: true },  // 90 min
 };
+
+/**
+ * The gourds, in the order of their rows on assets/flora/gourds.png. The order
+ * is the sheet's: append, never reorder.
+ */
+export const GOURDS = ['pumpkin', 'wintersquash', 'birdhouse', 'acorn', 'turban', 'swan', 'spaghetti', 'ghostpumpkin'];
+
+export const isGourd = (type) => !!CROPS[type]?.gourd;
 
 /** How long watered soil stays visibly wet before drying out again. */
 export const SOIL_DRY_TICKS = 420;

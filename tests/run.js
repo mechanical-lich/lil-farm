@@ -77,6 +77,21 @@ import {
   canBalloonSpawn, reconcileBalloons, nextMythical,
 } from '../js/sim/balloons.js';
 import {
+  isHalloweenSeason, noteHalloween, lanternAt, lanternList, spawnLantern, popLantern, updateLanterns,
+  canLanternSpawn, LANTERN_INTERVAL, LANTERN_CAP, LANTERN_FACES, SEEDS as LANTERN_SEEDS, LANTERN_NAMES,
+} from '../js/sim/lanterns.js';
+import {
+  eventRows, recordHarvest, recordLantern, backfillBirthday, mythicalCount, lanternCount, gourdCount,
+  grewEveryGourd, foundEveryFace, foundEveryMythical, recordMythical,
+} from '../js/sim/events.js';
+import {
+  decorGourdAt, gourdDecorList, canPlaceGourd, placeGourd, DECOR_SEEDS,
+} from '../js/sim/gourddecor.js';
+import { GOURDS, isGourd } from '../js/sim/crops.js';
+import {
+  drawGourdSheet, drawLanternSheet, STAGES as GOURD_STAGES, RIPE as GOURD_RIPE, FACES as LANTERN_FACE_DESIGNS,
+} from '../tools/make-gourds.mjs';
+import {
   ACHIEVEMENTS, count, isEarned, earnedCount, rows as awardRows, earnedSince,
   checkAchievements, noteTaskResult, notePlayDay, dayBefore, bump, achievementDef,
   notePet,
@@ -8224,7 +8239,7 @@ function keyBehind(id) {
   const keys = ['crops', 'eggs', 'produce', 'mushrooms', 'fish', 'flowers',
     'animals', 'hands', 'water', 'barns', 'houses', 'streak',
     'sown', 'tilled', 'watered', 'cleared', 'feedFills', 'waterFills', 'pets', 'earned',
-    'balloons', 'befriended'];
+    'balloons', 'befriended', 'lanterns'];
   for (const key of keys) {
     const probe = newGame(1);
     // Big enough to clear the top rung of every ladder — the takings ladder
@@ -8602,6 +8617,373 @@ test('a farm saved before the birthday week loads without one', () => {
   const back = deserialize(JSON.parse(JSON.stringify(data)));
   assertEqual(balloonList(back), [], 'no balloons');
   assertEqual(noteParty(back, '2026-09-09').on, true, 'and the week still starts');
+});
+
+// --- October: jack-o'-lanterns and gourds ---------------------------------
+
+/** Ticks until the queue is empty, or a ceiling. */
+function runQueue(s, max = 4000) {
+  let n = 0;
+  while (s.tasks.length && n < max) { tick(s); n++; }
+}
+
+test("the jack-o'-lanterns are out for October and no other month", () => {
+  assert(isHalloweenSeason('2026-10-01'), 'the first');
+  assert(isHalloweenSeason('2026-10-31'), 'Halloween itself');
+  assert(isHalloweenSeason('2027-10-15'), 'and every year, with nothing to edit');
+  assert(!isHalloweenSeason('2026-09-30'), 'the last of September is too early');
+  assert(!isHalloweenSeason('2026-11-01'), 'the first of November is too late');
+
+  const s = farmWithMaterials(9500);
+  assertEqual(noteHalloween(s, '2026-10-11'), { on: true, fresh: true, halloween: false }, 'first look of the day');
+  assertEqual(noteHalloween(s, '2026-10-11').fresh, false, 'opening it twice is not a fresh day');
+  assertEqual(noteHalloween(s, '2026-10-31').halloween, true, 'the 31st is the night');
+  assertEqual(noteHalloween(s, '2026-11-01').on, false, 'and then it stops');
+});
+
+test("lanterns appear in October, up to the cap, on ground anybody can reach", () => {
+  const s = farmWithMaterials(9501);
+  noteHalloween(s, '2026-06-01');
+  for (let i = 0; i < LANTERN_INTERVAL * 30; i++) tick(s);
+  assertEqual(lanternList(s).length, 0, 'none in June');
+
+  noteHalloween(s, '2026-10-11');
+  for (let i = 0; i < LANTERN_INTERVAL * 200; i++) tick(s);
+  const out = lanternList(s);
+  assertEqual(out.length, LANTERN_CAP, 'October fills to the cap and stops');
+  for (const l of out) {
+    assert(l.face >= 0 && l.face < LANTERN_FACES, `face ${l.face} is on the sheet`);
+    assertEqual(s.grid.getGround(l.x, l.y), GROUND.GRASS, 'on open grass');
+    assert(findPath(s.grid, { x: s.farmer.x, y: s.farmer.y }, { x: l.x, y: l.y }, { actor: 'farmer' }),
+      `the one at ${l.x},${l.y} can be got to`);
+  }
+});
+
+test('a lantern is never put on top of something, or where he cannot reach', () => {
+  const { s, px, py } = pondFarm(9502, 9, 9);
+  const island = { x: px + 4, y: py + 4 };
+  s.grid.setGround(island.x, island.y, GROUND.GRASS);
+  assertEqual(canLanternSpawn(s, island.x, island.y), false, 'not on an island');
+
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y;
+  assert(canLanternSpawn(s, x, y), 'open grass he can walk to is fine');
+  spawnBalloon(s, x, y, 0);
+  assertEqual(canLanternSpawn(s, x, y), false, 'but not under a balloon');
+  popBalloon(s, x, y);
+  spawnLantern(s, x, y, 0);
+  assertEqual(canLanternSpawn(s, x, y), false, 'nor on another lantern');
+  assertEqual(canBalloonSpawn(s, x, y), false, 'and a balloon will not sit on one');
+
+  // It sits on the ground, so unlike a balloon it needs the ground empty.
+  const bed = { x: s.farmer.x - 2, y: s.farmer.y };
+  s.grid.setGround(bed.x, bed.y, GROUND.TILLED);
+  plantCrop(s, bed.x, bed.y, 'carrot');
+  assert(canBalloonSpawn(s, bed.x, bed.y), 'a balloon may float over a crop');
+  assertEqual(canLanternSpawn(s, bed.x, bed.y), false, 'a lantern may not sit on one');
+  const path = { x: s.farmer.x, y: s.farmer.y + 2 };
+  s.grid.setGround(path.x, path.y, GROUND.DIRT);
+  assertEqual(canLanternSpawn(s, path.x, path.y), false, 'nor on a path, where mushrooms never grow either');
+});
+
+test('nothing grows up through a lantern', () => {
+  const s = farmWithMaterials(9503);
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y;
+  assert(canSprout(s, x, y) && canSproutShroom(s, x, y), 'open grass, before');
+  spawnLantern(s, x, y, 1);
+  assertEqual(canSprout(s, x, y), false, 'no weed');
+  assertEqual(canSproutShroom(s, x, y), false, 'no mushroom');
+  assertEqual(canPlaceDecor(s, x, y, 'bush'), false, 'and no bought bush on top of it');
+});
+
+test("popping a jack-o'-lantern through the real queue gives gourd seed", () => {
+  const s = farmWithMaterials(9504);
+  noteHalloween(s, '2026-10-11');
+  noteParty(s, '2026-10-11');
+  const x = s.farmer.x + 3;
+  const y = s.farmer.y;
+  spawnLantern(s, x, y, 2);
+
+  const spec = taskForTile(s, x, y, 'auto');
+  assertEqual(spec.type, 'pop', 'a tap on a lantern pops it');
+  assertEqual(spec.detail, "a jack-o'-lantern", 'and says what it is');
+  const before = { ...s.inventory };
+  addTask(s, spec);
+  runQueue(s);
+
+  assertEqual(lanternAt(s, x, y), null, 'the lantern is gone');
+  const got = Object.keys(s.inventory).filter((id) => (s.inventory[id] || 0) > (before[id] || 0));
+  assertEqual(got.length, 1, 'one packet');
+  const crop = got[0].replace(/_seed$/, '');
+  assert(got[0].endsWith('_seed') && isGourd(crop), `${got[0]} is gourd seed`);
+  const qty = s.inventory[got[0]] - (before[got[0]] || 0);
+  assert(qty >= LANTERN_SEEDS.lo && qty <= LANTERN_SEEDS.hi, `${qty} seeds`);
+  assertEqual(count(s, 'lanterns'), 1, 'the popping counted as a lantern');
+  assertEqual(count(s, 'balloons'), 0, 'and not as a balloon');
+});
+
+test('every gourd comes out of a lantern sooner or later', () => {
+  const s = farmWithMaterials(9505);
+  const seen = new Set();
+  for (let i = 0; i < 200; i++) {
+    spawnLantern(s, s.farmer.x + 1, s.farmer.y, 0);
+    for (const id of Object.keys(popLantern(s, s.farmer.x + 1, s.farmer.y))) seen.add(id);
+  }
+  assertEqual([...seen].sort(), GOURDS.map((g) => seedIdFor(g)).sort(), 'all eight');
+});
+
+test('gourds grow like any crop, from seed to harvest', () => {
+  for (const type of GOURDS) {
+    const s = farmWithMaterials(9506);
+    const x = s.farmer.x + 2;
+    const y = s.farmer.y;
+    s.grid.setGround(x, y, GROUND.TILLED);
+    plantCrop(s, x, y, type);
+    waterTile(s, x, y);
+    for (let i = 0; i < CROPS[type].growTicks; i++) updateCrops(s);
+    assert(isRipe(cropAt(s, x, y)), `${type} ripens`);
+    const got = harvestCrop(s, x, y);
+    assert(got[type] >= CROPS[type].yield[0], `${type} harvests`);
+    assert(ITEMS[type]?.sell > 0, `${type} is worth something`);
+  }
+});
+
+test('gourds are not for sale and not on the market', () => {
+  const s = newGame(9507);
+  s.money = 100000;
+  for (let r = 0; r < 40; r++) {
+    s.tickCount = r * ROTATION_TICKS;
+    assert(!stockedSeedCrops(s).some(isGourd), `no gourd in rotation ${r}`);
+  }
+  assert(!buy(s, 'pumpkin_seed', 1).ok, 'pumpkin seed cannot be bought');
+  for (const g of GOURDS) assert(!TRADED.includes(g), `${g} has a fixed price`);
+  assertEqual(GOURDS.length, Object.keys(CROPS).filter(isGourd).length, 'GOURDS lists every gourd');
+});
+
+test('the gourd and lantern sheets are exactly what the tool draws', () => {
+  // The grids in tools/make-gourds.mjs are the source. A grid edited without
+  // rerunning the tool would leave the farm drawing the old shape.
+  for (const [file, want] of [['assets/flora/gourds.png', drawGourdSheet()],
+    ['assets/flora/jackolanterns.png', drawLanternSheet()]]) {
+    const got = decodePng(file);
+    assertEqual([got.width, got.height], [want.width, want.height], `${file} size`);
+    assert(Buffer.from(got.rgba).equals(want.rgba), `${file} pixels`);
+  }
+  const { w, h } = pngSize('assets/flora/gourds.png');
+  assertEqual(h / TILE, GOURDS.length, 'a row per gourd');
+  assertEqual(w / TILE, GOURD_STAGES, 'a column per stage');
+  assertEqual(pngSize('assets/flora/jackolanterns.png').w / TILE, LANTERN_FACES, 'a column per face');
+  assertEqual(Object.keys(LANTERN_FACE_DESIGNS).length, LANTERN_FACES, 'and a design per face');
+  for (const g of GOURDS) assert(GOURD_RIPE[g], `${g} has a design`);
+});
+
+test('lanterns survive a save and reload; the October flag does not', () => {
+  const s = farmWithMaterials(9508);
+  noteHalloween(s, '2026-10-11');
+  spawnLantern(s, s.farmer.x + 1, s.farmer.y, 3);
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual(lanternAt(back, s.farmer.x + 1, s.farmer.y), { face: 3 }, 'still there');
+  assertEqual(noteHalloween(back, '2026-11-02').on, false, 'November stops the spawning');
+
+  const old = serialize(farmWithMaterials(9509));
+  delete old.lanterns;
+  delete old.halloween;
+  delete old.gourdDecor;
+  const loaded = deserialize(JSON.parse(JSON.stringify(old)));
+  assertEqual(lanternList(loaded), [], 'a farm from before October has none');
+  assertEqual(gourdDecorList(loaded), [], 'and no gourds set out');
+  assertEqual(noteHalloween(loaded, '2026-10-01').on, true, 'and October still comes');
+});
+
+test('a gourd from the bag can be set out, and cleared for its seed', () => {
+  const s = farmWithMaterials(9510);
+  const x = s.farmer.x + 3;
+  const y = s.farmer.y;
+  s.inventory.pumpkin = 2;
+
+  assert(!placeGourd(s, 'carrot', x, y).ok, 'a carrot is not a decoration');
+  assert(placeGourd(s, 'pumpkin', x, y).ok, 'a pumpkin is');
+  assertEqual(decorGourdAt(s, x, y), 'pumpkin', 'it is on the farm');
+  assertEqual(s.inventory.pumpkin, 1, 'and one fewer in the bag');
+  assert(!placeGourd(s, 'pumpkin', x, y).ok, 'not two to a tile');
+  s.inventory.pumpkin = 0;
+  assert(!placeGourd(s, 'pumpkin', x + 1, y).ok, 'and not one she does not have');
+
+  // Nothing grows up through it, and nothing is put on top.
+  assertEqual(canSprout(s, x, y), false, 'no weed');
+  assertEqual(canSproutShroom(s, x, y), false, 'no mushroom');
+  assertEqual(canLanternSpawn(s, x, y), false, 'no lantern');
+  assertEqual(canPlaceDecor(s, x, y, 'pot'), false, 'no pot');
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual(decorGourdAt(back, x, y), 'pumpkin', 'it survives a save');
+
+  const spec = taskForTile(s, x, y, 'clear');
+  assertEqual(spec.type, 'clear', 'the clear tool takes it away');
+  assertEqual(spec.detail, 'pumpkin');
+  addTask(s, spec);
+  runQueue(s);
+  assertEqual(decorGourdAt(s, x, y), null, 'gone');
+  const seeds = s.inventory.pumpkin_seed || 0;
+  assert(seeds >= DECOR_SEEDS.lo && seeds <= DECOR_SEEDS.hi, `${seeds} pumpkin seeds back`);
+  assertEqual(s.inventory.pumpkin, 0, 'and not the pumpkin itself');
+});
+
+test('a gourd may stand on a road but not in water, on a crop, or on a site', () => {
+  const s = farmWithMaterials(9511);
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y;
+  s.grid.setGround(x, y, GROUND.DIRT);
+  assert(canPlaceGourd(s, x, y), 'a dirt path is fine');
+  s.grid.setGround(x, y, GROUND.TILLED);
+  plantCrop(s, x, y, 'carrot');
+  assertEqual(canPlaceGourd(s, x, y), false, 'not on a crop');
+  s.grid.setGround(x + 1, y, GROUND.WATER);
+  assertEqual(canPlaceGourd(s, x + 1, y), false, 'not in water');
+});
+
+// --- the Events journal ------------------------------------------------------
+
+test('the lantern faces in the sim are the faces the tool draws, in order', () => {
+  assertEqual(LANTERN_FACES, 12, 'twelve to find');
+  assertEqual(Object.keys(LANTERN_FACE_DESIGNS), LANTERN_NAMES, 'same names, same columns');
+});
+
+test('popping a lantern marks its face off in the Events journal', () => {
+  const s = farmWithMaterials(9520);
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y;
+  spawnLantern(s, x, y, 9);
+  addTask(s, taskForTile(s, x, y, 'auto'));
+  runQueue(s);
+  assertEqual(lanternCount(s, LANTERN_NAMES[9]), 1, `the ${LANTERN_NAMES[9]} one is found`);
+  assertEqual(lanternCount(s, LANTERN_NAMES[0]), 0, 'and nothing else');
+});
+
+test('a gourd counts as found when it is harvested, through the real queue', () => {
+  const s = farmWithMaterials(9521);
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y;
+  s.grid.setGround(x, y, GROUND.TILLED);
+  plantCrop(s, x, y, 'swan');
+  const crop = cropAt(s, x, y);
+  crop.watered = true;
+  crop.age = CROPS.swan.growTicks;
+  crop.ripeAt = s.tickCount;
+  assertEqual(gourdCount(s, 'swan'), 0, 'not yet');
+  addTask(s, taskForTile(s, x, y, 'harvest'));
+  runQueue(s);
+  assert(gourdCount(s, 'swan') >= CROPS.swan.yield[0], 'grown, as many as were picked');
+
+  recordHarvest(s, 'carrot', 5);
+  assertEqual(eventRows(s)[1].shelves[1].items.every((i) => i.id !== 'carrot'), true, 'a carrot is not a gourd');
+});
+
+test('a mythical out of a balloon is marked off under the birthday', () => {
+  const s = farmWithMaterials(9522);
+  noteParty(s, '2026-09-09');
+  const x = s.farmer.x + 3;
+  const y = s.farmer.y;
+  spawnBalloon(s, x, y, 0);
+  addTask(s, taskForTile(s, x, y, 'auto'));
+  runQueue(s);
+  const type = s.animals[0].type;
+  assertEqual(mythicalCount(s, type), 1, `the ${type} is in the journal`);
+});
+
+test('finding every mythical horse earns its award', () => {
+  const s = farmWithMaterials(9528);
+  for (const type of MYTHICALS.slice(1)) recordMythical(s, type);
+  checkAchievements(s);
+  assert(!foundEveryMythical(s) && !isEarned(s, 'mythical_master'), 'three of four is not all');
+  recordMythical(s, MYTHICALS[0]);
+  checkAchievements(s);
+  assert(isEarned(s, 'mythical_master'), 'all four is');
+});
+
+test('a farm that already has all four horses earns it at boot', () => {
+  // Her birthday week came before this award. The backfill counts the horses
+  // on the farm, and the day streak noted at boot runs the checks.
+  const s = farmWithMaterials(9529);
+  MYTHICALS.forEach((type, i) => makeAnimal(s, type, s.farmer.x + 2 + i, s.farmer.y + 1, 0));
+  const data = JSON.parse(JSON.stringify(serialize(s)));
+  delete data.events;
+  const back = deserialize(data);
+  assert(!isEarned(back, 'mythical_master'), 'not handed out by loading alone');
+  notePlayDay(back, '2026-10-12');
+  assert(isEarned(back, 'mythical_master'), 'but the first check after it');
+});
+
+test('finding every lantern face earns its award', () => {
+  const s = farmWithMaterials(9527);
+  for (let f = 1; f < LANTERN_FACES; f++) recordLantern(s, f);
+  checkAchievements(s);
+  assert(!foundEveryFace(s) && !isEarned(s, 'face_collector'), 'eleven of twelve is not all');
+  recordLantern(s, 0);
+  checkAchievements(s);
+  assert(isEarned(s, 'face_collector'), 'all twelve is');
+});
+
+test('growing every gourd earns its award', () => {
+  const s = farmWithMaterials(9523);
+  for (const g of GOURDS.slice(1)) recordHarvest(s, g, 1);
+  checkAchievements(s);
+  assert(!grewEveryGourd(s) && !isEarned(s, 'gourd_master'), 'seven of eight is not all');
+  recordHarvest(s, GOURDS[0], 1);
+  checkAchievements(s);
+  assert(isEarned(s, 'gourd_master'), 'all eight is');
+});
+
+test('a farm from before the Events journal counts its mythicals once, from the animals', () => {
+  // The one-off backfill: she had her birthday week before this record
+  // existed, so the horses standing on the farm are what she was given.
+  const s = farmWithMaterials(9524);
+  for (const [type, dx] of [['unicorn', 2], ['pegasus', 3], ['pegasus', 4], ['hippocampus', 5]]) {
+    makeAnimal(s, type, s.farmer.x + dx, s.farmer.y + 1, 0);
+  }
+  s.party.given = ['unicorn', 'pegasus', 'nightmare'];   // what the balloons remember
+  const data = JSON.parse(JSON.stringify(serialize(s)));
+  delete data.events;
+
+  const back = deserialize(data);
+  assertEqual(mythicalCount(back, 'unicorn'), 1, 'one unicorn');
+  assertEqual(mythicalCount(back, 'pegasus'), 2, 'two pegasi, counted off the farm');
+  assertEqual(mythicalCount(back, 'nightmare'), 1, "the balloons' own list counts too");
+  assertEqual(mythicalCount(back, 'hippocampus'), 1, 'and the hippocampus');
+
+  // Exactly once: loading again, or calling it again, never adds to it.
+  assertEqual(backfillBirthday(back), false, 'already done');
+  const again = deserialize(JSON.parse(JSON.stringify(serialize(back))));
+  assertEqual(mythicalCount(again, 'pegasus'), 2, 'not counted twice');
+
+  // A brand-new farm has nothing to backfill, and its later presents count normally.
+  const fresh = newGame(9525);
+  assertEqual(fresh.events.birthdayChecked, true, 'a new farm starts with it done');
+});
+
+test('the Events tab lists each event with every thing it can turn up', () => {
+  const s = farmWithMaterials(9526);
+  recordLantern(s, 0);
+  const rows = eventRows(s);
+  assertEqual(rows.map((e) => e.id), ['birthday', 'halloween'], 'in calendar order');
+  assertEqual(rows[0].shelves[0].items.length, MYTHICALS.length, 'every mythical');
+  assertEqual(rows[1].shelves[0].items.length, LANTERN_FACES, 'every face');
+  assertEqual(rows[1].shelves[1].items.length, GOURDS.length, 'every gourd');
+  assertEqual(rows[1].shelves[0].items[0].count, 1, 'with what has been found');
+});
+
+test('the Events art in the css matches the sheets', () => {
+  // Sliding one background image, like the other journals: the size has to
+  // name the whole sheet, or every slot shows a slice of its neighbour.
+  const css = readFileSync('css/style.css', 'utf8');
+  for (const [sheet, file] of [['mythical', 'assets/animals/mythical.png'],
+    ['lanterns', 'assets/flora/jackolanterns.png'], ['gourds', 'assets/flora/gourds.png']]) {
+    const m = css.match(new RegExp(`\\.wild-art\\.sheet-${sheet}\\s*\\{[^}]*background-size:\\s*(\\d+)px\\s+(\\d+)px`));
+    assert(m, `${sheet} has a background-size`);
+    const { w, h } = pngSize(file);
+    assertEqual([+m[1], +m[2]], [w * 3, h * 3], `${sheet} at three times`);
+  }
 });
 
 // --- wild animals -------------------------------------------------------

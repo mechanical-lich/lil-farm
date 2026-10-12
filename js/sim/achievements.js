@@ -38,7 +38,10 @@
 
 import { emitUnlessSuspended } from '../engine/events.js';
 import { ANIMALS, NOT_FOR_SALE } from './animals.js';
-import { CROPS } from './crops.js';
+import { CROPS, GOURDS } from './crops.js';
+import { grewEveryGourd, foundEveryFace, foundEveryMythical } from './events.js';
+import { MYTHICALS } from './balloons.js';
+import { LANTERN_FACES } from './lanterns.js';
 import { SPECIES, MUSHROOMS, journalCount } from './mushrooms.js';
 import { FLOWER_KINDS, WILD_HUES } from './flowergenes.js';
 import { FISH_IDS, caughtBefore, itemFor } from './fish.js';
@@ -297,6 +300,14 @@ export const ACHIEVEMENTS = [
     { at: 100, id: 'birthday_girl', name: 'The birthday girl' },
   ]),
 
+  // October's, the same shape: only reachable while the lanterns are out, so
+  // the top rung is a good month's popping. See sim/lanterns.js.
+  ...ladder('lanterns', (n) => `Popped ${commas(n)} jack-o'-lanterns`, [
+    { at: 10, id: 'trick_or_treat', name: 'Trick or treat' },
+    { at: 50, id: 'jack_of_all_lanterns', name: "Jack of all lanterns" },
+    { at: 100, id: 'great_pumpkin', name: 'The Great Pumpkin' },
+  ]),
+
   // --- wild animals -------------------------------------------------------
   //
   // Befriended ones are counted as they are won over; the collections read the
@@ -392,6 +403,32 @@ export const ACHIEVEMENTS = [
     check: (s) => FLOWER_KINDS.every(
       (kind) => (((s.flowerJournal || {})[kind] || {}).hues || []).length >= WILD_HUES,
     ),
+  },
+  {
+    // Read off the Events journal, which was filled in from the horses on the
+    // farm for anybody whose birthday week came first — so a farm that already
+    // has all four earns this on the next check after loading (the day streak
+    // at boot is one), rather than waiting for next September.
+    id: 'mythical_master',
+    name: 'Stuff of legend',
+    blurb: `Found all ${MYTHICALS.length} mythical horses`,
+    check: foundEveryMythical,
+  },
+  {
+    // Every face on the sheet popped at least once. The faces are drawn at
+    // random, so the last one or two are the long wait.
+    id: 'face_collector',
+    name: 'Face in the crowd',
+    blurb: `Found all ${LANTERN_FACES} jack-o'-lantern faces`,
+    check: foundEveryFace,
+  },
+  {
+    // Grown, not merely given the seed for: harvested at least once each. See
+    // sim/events.js, which keeps the record.
+    id: 'gourd_master',
+    name: 'Gourd-geous',
+    blurb: `Grew all ${GOURDS.length} gourds`,
+    check: grewEveryGourd,
   },
   {
     id: 'bigger_boat',
@@ -550,7 +587,7 @@ export function noteTaskResult(state, task, gained) {
   else if (task.type === 'till') bump(state, 'tilled');
   else if (task.type === 'water') bump(state, 'watered');
   else if (task.type === 'clear' || task.type === 'chop') bump(state, 'cleared');
-  else if (task.type === 'pop') bump(state, 'balloons');
+  else if (task.type === 'pop') bump(state, task.lantern ? 'lanterns' : 'balloons');
 
   // Only counts if a farmhand was actually on its way to that animal. Merely
   // employing somebody and doing your own milking is not beating them to it.

@@ -51,9 +51,10 @@ export const MARKET_INTERVAL = 60;
  * Deliberately not wood or stone — they are what buildings are made of, and a
  * barn whose price wandered would be a nuisance rather than a decision. Nor
  * mushrooms: those are the foraging fantasy, and haggling over a morel cheapens
- * finding one.
+ * finding one. Nor gourds, for much the same reason: they only come out of a
+ * jack-o'-lantern, and the market's shares describe an ordinary farm.
  */
-export const TRADED = [...Object.keys(CROPS), 'egg', 'milk', 'goat_milk', 'wool'];
+export const TRADED = [...Object.keys(CROPS).filter((c) => !CROPS[c].gourd), 'egg', 'milk', 'goat_milk', 'wool'];
 
 /**
  * What share of the market each good normally accounts for.

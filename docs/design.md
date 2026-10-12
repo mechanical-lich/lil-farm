@@ -614,3 +614,23 @@ Farmers can automatically open/close gates to move through them
 ## Thoughts 
 - There's farm tiles but IDK what to do with them gameplay wise yet.
 - It should be possible to buy more land at some point
+## October
+
+Jack-o'-lanterns turn up on the farm for the whole of October, built exactly the way the birthday balloons are (`sim/lanterns.js`): the date is handed in at boot by `noteHalloween`, the spawner runs in the tick off the flag that sets, and catch-up spawns them for the time she was away.  Same pace and cap as the balloons — one attempt every five minutes, at most four waiting.  Twelve faces, drawn on `assets/flora/jackolanterns.png` and named in `LANTERN_NAMES` (a lantern saves its column, so faces are only ever appended).
+
+- **A lantern sits on the ground, where a balloon floats over it,** so it wants the ground a mushroom wants: open grass with nothing on it, that the farmer can walk to.  Weeds, mushrooms, wild flowers, balloons and bought decorations all check for one, so nothing grows up through it or is put on top.  It sorts by row with the objects, so the farmer walking up behind one is hidden by it.
+- **Popping one gives a packet of gourd seed** — three to six of one of eight gourds, all equally likely.  The pop is the balloon's task with a `lantern` flag, and counts as a lantern, not a balloon, so the balloon achievements stay her birthday's.  Popping 10, 50 and 100 earns *Trick or treat*, *Jack of all lanterns* and *The Great Pumpkin*; growing all eight gourds earns *Gourd-geous*; popping every one of the twelve faces earns *Face in the crowd*.
+- **Gourds are ordinary crops** in `CROPS`, marked `gourd: true`: planted, watered, grown and harvested by exactly the code everything else uses, and they grow any time of year once she has the seed.  They are never in the shop, and they are off the market (a fixed price, like mushrooms), because the market's shares describe an ordinary farm and these only come out of a lantern.  Prices sit with the long crops and the slower ones pay more; the profit test holds them to the same shape as everything else, which is why the ghost pumpkin sells for $90 rather than $95 — at $95 it beat the carrot on profit per minute.
+- **A harvested gourd can be set out as a decoration** from the bag (`sim/gourddecor.js`): any dry ground she owns, road and paths included, since a pumpkin by the barn door is the point.  It lives in its own layer like a flower pot, blocks nobody, and **clearing it breaks it open for two to four of its seed** — the way gourd seed keeps coming once October is over.
+- **Lanterns left standing after the 31st stay,** like the balloons do.
+- The art is generated, from text grids in `tools/make-gourds.mjs`: a row per gourd of seedling, young vine, ripe, withered, and set out (ripe with the leaves off); the outline is the shared rule in `tools/outline.mjs`.  A test holds both sheets to the tool's output byte for byte.
+
+## The Events journal
+
+A sixth journal tab, organised by **occasion** rather than by kind of thing (`sim/events.js`): a section per event, in calendar order, each with shelves of what that event can turn up.  The reason to look is "how much of October have I got", and a unicorn means nothing next to a pumpkin.
+
+- **Birthday** — the four mythical horses, with how many of each.  Having all four earns *Stuff of legend*; because it reads this backfilled section, a farm that already has all four earns it at the first check after loading (the day streak noted at boot).
+- **Halloween** — the twelve lantern faces, with how many of each were popped, and the eight gourds, with how many were grown.  A gourd counts when it is **harvested**, not when its seed turns up: the collection is of gourds she raised, which is what *Gourd-geous* means.
+- Recorded from `farmer.js` as the work lands, so `events.js` reads the other modules' constants and nothing reads it back — no import cycle.
+- **The birthday section was backfilled once.**  Her birthday week came before this journal, so a save without an events record is counted on load from the mythicals standing on the farm (they can never be sold, so every one she was given is still there), alongside the balloons' own list of what it handed out, taking the larger of the two.  A flag makes it run exactly once; a brand-new farm starts with the flag set because it has nothing to count.
+- Six tabs needed the tab labels tightened to 13px with 2px sides to fit her phone.

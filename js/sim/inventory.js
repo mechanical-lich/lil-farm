@@ -35,6 +35,16 @@ export const ITEMS = {
   tomato: { name: 'Tomato', sell: 20, group: 'crop' },
   cabbage: { name: 'Cabbage', sell: 40, group: 'crop' },
   eggplant: { name: 'Eggplant', sell: 45, group: 'crop' },
+  // Gourds: only ever grown from jack-o'-lantern seed. A fixed price, like a
+  // mushroom — they are not on the market (see TRADED in sim/market.js).
+  spaghetti: { name: 'Spaghetti squash', sell: 30, group: 'crop' },
+  acorn: { name: 'Acorn squash', sell: 32, group: 'crop' },
+  pumpkin: { name: 'Pumpkin', sell: 45, group: 'crop' },
+  birdhouse: { name: 'Birdhouse gourd', sell: 60, group: 'crop' },
+  wintersquash: { name: 'Winter squash', sell: 58, group: 'crop' },
+  swan: { name: 'Swan gourd', sell: 75, group: 'crop' },
+  turban: { name: 'Turban squash', sell: 85, group: 'crop' },
+  ghostpumpkin: { name: 'Ghost pumpkin', sell: 90, group: 'crop' },
   egg: { name: 'Egg', sell: 25, group: 'produce' },
   milk: { name: 'Milk', sell: 60, group: 'produce' },
   // A goat gives less than a cow and gives it sooner, so a goat pays for itself

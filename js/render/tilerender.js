@@ -6,7 +6,7 @@ import { TILE } from '../config.js';
 /** Half a tile: autotiling works a quarter of a tile at a time. */
 const HALF = TILE / 2;
 import { GROUND, OBJ, isTilled, isWater } from '../world/tiledefs.js';
-import { SPRITES, TOWN, WATER, RIVER, BARN, HOUSE, DECORATIONS, CAPSULES, srcRect, sheetFor } from './sprites.js';
+import { SPRITES, TOWN, WATER, RIVER, BARN, HOUSE, DECORATIONS, CAPSULES, GOURD_DECOR, srcRect, sheetFor } from './sprites.js';
 import { mushroomAt } from '../sim/mushrooms.js';
 import { crateAt, CRATE_CAPACITY } from '../sim/crates.js';
 import { hayAt, hayLeft, HAY_HELPINGS } from '../sim/hay.js';
@@ -14,6 +14,8 @@ import { toolList } from '../sim/tools.js';
 import { potAt, potList } from '../sim/pots.js';
 import { fishList } from '../sim/fish.js';
 import { balloonList } from '../sim/balloons.js';
+import { lanternList } from '../sim/lanterns.js';
+import { gourdDecorList } from '../sim/gourddecor.js';
 import { shadowFor, SHADOW_ALPHA } from './fishart.js';
 import { flowerAt, isWatered } from '../sim/flowers.js';
 import { flowerCanvas } from './flowerart.js';
@@ -318,6 +320,8 @@ export function drawObjects(ctx, sheets, state, view, entityRows = null) {
 
   drawFish(ctx, sheets, state, view);
   drawPots(ctx, sheets, state, view);
+  const lanterns = lanternsByRow(state, view);
+  const gourds = byRow(gourdDecorList(state), view);
 
   for (let y = view.y0; y <= view.y1; y++) {
     for (let x = view.x0; x <= view.x1; x++) {
@@ -325,6 +329,16 @@ export function drawObjects(ctx, sheets, state, view, entityRows = null) {
       // Building footprints are drawn whole, from the building record.
       if (o === OBJ.NONE || o === OBJ.BUILDING) continue;
       drawObject(ctx, sheets, state, o, x, y);
+    }
+    // Jack-o'-lanterns sit on the ground like any object, so they sort by row
+    // with them: the farmer walking up behind one is hidden by it.
+    for (const l of lanterns.get(y) || []) {
+      ctx.drawImage(sheets.lanterns, (l.face || 0) * TILE, 0, TILE, TILE, l.x * TILE, y * TILE, TILE, TILE);
+    }
+    // And gourds she has set out, the same way.
+    for (const g of gourds.get(y) || []) {
+      const sprite = GOURD_DECOR[g.type];
+      if (sprite) blit(ctx, sheets, sprite, g.x * TILE, y * TILE);
     }
     // Draw each building as its bottom row comes up, so it sorts against other
     // objects the same way a tall sprite does: things lower on screen overlap it.
@@ -445,6 +459,22 @@ function drawBalloons(ctx, sheets, state, view) {
     ctx.drawImage(sheet, (colour || 0) * TILE, 0, TILE, TILE,
       x * TILE, y * TILE - LIFT + bob, TILE, TILE);
   }
+}
+
+/** Things sitting on tiles in view, by row, for drawObjects to place as it goes. */
+function byRow(list, view) {
+  const rows = new Map();
+  for (const t of list) {
+    if (t.x < view.x0 || t.x > view.x1 || t.y < view.y0 || t.y > view.y1) continue;
+    if (!rows.has(t.y)) rows.set(t.y, []);
+    rows.get(t.y).push(t);
+  }
+  return rows;
+}
+
+/** The jack-o'-lanterns in view, by row. */
+function lanternsByRow(state, view) {
+  return byRow(lanternList(state), view);
 }
 
 /** How far off the ground a balloon floats. */

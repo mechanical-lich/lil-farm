@@ -8,6 +8,8 @@
 //   'battle'  — assets/battle_tilemap_packed.png  water: ponds and rivers
 //   'barn'    — assets/barn.png                  the barn, gathered and extended
 //   'flowers' — assets/flora/flowers.png               eight flowers in three greys
+//   'gourds'  — assets/flora/gourds.png                a row per gourd: growth stages, withered, set out
+//   'lanterns' — assets/flora/jackolanterns.png        one row of jack-o'-lantern faces
 //
 // Both share the same palette (#84c669 grass, #eaa56c dirt), so tiles from the
 // two sheets sit next to each other seamlessly.
@@ -22,6 +24,7 @@
 
 import { TILE } from '../config.js';
 import { setAnimalVariants } from '../sim/animals.js';
+import { GOURDS } from '../sim/crops.js';
 import { useFlowerSheet } from './flowerart.js';
 import { useAquaticSheet } from './fishart.js';
 
@@ -197,6 +200,8 @@ export const SPRITES = {
     carrot: [7, 0], eggplant: [7, 1], corn: [7, 2],
     tomato: [7, 3], cabbage: [7, 4], wheat: [7, 5],
   },
+  // The gourds have their own sheet, a row each in GOURDS order: seedling,
+  // young, ripe, withered. Filled in below from GOURDS rather than typed out.
   itemIcons: {
     carrot: [8, 0], eggplant: [8, 1], corn: [8, 2],
     tomato: [8, 3], cabbage: [8, 4], wheat: [8, 5],
@@ -269,6 +274,15 @@ export const SPRITES = {
   farmer: [0, 9],
   farmerHat: [1, 9],
 };
+
+// The gourds, from their own sheet. See tools/make-gourds.mjs.
+GOURDS.forEach((type, row) => {
+  SPRITES.cropStages[type] = [[0, row, 'gourds'], [1, row, 'gourds'], [2, row, 'gourds']];
+  SPRITES.cropDead[type] = [3, row, 'gourds'];
+});
+
+/** A gourd set out as a decoration: picked, so no leaves. See sim/gourddecor.js. */
+export const GOURD_DECOR = Object.fromEntries(GOURDS.map((type, row) => [type, [4, row, 'gourds']]));
 
 /**
  * The barn, on its own sheet — see tools/make-barn-sheet.mjs, which builds it.
@@ -395,7 +409,7 @@ function loadImage(src) {
  */
 export async function loadSheets() {
   const [farm, town, emotes, shrooms, animals, battle, barn, flowers, decor, aquatic,
-    mythical, balloons, wildlife, exotic] = await Promise.all([
+    mythical, balloons, wildlife, exotic, gourds, lanterns] = await Promise.all([
     loadImage('assets/tilemap_packed.png'),
     loadImage('assets/town_tilemap_packed.png'),
     loadImage('assets/emotes.png'),
@@ -410,6 +424,8 @@ export async function loadSheets() {
     loadImage('assets/animals/balloons.png'),
     loadImage('assets/animals/wildlife.png'),
     loadImage('assets/animals/exotic.png'),
+    loadImage('assets/flora/gourds.png'),
+    loadImage('assets/flora/jackolanterns.png'),
   ]);
   buildCapsules(farm);
 
@@ -434,6 +450,9 @@ export async function loadSheets() {
     mythical, balloons,
     // The wild animals: one column each, an animal per row. See sim/wildkinds.js.
     wildlife, exotic,
+    // October: the gourds' growth stages, and the jack-o'-lanterns' faces.
+    // Both drawn by tools/make-gourds.mjs.
+    gourds, lanterns,
   };
 }
 

@@ -9,8 +9,9 @@ import { on, emit } from '../engine/events.js';
 import { inventoryList } from '../sim/inventory.js';
 import { isFlowerSeed } from '../sim/flowergenes.js';
 import { taskLabel } from '../sim/tasks.js';
+import { isGourd } from '../sim/crops.js';
 
-export function initHud(state) {
+export function initHud(state, { onPlaceGourd } = {}) {
   const money = document.getElementById('hud-money');
   // The status chip is also the task-queue button (see taskpanel.js); the HUD
   // only owns the text inside it, never the element's own classes or state.
@@ -45,7 +46,12 @@ export function initHud(state) {
     const rest = items.filter((i) => !isFlowerSeed(i.id));
     const seeds = packets.reduce((n, i) => n + i.qty, 0);
 
-    const rows = rest.map((i) => `<li><span>${i.name}</span><b>${i.qty}</b></li>`);
+    // A gourd can be set out on the farm as well as sold, so its row carries a
+    // way to do that — see sim/gourddecor.js.
+    const rows = rest.map((i) => (isGourd(i.id) && onPlaceGourd
+      ? `<li class="placeable"><span>${i.name}</span><b>${i.qty}</b>`
+        + `<button data-place="${i.id}">Place</button></li>`
+      : `<li><span>${i.name}</span><b>${i.qty}</b></li>`));
     if (seeds > 0) {
       const plural = packets.length === 1 ? 'colour' : 'colours';
       rows.push(`<li><span>Flower seeds<em>${packets.length} ${plural} — see the journal</em></span>`
@@ -55,6 +61,16 @@ export function initHud(state) {
       ? rows.join('')
       : '<li class="empty">Nothing yet. Clear some land!</li>';
   }
+
+  // Out to the map to set it down, and back to the bag afterwards, so a row of
+  // pumpkins along the path is a few taps rather than a trip through the menus
+  // for every one.
+  invList.addEventListener('click', (e) => {
+    const hit = e.target.closest('button[data-place]');
+    if (!hit) return;
+    setInvOpen(false);
+    onPlaceGourd(hit.dataset.place, () => { setInvOpen(true); renderInventory(); });
+  });
 
   function renderStatus() {
     const task = state.tasks.find((t) => t.id === state.farmer.taskId);

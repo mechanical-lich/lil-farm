@@ -604,6 +604,29 @@ li.market.glut .market-top small { color: #a33d2e; }
   background-size: 48px 864px;    /* 18 animals at 48px */
 }
 
+/* The Events tab borrows the wildlife cells, with the event sheets. */
+.wild-art.sheet-mythical {
+  background-image: url(../assets/animals/mythical.png);
+  background-size: 192px 48px;    /* 4 horses at 48px */
+}
+
+.wild-art.sheet-lanterns {
+  background-image: url(../assets/flora/jackolanterns.png);
+  background-size: 576px 48px;    /* 12 faces at 48px */
+}
+
+.wild-art.sheet-gourds {
+  background-image: url(../assets/flora/gourds.png);
+  background-size: 240px 384px;   /* 5 stages x 8 gourds at 48px */
+}
+
+.event-shelf {
+  font-size: 12px;
+  font-weight: 700;
+  color: #7a604a;
+  margin: 2px 0 6px;
+}
+
 .wild.unmet .wild-art {
   background-color: rgba(185, 138, 84, 0.16);
   border-style: dashed;
@@ -860,6 +883,8 @@ li.market.glut .market-top small { color: #a33d2e; }
 
 #inv-list li { justify-content: space-between; }
 #inv-list b { font-variant-numeric: tabular-nums; }
+/* A gourd's row carries a Place button: the count sits beside it, not mid-row. */
+#inv-list li.placeable b { margin-left: auto; margin-right: 10px; }
 
 /* --- shop --------------------------------------------------------------- */
 
@@ -884,15 +909,16 @@ li.market.glut .market-top small { color: #a33d2e; }
      has a Wildlife tab: at the old padding five words came to about 412px
      against 369 on her phone and the last tab ran off the edge, and equal
      widths fixed that only by clipping "Mushrooms" instead. Content-sized tabs
-     at this padding total about 330px, so every word fits whole. */
+     at this padding total about 330px, so every word fits whole.
+     Six since Events: 13px with 2px sides brings them back inside 369px. */
   flex: 1 1 auto;
   min-width: 0;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: 13px;
   border-radius: 10px 10px 0 0;
   border-bottom: none;
   margin-bottom: -2px;
-  padding: 8px 4px;
+  padding: 8px 2px;
   box-shadow: none;
   background: rgba(185, 138, 84, 0.18);
   border-color: transparent;

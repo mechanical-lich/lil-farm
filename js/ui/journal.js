@@ -26,6 +26,8 @@ import { flowerDataUrl } from '../render/flowerart.js';
 import { rows as awardRows, earnedCount, ACHIEVEMENTS } from '../sim/achievements.js';
 import { journalRows as wildJournalRows, kindsMet } from '../sim/wildlife.js';
 import { WILD_IDS } from '../sim/wildkinds.js';
+import { eventRows } from '../sim/events.js';
+import { animalDef } from '../sim/animals.js';
 import { esc } from './esc.js';
 
 export function initJournal(state, { onPlantFlower } = {}) {
@@ -64,12 +66,14 @@ export function initJournal(state, { onPlantFlower } = {}) {
     title.textContent = tab === 'mushrooms' ? 'Mushroom journal'
       : tab === 'flowers' ? 'Flower journal'
         : tab === 'fish' ? 'Fish journal'
-          : tab === 'wild' ? 'Wildlife journal' : 'Achievements';
+          : tab === 'wild' ? 'Wildlife journal'
+            : tab === 'events' ? 'Events' : 'Achievements';
 
     if (tab === 'mushrooms') renderMushrooms();
     else if (tab === 'flowers') renderFlowers();
     else if (tab === 'fish') renderFish();
     else if (tab === 'wild') renderWild();
+    else if (tab === 'events') renderEvents();
     else renderAwards();
   }
 
@@ -138,6 +142,47 @@ export function initJournal(state, { onPlantFlower } = {}) {
       <li class="journal"><div class="wild-grid">${rows.filter((r) => r.sheet === sheet).map(cell).join('')}</div></li>`;
 
     list.innerHTML = shelf('wildlife', 'From round here') + shelf('exotic', 'From far away');
+  }
+
+  /**
+   * The seasonal events, each a section of its own with what that occasion
+   * can turn up — see sim/events.js.
+   *
+   * Grouped by event rather than by kind of thing, because the reason to look
+   * is "how much of October have I got", and a unicorn means nothing next to a
+   * pumpkin. Same empty-slot rule as every other journal: the question marks
+   * are what say there is more to find, and nothing is named until it's found.
+   */
+  function renderEvents() {
+    const events = eventRows(state);
+    const all = events.flatMap((e) => e.shelves.flatMap((s) => s.items));
+    note.textContent = `${all.filter((i) => i.count > 0).length} of ${all.length} found`;
+
+    // Where each kind of thing lives on its sheet, and what to call it.
+    const look = {
+      mythicals: (i) => ({ sheet: 'mythical', pos: `-${i.col * 48}px 0`, name: animalDef(i.id)?.name || i.id }),
+      lanterns: (i) => ({ sheet: 'lanterns', pos: `-${i.col * 48}px 0`, name: i.id[0].toUpperCase() + i.id.slice(1) }),
+      gourds: (i) => ({ sheet: 'gourds', pos: `-192px -${i.row * 48}px`, name: i.name }),
+    };
+    const counted = { mythicals: (n) => `×${n}`, lanterns: (n) => `${n} popped`, gourds: (n) => `${n} grown` };
+
+    const cell = (shelf, i) => {
+      if (i.count <= 0) return '<figure class="wild unmet"><div class="wild-art"></div><figcaption>?</figcaption></figure>';
+      const { sheet, pos, name } = look[shelf.id](i);
+      return `<figure class="wild" title="${esc(name)}">
+           <div class="wild-art sheet-${sheet}" style="background-position:${pos}"></div>
+           <figcaption>${esc(name)}<b>${counted[shelf.id](i.count)}</b></figcaption>
+         </figure>`;
+    };
+
+    list.innerHTML = events.map((e) => {
+      const items = e.shelves.flatMap((s) => s.items);
+      const found = items.filter((i) => i.count > 0).length;
+      return `<li class="sell-head event-head"><span>${e.icon} ${esc(e.name)}</span><b>${found} of ${items.length}</b></li>`
+        + e.shelves.map((shelf) => `
+          <li class="journal"><div class="event-shelf">${esc(shelf.name)}</div>
+            <div class="wild-grid">${shelf.items.map((i) => cell(shelf, i)).join('')}</div></li>`).join('');
+    }).join('');
   }
 
   /**
@@ -222,6 +267,8 @@ export function initJournal(state, { onPlantFlower } = {}) {
   on('achievement:earned', refresh);
   on('wild:met', refresh);
   on('wild:befriended', refresh);
+  on('lantern:popped', refresh);
+  on('balloon:mythical', refresh);
 
   return { render };
 }

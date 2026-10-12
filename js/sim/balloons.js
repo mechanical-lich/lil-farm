@@ -153,6 +153,8 @@ export function canBalloonSpawn(state, x, y) {
   if (grid.getObject(x, y) !== OBJ.NONE) return false;
   if (!grid.isWalkable(x, y, 'farmer')) return false;
   if (balloonAt(state, x, y)) return false;
+  if ((state.lanterns || {})[balloonKey(x, y)]) return false;   // a jack-o'-lantern; see sim/lanterns.js
+  if ((state.gourdDecor || {})[balloonKey(x, y)]) return false;  // a gourd set out; see sim/gourddecor.js
 
   // A zero-length path counts: he may already be standing there.
   return !!findPath(state.grid, { x: state.farmer.x, y: state.farmer.y }, { x, y },
