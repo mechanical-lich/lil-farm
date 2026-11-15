@@ -6,7 +6,17 @@ export const TILE = 16;
 export const TICK_MS = 1000;            // one simulation tick = 1 second
 export const MAX_CATCHUP_DAYS = 7;      // safety valve on offline catch-up
 export const MAX_CATCHUP_TICKS = MAX_CATCHUP_DAYS * 24 * 60 * 60 * 1000 / TICK_MS;
-export const CATCHUP_CHUNK = 20000;     // ticks per chunk before yielding to the browser
+export const CATCHUP_CHUNK = 20000;     // most ticks per chunk before yielding to the browser
+// ...and the longest a chunk may run, whichever comes first. A count alone
+// can't keep the progress bar moving: twenty thousand ticks is a blink on an
+// empty farm and several seconds on a busy one on a phone, with the screen
+// frozen for each of them. Short enough to look smooth, long enough that the
+// yields between chunks (a few milliseconds each) stay a small tax.
+export const CATCHUP_SLICE_MS = 50;
+// With the tab hidden nobody is watching a bar, and the browser throttles
+// timers to about one a second — so short slices there would mean doing 50ms
+// of work a second. Long ones keep a backgrounded catch-up moving.
+export const CATCHUP_HIDDEN_SLICE_MS = 1000;
 
 // --- Persistence --------------------------------------------------------
 export const SAVE_KEY = 'lilfarm.save.v1';

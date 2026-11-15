@@ -94,7 +94,7 @@ export function updateWildlife(state) {
     if (gone) removeAnimal(state, a, a.leaving ? 'shooed' : 'moved on');
   }
 
-  intimidate(state);
+  if (state.tickCount % SCARE_INTERVAL === 0) intimidate(state);
   turkeyOfTheDay(state);
 
   if (state.tickCount % WILD_INTERVAL !== 0) return;
@@ -155,6 +155,18 @@ export function nextTurkey(state) {
 
 // --- scaring your animals -------------------------------------------------
 
+/**
+ * Ticks between looks at who a wild animal has come close to.
+ *
+ * Every tick was the obvious choice and a wasteful one: it measures every wild
+ * animal against every one of yours, and on a farm with a few hundred friends
+ * that is a thousand distances a second to notice something that happens a few
+ * times an hour. Half a minute is still well inside the time a wild animal
+ * spends near anything — it would have to wander into reach and out again
+ * between two looks to be missed.
+ */
+export const SCARE_INTERVAL = 30;
+
 /** The closest a wild animal can scare from, and how much further full intimidation adds. */
 const SCARE_BASE = 3;
 const SCARE_REACH = 5;
@@ -204,8 +216,12 @@ const chebyshev = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
  * below. A lion that trusts you is one of yours.
  */
 export function intimidate(state) {
+  // Nobody wild about, nobody to be frightened: the usual case, and on a farm
+  // with a few hundred friends not worth listing them all every tick to find out.
+  const wild = wildOnes(state);
+  if (wild.length === 0) return;
   const yours = (state.animals || []).filter((a) => !a.wild);
-  for (const w of wildOnes(state)) {
+  for (const w of wild) {
     const k = wildDef(w.type)?.intimidating || 0;
     const reach = triggerRadius(k);
     const before = new Set(w.inRange || []);

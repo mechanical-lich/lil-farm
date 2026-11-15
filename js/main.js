@@ -1,6 +1,9 @@
 // Entry point: load or create a farm, replay the time you were away, then run.
 
-import { TILE, TICK_MS, START_INVENTORY, TESTING } from './config.js';
+import {
+  TILE, TICK_MS, START_INVENTORY, TESTING, CATCHUP_SLICE_MS, CATCHUP_HIDDEN_SLICE_MS,
+  MAX_CATCHUP_TICKS,
+} from './config.js';
 import { loadSheets, GOURD_DECOR } from './render/sprites.js';
 import { Renderer } from './render/renderer.js';
 import { Camera } from './render/camera.js';
@@ -53,6 +56,9 @@ const els = {
   canvas: document.getElementById('game'),
   boot: document.getElementById('boot'),
   bootText: document.getElementById('boot-text'),
+  bootBar: document.getElementById('boot-bar'),
+  bootFill: document.getElementById('boot-fill'),
+  bootSub: document.getElementById('boot-sub'),
   debug: document.getElementById('debug'),
   paintToggle: document.getElementById('paint-toggle'),
 };
@@ -83,9 +89,9 @@ async function boot() {
   // never sees a stale farm snap forward a moment later.
   const returnedAt = state.tickCount;
   const away = Date.now() - state.lastTickTime;
-  const catchup = await runCatchup(away, () => simTick(state), (done, total) => {
-    els.bootText.textContent = `Catching up… ${Math.round((done / total) * 100)}%`;
-  });
+  const screen = catchupScreen(away);
+  const catchup = await runCatchup(away, () => simTick(state), screen.onProgress, { sliceMs: catchupSlice });
+  screen.done();
   // Anything past the cap is written off rather than left on the clock, or it
   // comes back as a fresh seven-day backlog every time the game is opened.
   discardSkipped(state, catchup);
@@ -974,18 +980,103 @@ function wireToastFeedback() {
  */
 const WAKE_SUMMARY_MIN_MS = 10 * 60 * 1000;
 
+/** How long a wake-up catch-up may run before the progress screen covers the farm. */
+const WAKE_SCREEN_AFTER_MS = 400;
+
+/** How long each chunk of catch-up may run: short while watched, long while hidden. */
+function catchupSlice() {
+  return document.hidden ? CATCHUP_HIDDEN_SLICE_MS : CATCHUP_SLICE_MS;
+}
+
+/** "3 days", "5 hours", "20 minutes" — how long she was away, roughly. */
+function awayText(ms) {
+  const mins = Math.round(ms / 60000);
+  const say = (n, unit) => `${n} ${unit}${n === 1 ? '' : 's'}`;
+  if (mins < 90) return say(Math.max(1, mins), 'minute');
+  const hours = Math.round(mins / 60);
+  if (hours < 36) return say(hours, 'hour');
+  return say(Math.round(hours / 24), 'day');
+}
+
+/**
+ * The progress bar shown while time away is replayed.
+ *
+ * The boot screen's own furniture: on a cold start it is already up and this
+ * only fills it in; on a wake-up it is brought back, and only once the replay
+ * has been running for `after` milliseconds.
+ *
+ * @param {number} awayMs how long is being replayed, for the wording
+ * @param {{after?: number}} [opts]
+ * @returns {{onProgress: (done: number, total: number) => void,
+ *   done: (opts?: {hide?: boolean}) => void}}
+ */
+function catchupScreen(awayMs, { after = 0 } = {}) {
+  const began = performance.now();
+  let shown = false;
+
+  const show = () => {
+    shown = true;
+    // Never more than the cap: a month away replays a week, and the bar
+    // should not promise the month.
+    const replayed = Math.min(awayMs, MAX_CATCHUP_TICKS * TICK_MS);
+    els.bootText.textContent = `Catching up on ${awayText(replayed)} away…`;
+    els.bootBar.hidden = false;
+    els.boot.classList.remove('hidden');
+  };
+
+  return {
+    onProgress(done, total) {
+      if (!shown) {
+        if (performance.now() - began < after) return;
+        show();
+      }
+      const fraction = total > 0 ? done / total : 1;
+      const pct = Math.floor(fraction * 100);
+      els.bootFill.style.transform = `scaleX(${fraction})`;
+      els.bootBar.setAttribute('aria-valuenow', String(pct));
+      els.bootSub.textContent = `${pct}%`;
+    },
+    done({ hide = false } = {}) {
+      els.bootBar.hidden = true;
+      els.bootSub.textContent = '';
+      els.bootFill.style.transform = 'scaleX(0)';
+      if (hide && shown) els.boot.classList.add('hidden');
+    },
+  };
+}
+
 function wireWakeUp(state, loop) {
+  // One catch-up at a time. Flicking away and back while one is running fires
+  // this again, and a second replay started from a clock the first is still
+  // moving would run the same stretch of time twice.
+  let catchingUp = false;
+
   document.addEventListener('visibilitychange', async () => {
-    if (document.visibilityState !== 'visible') return;
+    if (document.visibilityState !== 'visible' || catchingUp) return;
 
     const away = Date.now() - state.lastTickTime;
     if (away < TICK_MS * 2) return;              // a glance away; pump will cope
 
-    const catchup = await runCatchup(away, () => simTick(state));
-    discardSkipped(state, catchup);
-    // The simulation is now level with the wall clock, so the loop must not
-    // also try to make up the same stretch of time.
-    loop.resync(Date.now());
+    catchingUp = true;
+    // The loop stands down while the time away is replayed. Left running, its
+    // own pump sees the same backlog and makes up to ten minutes of it a
+    // second time — and draws a half-caught-up farm while it does.
+    loop.stop();
+    // The screen only comes up if this turns out to be slow: a few minutes
+    // away replays in a blink, and flashing a card for that is worse than
+    // nothing. A long absence on a busy farm gets the same bar as a cold start.
+    const screen = catchupScreen(away, { after: WAKE_SCREEN_AFTER_MS });
+    let catchup;
+    try {
+      catchup = await runCatchup(away, () => simTick(state), screen.onProgress, { sliceMs: catchupSlice });
+      discardSkipped(state, catchup);
+    } finally {
+      screen.done({ hide: true });
+      catchingUp = false;
+      // start() puts the tick clock level with the wall clock, so the loop
+      // doesn't then try to make up the stretch that was just replayed.
+      loop.start(Date.now());
+    }
 
     // Only for a real absence. The card is a "welcome back", and getting one
     // for glancing at another tab for two minutes is nagging, not news.

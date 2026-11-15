@@ -372,10 +372,16 @@ function findWork(state, hand) {
   if (best) return best.target;
 
   // Eggs, searched outward so the first one found is the closest.
+  //
+  // Only the ring itself is walked: the top and bottom rows whole, and the two
+  // end tiles of every row between. Visiting the whole square and throwing
+  // away the inside looked at thirty thousand tiles per look to find nothing,
+  // which was a quarter of the cost of catching up with hands on the payroll.
+  // The tiles visited, and the order they are visited in, are unchanged.
   for (let r = 1; r <= EGG_RADIUS; r++) {
     for (let dy = -r; dy <= r; dy++) {
-      for (let dx = -r; dx <= r; dx++) {
-        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      const edge = dy === -r || dy === r;
+      for (let dx = -r; dx <= r; dx += edge ? 1 : 2 * r) {
         const x = hand.x + dx;
         const y = hand.y + dy;
         if (state.grid.getObject(x, y) !== OBJ.EGG) continue;

@@ -197,7 +197,13 @@ export function harvestCrop(state, x, y) {
 
 /** One tick of growth for every planted tile, plus spoiling and soil drying. */
 export function updateCrops(state) {
-  for (const [key, crop] of Object.entries(state.crops)) {
+  // for-in rather than Object.entries: this runs once a tick, and catch-up
+  // runs a week of ticks in a row. Building an array of pairs for every crop
+  // on every one of them was nearly half the whole cost of catching up on a
+  // farm with a few hundred beds. Same keys, same order.
+  const crops = state.crops;
+  for (const key in crops) {
+    const crop = crops[key];
     if (crop.dead) continue;
 
     const def = cropDef(crop.type);
@@ -233,8 +239,9 @@ export function updateCrops(state) {
 }
 
 function dryOutSoil(state) {
-  for (const [key, until] of Object.entries(state.wetUntil)) {
-    if (state.tickCount < until) continue;
+  const wetUntil = state.wetUntil;
+  for (const key in wetUntil) {
+    if (state.tickCount < wetUntil[key]) continue;
     delete state.wetUntil[key];
     const [x, y] = key.split(',').map(Number);
     if (state.grid.getGround(x, y) === GROUND.TILLED_WET) {

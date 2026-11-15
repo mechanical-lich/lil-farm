@@ -156,7 +156,13 @@
   </div>
 
   <div id="boot">
-    <div id="boot-text">Loading the farm…</div>
+    <div id="boot-box">
+      <div id="boot-text">Loading the farm…</div>
+      <div id="boot-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden>
+        <div id="boot-fill"></div>
+      </div>
+      <div id="boot-sub"></div>
+    </div>
   </div>
 
   <script type="module" src="js/main.js"></script>

@@ -5,7 +5,7 @@
 // farm keeps running while the tab is closed" work: catching up is just running
 // the same tick function in a tight loop.
 
-import { TICK_MS, MAX_CATCHUP_TICKS, CATCHUP_CHUNK } from '../config.js';
+import { TICK_MS, MAX_CATCHUP_TICKS, CATCHUP_CHUNK, CATCHUP_SLICE_MS } from '../config.js';
 import * as events from './events.js';
 
 export class GameLoop {
@@ -103,15 +103,25 @@ export class GameLoop {
  * Events fired during the replay are tallied rather than dispatched, so the
  * caller can report what happened while the player was away.
  *
+ * A chunk ends after CATCHUP_CHUNK ticks or `sliceMs` of work, whichever comes
+ * first. The time limit is what keeps progress smooth on a busy farm, where a
+ * fixed count of ticks can be seconds of frozen screen; the count is what
+ * keeps a quiet one from spinning for a whole slice on a clock it never needs.
+ *
  * @param {number} elapsedMs  wall-clock time since the last completed tick
  * @param {() => void} tick
  * @param {(done: number, total: number) => void} [onProgress]
+ * @param {{sliceMs?: number|(() => number), now?: () => number}} [opts]
+ *   `sliceMs` may be a function, asked afresh for each chunk, so the caller
+ *   can lengthen the slices while the tab is hidden; `now` is the clock, for
+ *   tests.
  * @returns {Promise<{ticks: number, capped: boolean, skipped: number,
  *   tally: object|null}>} `skipped` is the ticks beyond the cap that were
  *   deliberately not replayed; the caller must discard that time from the
  *   farm's clock or it comes back as a fresh backlog on the next load.
  */
-export async function runCatchup(elapsedMs, tick, onProgress) {
+export async function runCatchup(elapsedMs, tick, onProgress, opts = {}) {
+  const { sliceMs = CATCHUP_SLICE_MS, now = () => performance.now() } = opts;
   const wanted = Math.max(0, Math.floor(elapsedMs / TICK_MS));
   const total = Math.min(wanted, MAX_CATCHUP_TICKS);
   const capped = wanted > MAX_CATCHUP_TICKS;
@@ -125,8 +135,17 @@ export async function runCatchup(elapsedMs, tick, onProgress) {
     let done = 0;
     while (done < total) {
       const chunk = Math.min(CATCHUP_CHUNK, total - done);
-      for (let i = 0; i < chunk; i++) tick();
-      done += chunk;
+      const budget = typeof sliceMs === 'function' ? sliceMs() : sliceMs;
+      const stopAt = now() + budget;
+      let ran = 0;
+      while (ran < chunk) {
+        tick();
+        ran++;
+        // The clock is only read every so often: asking it on every tick
+        // would cost more than some ticks do.
+        if ((ran & CLOCK_MASK) === 0 && now() >= stopAt) break;
+      }
+      done += ran;
       if (onProgress) onProgress(done, total);
       if (done < total) await nextFrame();
     }
@@ -138,6 +157,9 @@ export async function runCatchup(elapsedMs, tick, onProgress) {
     events.resume();
   }
 }
+
+/** Ticks between looks at the clock inside a chunk, less one: a power of two. */
+const CLOCK_MASK = 127;
 
 /**
  * Discards time the cap refused to replay.

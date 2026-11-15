@@ -73,7 +73,8 @@ import {
 import {
   recordLeaf, leafCount, leavesCollected, foundEveryLeaf, befriendedEveryTurkey,
 } from '../js/sim/events.js';
-import { nextTurkey, rollKind, TURKEY_RETRY } from '../js/sim/wildlife.js';
+import { nextTurkey, rollKind, TURKEY_RETRY, SCARE_INTERVAL, updateWildlife } from '../js/sim/wildlife.js';
+import { SEEK_COOLDOWN, updateAnimals } from '../js/sim/animals.js';
 import {
   drawLeafSheet, drawTurkeySheet, LEAVES as LEAF_DESIGNS, TURKEY_COLOURS,
 } from '../tools/make-thanksgiving.mjs';
@@ -7602,6 +7603,48 @@ test('catch-up replays long absences in chunks, reporting progress', async () =>
   assertEqual(progress[progress.length - 1][0], ticks, 'ending at the total');
 });
 
+test('a chunk of catch-up ends when its time is up, not only when its count is', async () => {
+  // A busy farm's ticks are slow, and twenty thousand of them is seconds of
+  // frozen screen. With a clock that says every tick takes a millisecond and a
+  // ten-millisecond slice, progress has to come far more often than per chunk.
+  let clock = 0;
+  let ticks = 0;
+  const progress = [];
+  const total = 5000;
+  const result = await runCatchup(total * TICK_MS, () => { ticks++; clock += 1; },
+    (done, of) => progress.push([done, of]), { sliceMs: 10, now: () => clock });
+
+  assertEqual(ticks, total, 'every tick still ran, once');
+  assertEqual(result.ticks, total, 'and is reported');
+  assert(progress.length >= 10, `sliced by time, not by count: ${progress.length} reports`);
+  assert(progress.every(([done], i) => i === 0 || done > progress[i - 1][0]), 'progress only goes forward');
+  assertEqual(progress[progress.length - 1], [total, total], 'ending at the total');
+
+  // The slice may be a function, asked again for each chunk — how a hidden tab
+  // gets longer ones.
+  clock = 0;
+  let asked = 0;
+  const quiet = [];
+  await runCatchup(total * TICK_MS, () => { clock += 1; }, (done) => quiet.push(done),
+    { sliceMs: () => { asked++; return 100000; }, now: () => clock });
+  assertEqual(quiet, [total], 'a long slice runs it in one go');
+  assertEqual(asked, 1, 'and was asked for once per chunk');
+});
+
+test('catching up is the same farm whether it runs in one chunk or many', async () => {
+  // Slicing by time must only change when the browser gets a look in, never
+  // what the simulation does.
+  const run = async (sliceMs) => {
+    const s = newGame(9950);
+    let clock = 0;
+    await runCatchup(4000 * TICK_MS, () => { tick(s); clock += 1; }, null, { sliceMs, now: () => clock });
+    const out = serialize(s);
+    delete out.lastTickTime;
+    return JSON.stringify(out);
+  };
+  assertEqual(await run(7), await run(1e9), 'identical saves');
+});
+
 test('catch-up caps a very long absence and reports what it skipped', () => {
   const wanted = MAX_CATCHUP_TICKS + 5000;
   return runCatchup(wanted * TICK_MS, () => {}).then((result) => {
@@ -8998,6 +9041,75 @@ test('the Events art in the css matches the sheets', () => {
   }
 });
 
+// --- hungry animals during catch-up --------------------------------------
+
+test('a hungry animal looks for a trough every tick live, and once a minute in a replay', async () => {
+  const build = () => {
+    const s = farmWithMaterials(9970);
+    s.animals = [];
+    const cow = makeAnimal(s, 'cow', s.farmer.x + 3, s.farmer.y + 3, 0);
+    cow.food = 0;                                // hungry, not thirsty
+    cow.water = WATER_DURATION;
+    return { s, cow };
+  };
+  const stock = (s, x, y) => {
+    placeStructure(s, 'feedTrough', x, y);
+    s.troughs[`${x},${y}`].level = TROUGH_CAPACITY;
+  };
+
+  // Live: nothing to find leaves no mark, and a trough put down is headed for
+  // on the very next tick.
+  const live = build();
+  for (let i = 0; i < 5; i++) updateAnimals(live.s);
+  assertEqual(live.cow.feedSearchAt ?? null, null, 'no wait is ever started in live play');
+  stock(live.s, live.cow.x + 6, live.cow.y);
+  live.s.tickCount++;
+  updateAnimals(live.s);
+  assert(live.cow.goal?.want === 'food', 'the new trough is noticed at once');
+
+  // In a replay: the failed look is remembered, a trough that appears inside
+  // the wait is not noticed until it is over, and then it is.
+  const away = build();
+  suspend();
+  try {
+    updateAnimals(away.s);
+    assertEqual(away.cow.feedSearchAt, away.s.tickCount, 'the failed look is noted');
+    stock(away.s, away.cow.x + 6, away.cow.y + 6);
+    for (let i = 1; i < SEEK_COOLDOWN; i++) {
+      away.s.tickCount++;
+      updateAnimals(away.s);
+      // Wandering could bring it right up to the trough, where it eats at
+      // once whatever the wait says — which is the point, not a failure.
+      if (away.cow.food > 0) break;
+      assert(!away.cow.goal, `no new search inside the wait (tick ${i})`);
+    }
+    if (away.cow.food === 0) {
+      away.s.tickCount++;
+      updateAnimals(away.s);
+      assert(away.cow.goal?.want === 'food', 'and when the wait is over it sets off');
+      assertEqual(away.cow.feedSearchAt, null, 'with the wait cleared');
+    }
+  } finally {
+    resume();
+  }
+});
+
+test('an animal beside a full trough eats at once, wait or no wait', () => {
+  const s = farmWithMaterials(9971);
+  s.animals = [];
+  const x = s.farmer.x + 3;
+  const y = s.farmer.y + 3;
+  placeStructure(s, 'feedTrough', x, y);
+  s.troughs[`${x},${y}`].level = TROUGH_CAPACITY;
+  const cow = makeAnimal(s, 'cow', x, y + 1, 0);
+  cow.food = 0;
+  cow.water = WATER_DURATION;
+  cow.feedSearchAt = s.tickCount;                // a search has only just failed
+  suspend();
+  try { updateAnimals(s); } finally { resume(); }
+  assertEqual(cow.food, FOOD_DURATION, 'it ate from the trough it was standing at');
+});
+
 // --- November: leaves and turkeys -------------------------------------------
 
 test('Thanksgiving is the fourth Thursday of November, whatever the year', () => {
@@ -9284,6 +9396,28 @@ test('the leaf and turkey sheets are exactly what the tool draws', () => {
 });
 
 // --- wild animals -------------------------------------------------------
+
+test('the fear check runs on a timer in the tick, not on every one', () => {
+  // A lion standing beside a cow is noticed at the next look, not the next
+  // tick: measuring every wild animal against the whole herd each second was
+  // a real share of the cost of catching up on a farm full of friends.
+  const s = farmWithMaterials(9960);
+  s.animals = [];
+  const cow = makeAnimal(s, 'cow', s.farmer.x + 4, s.farmer.y + 4, 0);
+  const lion = spawnWild(s, 'lion', cow.x + 1, cow.y);
+  s.tickCount = SCARE_INTERVAL * 100 + 1;      // just after a look
+  const heard = [];
+  const off = on('animal:scared', (e) => heard.push(e));
+  // Held in place, so neither wanders out of the other's reach.
+  const hold = () => { lion.x = cow.x + 1; lion.y = cow.y; lion.path = []; cow.path = []; };
+  for (let i = 0; i < SCARE_INTERVAL - 1; i++) { hold(); updateWildlife(s); s.tickCount++; if (heard.length) break; }
+  assertEqual(heard.length, 0, 'nothing between looks');
+  s.tickCount = SCARE_INTERVAL * 101;
+  hold();
+  updateWildlife(s);
+  off();
+  assertEqual(heard.length, 1, 'and a lion, which always scares, is noticed at the next one');
+});
 
 /** A farm with nothing wandering about, so a test can put down exactly what it means to. */
 function quietFarm(seed) {

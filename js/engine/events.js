@@ -33,6 +33,15 @@ export function suspend() { suspended = true; }
 export function resume() { suspended = false; }
 
 /**
+ * Is a replay running — time being caught up with nobody watching?
+ *
+ * For the few places in the simulation that can afford to be lazier then than
+ * they are live. Never to change what *can* happen, only how often something
+ * that is failing anyway gets tried again.
+ */
+export function isSuspended() { return suspended; }
+
+/**
  * While suspended, events can still be *counted* even though nobody is
  * listening. That's how the "while you were away" summary is built: replaying
  * two days would fire thousands of toasts, but tallying integers costs nothing,

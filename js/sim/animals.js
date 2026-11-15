@@ -18,7 +18,7 @@ import { handTargeting } from './farmhand.js';
 import { OBJ } from '../world/tiledefs.js';
 import { addItem, countItem, removeItem, ITEMS } from './inventory.js';
 import { CROPS } from './crops.js';
-import { emitUnlessSuspended } from '../engine/events.js';
+import { emitUnlessSuspended, isSuspended } from '../engine/events.js';
 import { hayList, hayLeft, eatFrom } from './hay.js';
 import { WILD_KINDS, TURKEY_KINDS } from './wildkinds.js';
 
@@ -261,6 +261,32 @@ export const TARGET_RECHECK = 5;
 /** How far an animal will look for a drink, and how long before it looks again. */
 const WATER_SCAN_RADIUS = 10;
 const WATER_SCAN_COOLDOWN = 300;
+
+/**
+ * How long an animal that found no trough or bale it could get to waits before
+ * looking again — **only while time away is being caught up**.
+ *
+ * Live, a hungry animal looks every tick, so one she has just topped up is
+ * noticed at once. Caught up in a replay, nobody is topping anything up: a
+ * farm left for a day has drained troughs and a herd that is all hungry, and
+ * every one of them asking the same unanswerable question every second was
+ * the largest single cost of coming back to a big farm. A minute is short
+ * enough that a trough the farmer fills from his queue mid-replay is still
+ * found promptly. An animal standing right beside food or water never waits:
+ * that check is separate and runs every tick regardless.
+ */
+export const SEEK_COOLDOWN = 60;
+
+/** Still inside the wait after a failed search? Never true in live play. */
+function seekResting(state, a, field) {
+  return isSuspended() && a[field] != null && state.tickCount - a[field] < SEEK_COOLDOWN;
+}
+
+/** Notes a failed search, so a replay doesn't repeat it next tick. */
+function seekFailed(state, a, field) {
+  if (isSuspended()) a[field] = state.tickCount;
+  return false;
+}
 
 // --- Affection ----------------------------------------------------------
 //
@@ -515,6 +541,65 @@ export function collectFrom(state, animal) {
 
 // --- troughs ------------------------------------------------------------
 
+/**
+ * The tile a "x,y" key names, worked out once per key.
+ *
+ * The animals ask where the troughs and the bales are several times a tick
+ * each, and a week of catch-up is six hundred thousand ticks. Slicing the same
+ * few strings apart every time was a real share of the cost of a big herd; a
+ * key never means a different tile, so the answer is kept. There are only as
+ * many keys as the map has tiles.
+ */
+const TILE_OF = new Map();
+function tileOf(key) {
+  let at = TILE_OF.get(key);
+  if (!at) {
+    const comma = key.indexOf(',');
+    at = { x: +key.slice(0, comma), y: +key.slice(comma + 1) };
+    TILE_OF.set(key, at);
+  }
+  return at;
+}
+
+/**
+ * Stocked troughs of one kind, nearest first — or nothing at all, without
+ * building a list, when there are none: the usual state of a farm she has been
+ * away from for a day, and the question every hungry animal asks every tick.
+ *
+ * In the troughs' own order before sorting, so equally near ones come out in
+ * the order they always did.
+ */
+function stockedTroughs(state, kind, a) {
+  const troughs = state.troughs;
+  let found = null;
+  for (const key in troughs) {
+    const t = troughs[key];
+    if (t.kind !== kind || (t.level || 0) <= 0) continue;
+    const at = tileOf(key);
+    (found = found || []).push({ key, x: at.x, y: at.y, ...t });
+  }
+  if (!found) return NONE;
+  return found.sort((p, q) => (Math.abs(p.x - a.x) + Math.abs(p.y - a.y))
+                            - (Math.abs(q.x - a.x) + Math.abs(q.y - a.y)));
+}
+
+/** The same for bales with something left in them. */
+function stockedBales(state, a) {
+  const hay = state.hay;
+  let found = null;
+  for (const key in hay) {
+    const bale = hay[key];
+    if (hayLeft(bale) <= 0) continue;
+    const at = tileOf(key);
+    (found = found || []).push({ x: at.x, y: at.y, ...bale });
+  }
+  if (!found) return NONE;
+  return found.sort((p, q) => (Math.abs(p.x - a.x) + Math.abs(p.y - a.y))
+                            - (Math.abs(q.x - a.x) + Math.abs(q.y - a.y)));
+}
+
+const NONE = Object.freeze([]);
+
 export function troughList(state) {
   return Object.entries(state.troughs || {}).map(([key, t]) => {
     const comma = key.indexOf(',');
@@ -752,9 +837,13 @@ export function canGraze(a) { return !!animalDef(a?.type)?.grazes; }
 
 /** A bale with something left in it that the animal is standing next to. */
 function hayBeside(state, a) {
-  for (const bale of hayList(state)) {
+  // In place, with no list built: asked by every hungry grazer every tick.
+  const hay = state.hay;
+  for (const key in hay) {
+    const bale = hay[key];
     if (hayLeft(bale) <= 0) continue;
-    if (Math.abs(bale.x - a.x) + Math.abs(bale.y - a.y) === 1) return bale;
+    const at = tileOf(key);
+    if (Math.abs(at.x - a.x) + Math.abs(at.y - a.y) === 1) return { x: at.x, y: at.y, ...bale };
   }
   return null;
 }
@@ -770,18 +859,19 @@ function eatHay(state, a, bale) {
  * away from every bale shouldn't scan the whole farm every tick.
  */
 function seekHay(state, a) {
-  const bales = hayList(state)
-    .filter((b) => hayLeft(b) > 0)
-    .sort((p, q) => (Math.abs(p.x - a.x) + Math.abs(p.y - a.y))
-                  - (Math.abs(q.x - a.x) + Math.abs(q.y - a.y)));
+  if (seekResting(state, a, 'haySearchAt')) return false;
+  const bales = stockedBales(state, a);
 
   for (const b of bales.slice(0, 3)) {
     const path = findPath(state.grid, { x: a.x, y: a.y }, { x: b.x, y: b.y },
       { actor: actorFor(a), adjacent: true });
-    if (path && path.length > 0) { a.path = path; a.goal = { want: 'hay', x: b.x, y: b.y }; return true; }
+    if (path && path.length > 0) {
+      a.path = path; a.goal = { want: 'hay', x: b.x, y: b.y }; a.haySearchAt = null;
+      return true;
+    }
     if (path && path.length === 0) return false;   // already there
   }
-  return false;
+  return seekFailed(state, a, 'haySearchAt');
 }
 
 /**
@@ -846,9 +936,14 @@ function worthContinuing(state, a) {
 
 /** A stocked trough of the right kind that the animal is standing next to. */
 function troughBeside(state, a, kind) {
-  for (const t of troughList(state)) {
+  // In place, with no list built: asked by every hungry or thirsty animal
+  // every tick, and nearly always answered "no".
+  const troughs = state.troughs;
+  for (const key in troughs) {
+    const t = troughs[key];
     if (t.kind !== kind || (t.level || 0) <= 0) continue;
-    if (besideBox(t.x, t.y, 2, 1, a.x, a.y)) return t;
+    const at = tileOf(key);
+    if (besideBox(at.x, at.y, 2, 1, a.x, a.y)) return { key, x: at.x, y: at.y, ...t };
   }
   return null;
 }
@@ -939,20 +1034,24 @@ function seekWater(state, a, onto = false) {
 
 /** Routes toward the nearest stocked trough it can actually reach. */
 function seekTrough(state, a, kind) {
-  const candidates = troughList(state)
-    .filter((t) => t.kind === kind && (t.level || 0) > 0)
-    .sort((p, q) => (Math.abs(p.x - a.x) + Math.abs(p.y - a.y))
-                  - (Math.abs(q.x - a.x) + Math.abs(q.y - a.y)));
+  // One wait per kind: finding no water says nothing about feed.
+  const stamp = kind === 'water' ? 'waterTroughSearchAt' : 'feedSearchAt';
+  if (seekResting(state, a, stamp)) return false;
+  const candidates = stockedTroughs(state, kind, a);
 
   // Only try the closest few: a fenced-out animal shouldn't scan the whole
-  // farm every tick, and it will try again next tick anyway.
+  // farm every tick, and it will try again next tick anyway — or, in a
+  // replay, in a minute: see SEEK_COOLDOWN.
   for (const t of candidates.slice(0, 3)) {
     const path = findPath(state.grid, { x: a.x, y: a.y }, { x: t.x, y: t.y },
       { actor: actorFor(a), adjacent: true, w: 2, h: 1 });
-    if (path && path.length > 0) { a.path = path; a.goal = { want: kind, x: t.x, y: t.y }; return true; }
+    if (path && path.length > 0) {
+      a.path = path; a.goal = { want: kind, x: t.x, y: t.y }; a[stamp] = null;
+      return true;
+    }
     if (path && path.length === 0) return false;   // already there
   }
-  return false;
+  return seekFailed(state, a, stamp);
 }
 
 /** Is this animal sitting on a finished product it can't put down here? */
