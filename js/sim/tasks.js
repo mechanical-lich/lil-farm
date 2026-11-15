@@ -22,11 +22,13 @@ import { potAt } from './pots.js';
 import { fishAt, standFor } from './fish.js';
 import { balloonAt } from './balloons.js';
 import { lanternAt } from './lanterns.js';
+import { leafAt, leafName } from './thanksgiving.js';
 import { decorGourdAt } from './gourddecor.js';
 
 /** Work is measured in ticks (1 tick = 1 second). */
 export const TASK_TYPES = {
   pop: { label: 'Pop', verb: 'Popping' },
+  leaf: { label: 'Pick up', verb: 'Picking up' },
   clear: { label: 'Clear', verb: 'Clearing' },
   chop: { label: 'Chop', verb: 'Chopping' },
   untill: { label: 'Clear', verb: 'Clearing' },
@@ -67,6 +69,8 @@ export const WORK = {
   // Barely any work at all. Walking over to it is the errand; a balloon does
   // not need untying.
   pop: 2,
+  // The same goes for a leaf: bending down for it is all there is.
+  leaf: 2,
 };
 
 /** A task the player cannot see the point of is a bug; keep labels concrete. */
@@ -345,6 +349,10 @@ export function taskForTile(state, x, y, tool = 'auto', opts = {}) {
     if (lanternAt(state, x, y)) {
       return { type: 'pop', x, y, work: WORK.pop, detail: "a jack-o'-lantern", lantern: true };
     }
+    // And a fallen leaf in November: picked up rather than popped, so it is a
+    // task of its own with its own words, but offered in exactly the same place.
+    const leaf = leafAt(state, x, y);
+    if (leaf) return { type: 'leaf', x, y, work: WORK.leaf, detail: `a ${leafName(leaf.kind)}` };
     return null;
   };
 

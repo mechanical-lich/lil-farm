@@ -9,6 +9,10 @@
 //   birthday   the mythical horses out of the balloons — see sim/balloons.js
 //   halloween  the jack-o'-lantern faces popped, and the gourds grown from
 //              their seed — see sim/lanterns.js
+//   thanksgiving  the leaves picked up, and the turkeys met and won over —
+//              see sim/thanksgiving.js. The turkeys are read straight off the
+//              wildlife journal, which already records every wild thing met,
+//              rather than counted a second time here.
 //
 // Recorded from farmer.js as the work lands, which keeps this file free of
 // imports from the modules that do the work, so there is no cycle: this reads
@@ -24,11 +28,14 @@
 import { GOURDS, CROPS } from './crops.js';
 import { MYTHICALS } from './balloons.js';
 import { LANTERN_NAMES } from './lanterns.js';
+import { LEAF_IDS, LEAF_KINDS } from './thanksgiving.js';
+import { TURKEY_IDS, TURKEY_KINDS } from './wildkinds.js';
 
 export function newEventRecord() {
   return {
     birthday: { mythicals: {} },
     halloween: { lanterns: {}, gourds: {} },
+    thanksgiving: { leaves: {} },
     // Whether the one-off birthday backfill has run; see backfillBirthday. A
     // brand-new farm has nothing to backfill, so it starts done; a save from
     // before this record existed is loaded with it unset (see state.js).
@@ -41,6 +48,7 @@ function record(state) {
   const rec = state.events || (state.events = fresh);
   rec.birthday = { ...fresh.birthday, ...rec.birthday };
   rec.halloween = { ...fresh.halloween, ...rec.halloween };
+  rec.thanksgiving = { ...fresh.thanksgiving, ...rec.thanksgiving };
   return rec;
 }
 
@@ -61,6 +69,17 @@ export function recordLantern(state, face) {
 export function recordHarvest(state, type, n = 1) {
   if (!CROPS[type]?.gourd || n <= 0) return;
   add(record(state).halloween.gourds, type, n);
+}
+
+/**
+ * A leaf was picked up. Anything that isn't off one of the trees is ignored.
+ * @returns {number} how many of that tree's she has now
+ */
+export function recordLeaf(state, kind) {
+  if (!LEAF_KINDS[kind]) return 0;
+  const leaves = record(state).thanksgiving.leaves;
+  add(leaves, kind);
+  return leaves[kind];
 }
 
 /**
@@ -97,6 +116,29 @@ export function backfillBirthday(state) {
 export function mythicalCount(state, type) { return record(state).birthday.mythicals[type] || 0; }
 export function lanternCount(state, name) { return record(state).halloween.lanterns[name] || 0; }
 export function gourdCount(state, type) { return record(state).halloween.gourds[type] || 0; }
+
+export function leafCount(state, kind) { return record(state).thanksgiving.leaves[kind] || 0; }
+
+/** Every leaf ever picked up, of any tree. */
+export function leavesCollected(state) {
+  return LEAF_IDS.reduce((n, id) => n + leafCount(state, id), 0);
+}
+
+/** How many of this breed of turkey have been met, and how many won over. */
+export function turkeyRecord(state, id) {
+  const entry = (state.wildJournal || {})[id] || {};
+  return { met: entry.met || 0, befriended: entry.befriended || 0 };
+}
+
+/** True once a leaf off every tree has been picked up — `each` of every one. */
+export function foundEveryLeaf(state, each = 1) {
+  return LEAF_IDS.every((id) => leafCount(state, id) >= each);
+}
+
+/** True once a turkey of every breed has been won over. */
+export function befriendedEveryTurkey(state) {
+  return TURKEY_IDS.every((id) => turkeyRecord(state, id).befriended > 0);
+}
 
 /** True once every mythical horse has stepped out of a balloon at least once. */
 export function foundEveryMythical(state) {
@@ -145,6 +187,30 @@ export function eventRows(state) {
           items: GOURDS.map((type, row) => ({
             id: type, row, name: CROPS[type].name, count: gourdCount(state, type),
           })),
+        },
+      ],
+    },
+    {
+      id: 'thanksgiving',
+      name: 'Thanksgiving',
+      icon: '🦃',
+      shelves: [
+        {
+          id: 'leaves',
+          name: 'Leaves collected',
+          items: LEAF_IDS.map((id, col) => ({
+            id, col, name: LEAF_KINDS[id].name, count: leafCount(state, id),
+          })),
+        },
+        {
+          // A breed shows once it has been met, like anything in the wildlife
+          // journal; the heart is how many of them are friends.
+          id: 'turkeys',
+          name: 'Turkeys',
+          items: TURKEY_IDS.map((id) => {
+            const { met, befriended } = turkeyRecord(state, id);
+            return { id, row: TURKEY_KINDS[id].row, name: TURKEY_KINDS[id].name, count: met, befriended };
+          }),
         },
       ],
     },

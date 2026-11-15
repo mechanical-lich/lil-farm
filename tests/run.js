@@ -35,7 +35,7 @@ import {
 } from '../tools/make-flower-kinds.mjs';
 import {
   addTask, cancelTask, prioritizeTask, taskForTile, tillRow, queueTillRow, clearBuildSite,
-  followTargets, taskCovering,
+  followTargets, taskCovering, taskLabel,
 } from '../js/sim/tasks.js';
 import { TOOLS } from '../js/ui/toolbar.js';
 import {
@@ -65,7 +65,18 @@ import {
   FISH_HARD_CAP,
 } from '../js/sim/fish.js';
 import { movableAt, canMoveTo, moveTo } from '../js/sim/moving.js';
-import { WILD_KINDS, WILD_IDS } from '../js/sim/wildkinds.js';
+import { WILD_KINDS, WILD_IDS, TURKEY_KINDS, TURKEY_IDS } from '../js/sim/wildkinds.js';
+import {
+  thanksgivingDay, isThanksgivingSeason, isThanksgiving, noteThanksgiving, leafAt, leafList, dropLeaf,
+  collectLeaf, updateLeaves, canLeafFall, LEAF_INTERVAL, LEAF_CAP, LEAF_IDS, LEAF_KINDS,
+} from '../js/sim/thanksgiving.js';
+import {
+  recordLeaf, leafCount, leavesCollected, foundEveryLeaf, befriendedEveryTurkey,
+} from '../js/sim/events.js';
+import { nextTurkey, rollKind, TURKEY_RETRY } from '../js/sim/wildlife.js';
+import {
+  drawLeafSheet, drawTurkeySheet, LEAVES as LEAF_DESIGNS, TURKEY_COLOURS,
+} from '../tools/make-thanksgiving.mjs';
 import {
   WILD_CAP, WILD_STAY, WILD_INTERVAL, WILD_PER_DAY, LEAVE_TIMEOUT, wildOnes, spawnWild, befriend, shoo,
   arrivalsToday, intimidate, fleeRange, triggerRadius,
@@ -8239,7 +8250,7 @@ function keyBehind(id) {
   const keys = ['crops', 'eggs', 'produce', 'mushrooms', 'fish', 'flowers',
     'animals', 'hands', 'water', 'barns', 'houses', 'streak',
     'sown', 'tilled', 'watered', 'cleared', 'feedFills', 'waterFills', 'pets', 'earned',
-    'balloons', 'befriended', 'lanterns'];
+    'balloons', 'befriended', 'lanterns', 'leaves', 'turkeys'];
   for (const key of keys) {
     const probe = newGame(1);
     // Big enough to clear the top rung of every ladder — the takings ladder
@@ -8966,7 +8977,7 @@ test('the Events tab lists each event with every thing it can turn up', () => {
   const s = farmWithMaterials(9526);
   recordLantern(s, 0);
   const rows = eventRows(s);
-  assertEqual(rows.map((e) => e.id), ['birthday', 'halloween'], 'in calendar order');
+  assertEqual(rows.map((e) => e.id), ['birthday', 'halloween', 'thanksgiving'], 'in calendar order');
   assertEqual(rows[0].shelves[0].items.length, MYTHICALS.length, 'every mythical');
   assertEqual(rows[1].shelves[0].items.length, LANTERN_FACES, 'every face');
   assertEqual(rows[1].shelves[1].items.length, GOURDS.length, 'every gourd');
@@ -8978,12 +8989,298 @@ test('the Events art in the css matches the sheets', () => {
   // name the whole sheet, or every slot shows a slice of its neighbour.
   const css = readFileSync('css/style.css', 'utf8');
   for (const [sheet, file] of [['mythical', 'assets/animals/mythical.png'],
-    ['lanterns', 'assets/flora/jackolanterns.png'], ['gourds', 'assets/flora/gourds.png']]) {
+    ['lanterns', 'assets/flora/jackolanterns.png'], ['gourds', 'assets/flora/gourds.png'],
+    ['leaves', 'assets/flora/leaves.png'], ['turkeys', 'assets/animals/turkeys.png']]) {
     const m = css.match(new RegExp(`\\.wild-art\\.sheet-${sheet}\\s*\\{[^}]*background-size:\\s*(\\d+)px\\s+(\\d+)px`));
     assert(m, `${sheet} has a background-size`);
     const { w, h } = pngSize(file);
     assertEqual([+m[1], +m[2]], [w * 3, h * 3], `${sheet} at three times`);
   }
+});
+
+// --- November: leaves and turkeys -------------------------------------------
+
+test('Thanksgiving is the fourth Thursday of November, whatever the year', () => {
+  assertEqual(thanksgivingDay(2026), 26, '2026');
+  assertEqual(thanksgivingDay(2027), 25, '2027');
+  assertEqual(thanksgivingDay(2028), 23, '2028, where the month starts on a Wednesday');
+  assertEqual(thanksgivingDay(2029), 22, '2029, the earliest it can be');
+  assertEqual(thanksgivingDay(2023), 23, 'and one that has already happened');
+  for (let y = 2024; y < 2060; y++) {
+    const d = thanksgivingDay(y);
+    assert(d >= 22 && d <= 28, `${y}: the ${d}th is in range`);
+    assertEqual(new Date(Date.UTC(y, 10, d)).getUTCDay(), 4, `${y}: and a Thursday`);
+  }
+});
+
+test('the event runs for the whole of November, and no longer', () => {
+  assert(isThanksgivingSeason('2026-11-01'), 'the first');
+  assert(isThanksgivingSeason('2026-11-15'), 'the middle');
+  assert(isThanksgivingSeason('2026-11-26'), 'Thanksgiving itself');
+  assert(isThanksgivingSeason('2026-11-27'), 'the day after carries on');
+  assert(isThanksgivingSeason('2026-11-30'), 'right to the end of the month');
+  assert(isThanksgivingSeason('2029-11-30'), 'even when Thanksgiving is as early as the 22nd');
+  assert(!isThanksgivingSeason('2026-10-31'), 'Halloween is too early');
+  assert(!isThanksgivingSeason('2026-12-01'), 'December is too late');
+  assert(isThanksgiving('2026-11-26') && !isThanksgiving('2026-11-25'), 'only one day is the day');
+
+  const s = farmWithMaterials(9700);
+  assertEqual(noteThanksgiving(s, '2026-11-15'), { on: true, fresh: true, thanksgiving: false }, 'first look of the day');
+  assertEqual(noteThanksgiving(s, '2026-11-15').fresh, false, 'opening it twice is not a fresh day');
+  assertEqual(noteThanksgiving(s, '2026-11-26').thanksgiving, true, 'the 26th is the day');
+  assertEqual(noteThanksgiving(s, '2026-11-27'), { on: true, fresh: true, thanksgiving: false }, 'the day after is another day of it');
+  assertEqual(noteThanksgiving(s, '2026-12-01').on, false, 'and December stops it');
+});
+
+test('leaves fall in November, up to the cap, on ground anybody can reach', () => {
+  const s = farmWithMaterials(9701);
+  noteThanksgiving(s, '2026-06-01');
+  for (let i = 0; i < LEAF_INTERVAL * 30; i++) tick(s);
+  assertEqual(leafList(s).length, 0, 'none in June');
+
+  noteThanksgiving(s, '2026-11-15');
+  for (let i = 0; i < LEAF_INTERVAL * 200; i++) tick(s);
+  const out = leafList(s);
+  assertEqual(out.length, LEAF_CAP, 'November fills to the cap and stops');
+  for (const l of out) {
+    assert(LEAF_KINDS[l.kind], `${l.kind} is a real tree`);
+    assertEqual(s.grid.getGround(l.x, l.y), GROUND.GRASS, 'on open grass');
+    assert(findPath(s.grid, { x: s.farmer.x, y: s.farmer.y }, { x: l.x, y: l.y }, { actor: 'farmer' }),
+      `the one at ${l.x},${l.y} can be got to`);
+  }
+});
+
+test('a leaf never lands on something, and nothing lands or grows on a leaf', () => {
+  const s = farmWithMaterials(9702);
+  const x = s.farmer.x + 2;
+  const y = s.farmer.y;
+  assert(canLeafFall(s, x, y), 'open grass he can walk to is fine');
+  spawnLantern(s, x, y, 0);
+  assertEqual(canLeafFall(s, x, y), false, 'but not on a lantern');
+  popLantern(s, x, y);
+
+  assert(dropLeaf(s, x, y, 'ginkgo'), 'a ginkgo leaf lands');
+  assertEqual(dropLeaf(s, x + 1, y, 'plastic'), false, 'something that is no tree does not');
+  assertEqual(canLeafFall(s, x, y), false, 'not two to a tile');
+  assertEqual(canLanternSpawn(s, x, y), false, 'no lantern on it');
+  assertEqual(canBalloonSpawn(s, x, y), false, 'no balloon over it');
+  assertEqual(canSprout(s, x, y), false, 'no weed');
+  assertEqual(canSproutShroom(s, x, y), false, 'no mushroom');
+  assertEqual(canPlaceDecor(s, x, y, 'bush'), false, 'no bought bush');
+  assertEqual(canPlaceGourd(s, x, y), false, 'and no gourd set out');
+
+  const path = { x: s.farmer.x, y: s.farmer.y + 2 };
+  s.grid.setGround(path.x, path.y, GROUND.DIRT);
+  assertEqual(canLeafFall(s, path.x, path.y), false, 'nor does one land on a path');
+});
+
+test('picking up a leaf through the real queue puts it in the journal and nothing in the bag', () => {
+  const s = farmWithMaterials(9703);
+  const x = s.farmer.x + 3;
+  const y = s.farmer.y;
+  dropLeaf(s, x, y, 'sassafras');
+
+  const spec = taskForTile(s, x, y, 'auto');
+  assertEqual(spec.type, 'leaf', 'a tap on a leaf picks it up');
+  assertEqual(taskLabel(spec), 'Pick up a sassafras leaf', 'and says which tree');
+  const before = JSON.stringify(s.inventory);
+  const heard = [];
+  const off = on('leaf:collected', (e) => heard.push(e));
+  addTask(s, spec);
+  runQueue(s);
+  off();
+
+  assertEqual(leafAt(s, x, y), null, 'the leaf is gone');
+  assertEqual(JSON.stringify(s.inventory), before, 'the bag is as it was');
+  assertEqual(leafCount(s, 'sassafras'), 1, 'it is in the journal');
+  assertEqual(leavesCollected(s), 1, 'one leaf in all');
+  assertEqual(count(s, 'leaves'), 1, 'and it counted toward the ladder');
+  assertEqual(heard, [{ kind: 'sassafras', name: 'Sassafras', first: true }], 'she is told, once');
+
+  dropLeaf(s, x, y, 'sassafras');
+  const again = [];
+  const off2 = on('leaf:collected', (e) => again.push(e));
+  addTask(s, taskForTile(s, x, y, 'auto'));
+  runQueue(s);
+  off2();
+  assertEqual(again[0].first, false, 'the second of a kind is not a new find');
+  assertEqual(leafCount(s, 'sassafras'), 2, 'but it is counted');
+});
+
+test('every tree drops a leaf sooner or later', () => {
+  const s = farmWithMaterials(9704);
+  noteThanksgiving(s, '2026-11-15');
+  const seen = new Set();
+  for (let i = 0; i < LEAF_INTERVAL * 600 && seen.size < LEAF_IDS.length; i++) {
+    tick(s);
+    for (const l of leafList(s)) { seen.add(l.kind); collectLeaf(s, l.x, l.y); }
+  }
+  assertEqual([...seen].sort(), [...LEAF_IDS].sort(), 'all twelve');
+});
+
+test('the leaf awards: a ladder, one of every tree, and five of every tree', () => {
+  const s = farmWithMaterials(9705);
+  for (const id of LEAF_IDS.slice(1)) recordLeaf(s, id);
+  checkAchievements(s);
+  assert(!foundEveryLeaf(s) && !isEarned(s, 'arboretum'), 'eleven of twelve is not all');
+  recordLeaf(s, LEAF_IDS[0]);
+  checkAchievements(s);
+  assert(isEarned(s, 'arboretum'), 'all twelve is');
+  assert(!isEarned(s, 'pressed_collection'), 'one of each is not five of each');
+  for (const id of LEAF_IDS) for (let i = 0; i < 4; i++) recordLeaf(s, id);
+  checkAchievements(s);
+  assert(isEarned(s, 'pressed_collection'), 'five of each is');
+  assertEqual(recordLeaf(s, 'plastic'), 0, 'and something off no tree counts for nothing');
+
+  const t = farmWithMaterials(9706);
+  for (const [n, id] of [[10, 'leaf_peeper'], [50, 'new_leaf'], [100, 'unbeleafable']]) {
+    assert(!isEarned(t, id), `${id} not before ${n}`);
+    bump(t, 'leaves', n - count(t, 'leaves'));
+    assert(isEarned(t, id), `${id} at ${n}`);
+  }
+});
+
+test('leaves survive a save and reload; the November flag is set by the date', () => {
+  const s = farmWithMaterials(9707);
+  noteThanksgiving(s, '2026-11-15');
+  dropLeaf(s, s.farmer.x + 1, s.farmer.y, 'beech');
+  recordLeaf(s, 'willow');
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual(leafAt(back, s.farmer.x + 1, s.farmer.y), { kind: 'beech' }, 'still lying there');
+  assertEqual(leafCount(back, 'willow'), 1, 'and the journal remembers');
+  assertEqual(noteThanksgiving(back, '2026-12-01').on, false, 'December stops the falling');
+  assertEqual(leafAt(back, s.farmer.x + 1, s.farmer.y), { kind: 'beech' }, 'but nothing rakes up what fell');
+
+  const old = serialize(farmWithMaterials(9708));
+  delete old.leaves;
+  delete old.thanksgiving;
+  delete old.events.thanksgiving;
+  const loaded = deserialize(JSON.parse(JSON.stringify(old)));
+  assertEqual(leafList(loaded), [], 'a farm from before November has none');
+  assertEqual(leavesCollected(loaded), 0, 'and an empty shelf rather than a crash');
+  assertEqual(noteThanksgiving(loaded, '2026-11-01').on, true, 'and November still comes');
+
+  const odd = serialize(farmWithMaterials(9709));
+  odd.leaves = { [`${s.farmer.x + 1},${s.farmer.y}`]: { kind: 'plastic' } };
+  assertEqual(leafList(deserialize(JSON.parse(JSON.stringify(odd)))), [], 'a leaf off no tree is swept on load');
+});
+
+test('every turkey is a real animal kind that nothing rolls for', () => {
+  for (const [id, k] of Object.entries(TURKEY_KINDS)) {
+    assert(ANIMALS[id] && ANIMALS[id].wild, `${id} is a wild animal kind`);
+    assert(!WILD_KINDS[id], `${id} is not in the table chance draws from`);
+    assert(k.tame > 0 && Number.isInteger(k.tame), `${id} needs a whole number of fusses`);
+    assertEqual(k.sheet, 'turkeys', `${id} is on the turkey sheet`);
+    assert(TURKEY_COLOURS[id], `${id} has a coat`);
+  }
+  const s = quietFarm(9710);
+  for (let i = 0; i < 2000; i++) assert(!TURKEY_KINDS[rollKind(s)], 'chance never sends a turkey');
+});
+
+test('one turkey a day turns up in the season, and none outside it', () => {
+  const s = quietFarm(9711);
+  const turkeys = () => s.animals.filter((a) => TURKEY_KINDS[a.type]);
+
+  noteThanksgiving(s, '2026-10-31');
+  for (let i = 0; i < TURKEY_RETRY * 20; i++) tick(s);
+  assertEqual(turkeys().length, 0, 'none in October');
+
+  noteThanksgiving(s, '2026-11-15');
+  for (let i = 0; i < TURKEY_RETRY * 3; i++) tick(s);
+  assertEqual(turkeys().length, 1, 'the day brings one, straight away');
+  assert(turkeys()[0].wild, 'and it is wild');
+  for (let i = 0; i < 3000; i++) tick(s);
+  assertEqual(turkeys().length, 1, 'and only one, however long the day');
+
+  noteThanksgiving(s, '2026-11-15');
+  for (let i = 0; i < TURKEY_RETRY * 3; i++) tick(s);
+  assertEqual(turkeys().length, 1, 'opening the game again the same day brings no second');
+
+  noteThanksgiving(s, '2026-11-16');
+  for (let i = 0; i < TURKEY_RETRY * 3; i++) tick(s);
+  assertEqual(turkeys().length, 2, 'the next day brings the next');
+
+  const late = quietFarm(9712);
+  noteThanksgiving(late, '2026-11-30');
+  late.thanksgiving.turkeyDue = true;
+  noteThanksgiving(late, '2026-12-01');
+  for (let i = 0; i < TURKEY_RETRY * 3; i++) tick(late);
+  assertEqual(late.animals.filter((a) => TURKEY_KINDS[a.type]).length, 0, 'one still owed when the month ends never comes');
+});
+
+test('a turkey takes no wild animal\'s place, and moves on after a day like one', () => {
+  const s = quietFarm(9713);
+  noteThanksgiving(s, '2026-11-15');
+  for (let i = 0; i < TURKEY_RETRY * 3; i++) tick(s);
+  assertEqual(arrivalsToday(s), 0, 'it is not one of the day\'s five');
+  for (let i = 0; i < WILD_INTERVAL * 6; i++) tick(s);
+  assertEqual(wildOnes(s).filter((a) => WILD_KINDS[a.type]).length, WILD_CAP, 'the cap is still all wildlife');
+  for (let i = 0; i < WILD_STAY; i++) tick(s);
+  assertEqual(s.animals.filter((a) => TURKEY_KINDS[a.type]).length, 0, 'unmet, it moves on after a day');
+});
+
+test('a turkey is won over like any wild animal, and counts as one', () => {
+  const s = quietFarm(9714);
+  const a = spawnWild(s, 'bourbonred', s.farmer.x + 2, s.farmer.y);
+  assert(a && a.wild, 'it can be put down');
+  let res;
+  let fusses = 0;
+  while (a.wild && fusses < 20) { letSettle(s, a); res = befriend(s, a); fusses++; }
+  assertEqual(fusses, TURKEY_KINDS.bourbonred.tame, 'as many fusses as its kind asks');
+  assert(res.befriended && !a.wild, 'and then it stays');
+  assertEqual(count(s, 'turkeys'), 1, 'counted as a turkey');
+  assertEqual(count(s, 'befriended'), 1, 'and as a wild animal befriended');
+  assert(isEarned(s, 'talking_turkey'), 'the first earns its award');
+  assert(hasMet(s, 'bourbonred'), 'it is in the journal as met');
+  assertEqual(kindsMet(s), 0, 'but not on the wildlife tab, which is not about turkeys');
+  assert(!wildJournalRows(s).some((r) => TURKEY_KINDS[r.id]), 'no turkey row there either');
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assert(back.animals.some((x) => x.type === 'bourbonred' && !x.wild), 'it survives a save, still a friend');
+  assertEqual(back.wildJournal.bourbonred.befriended, 1, 'and so does its line in the journal');
+});
+
+test('the day\'s turkey is a breed she has not won over, while there is one', () => {
+  const s = quietFarm(9715);
+  s.wildJournal = {};
+  for (const id of TURKEY_IDS.slice(1)) s.wildJournal[id] = { met: 1, befriended: 1 };
+  for (let i = 0; i < 50; i++) assertEqual(nextTurkey(s), TURKEY_IDS[0], 'the one she is missing');
+  assert(!befriendedEveryTurkey(s) && !isEarned(s, 'gobble_gobble'), 'five of six is not all');
+
+  s.wildJournal[TURKEY_IDS[0]] = { met: 1, befriended: 1 };
+  checkAchievements(s);
+  assert(isEarned(s, 'gobble_gobble'), 'all six is');
+  const seen = new Set();
+  for (let i = 0; i < 300; i++) seen.add(nextTurkey(s));
+  assertEqual(seen.size, TURKEY_IDS.length, 'and after that any breed may come');
+});
+
+test('the Thanksgiving shelves list every leaf and every turkey', () => {
+  const s = quietFarm(9716);
+  recordLeaf(s, 'ginkgo');
+  s.wildJournal = { royalpalm: { met: 2, befriended: 1 } };
+  const section = eventRows(s).find((e) => e.id === 'thanksgiving');
+  const [leaves, turkeys] = section.shelves;
+  assertEqual(leaves.items.map((i) => i.id), LEAF_IDS, 'every tree, in sheet order');
+  assertEqual(leaves.items.map((i) => i.col), LEAF_IDS.map((_, i) => i), 'each on its own column');
+  assertEqual(leaves.items.find((i) => i.id === 'ginkgo').count, 1, 'with what has been found');
+  assertEqual(turkeys.items.map((i) => i.id), TURKEY_IDS, 'every breed');
+  const palm = turkeys.items.find((i) => i.id === 'royalpalm');
+  assertEqual([palm.count, palm.befriended], [2, 1], 'shown once met, with its friends counted');
+  assertEqual(turkeys.items.find((i) => i.id === 'blueslate').count, 0, 'and unmet ones stay question marks');
+});
+
+test('the leaf and turkey sheets are exactly what the tool draws', () => {
+  for (const [file, want] of [['assets/flora/leaves.png', drawLeafSheet()],
+    ['assets/animals/turkeys.png', drawTurkeySheet()]]) {
+    const got = decodePng(file);
+    assertEqual([got.width, got.height], [want.width, want.height], `${file} size`);
+    assert(Buffer.from(got.rgba).equals(want.rgba), `${file} pixels`);
+  }
+  assertEqual(pngSize('assets/flora/leaves.png').w / TILE, LEAF_IDS.length, 'a column per leaf');
+  assertEqual(pngSize('assets/animals/turkeys.png').h / TILE, TURKEY_IDS.length, 'a row per turkey');
+  assertEqual(Object.keys(LEAF_DESIGNS).sort(), [...LEAF_IDS].sort(), 'and a design per tree');
+  assertEqual(TURKEY_IDS.map((id) => TURKEY_KINDS[id].row), TURKEY_IDS.map((_, i) => i), 'rows in order, none shared');
 });
 
 // --- wild animals -------------------------------------------------------

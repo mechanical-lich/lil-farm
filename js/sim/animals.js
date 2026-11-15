@@ -20,7 +20,7 @@ import { addItem, countItem, removeItem, ITEMS } from './inventory.js';
 import { CROPS } from './crops.js';
 import { emitUnlessSuspended } from '../engine/events.js';
 import { hayList, hayLeft, eatFrom } from './hay.js';
-import { WILD_KINDS } from './wildkinds.js';
+import { WILD_KINDS, TURKEY_KINDS } from './wildkinds.js';
 
 /**
  * `swims` is what lets an animal onto water, via SWIMMERS below. A duck spends
@@ -145,7 +145,8 @@ export const ANIMALS = {
   // same code as a horse, and none of that code has to know where it came from.
   // `wild` on the *kind* says it can't be bought; `wild` on an *animal* says
   // this particular one hasn't been won over yet.
-  ...Object.fromEntries(Object.entries(WILD_KINDS).map(([type, k]) => [type, {
+  // November's turkeys are made the same way; see TURKEY_KINDS.
+  ...Object.fromEntries(Object.entries({ ...WILD_KINDS, ...TURKEY_KINDS }).map(([type, k]) => [type, {
     name: k.name, wild: true, sheet: k.sheet, row: k.row, col: 0,
     eats: 1, drinks: 1, grazes: true,
     ...(k.swims ? { swims: true } : {}),

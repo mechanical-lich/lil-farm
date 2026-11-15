@@ -80,3 +80,36 @@ export const WILD_KINDS = {
 };
 
 export const WILD_IDS = Object.keys(WILD_KINDS);
+
+// --- November's turkeys ------------------------------------------------------
+//
+// Wild in every way that matters — they wander on, bolt when fussed over, and
+// stay for good once they trust you — but they are not part of the table
+// above, because they don't turn up by chance: one arrives a day through
+// November and at no other time. See sim/thanksgiving.js. Kept apart so
+// the wildlife journal and its awards ("met all of them") stay about what can
+// be met in any month; the turkeys have a shelf of their own in the Events
+// journal.
+//
+// Real breeds, one silhouette in six coats, on a sheet of their own:
+// assets/animals/turkeys.png, drawn by tools/make-thanksgiving.mjs. Same
+// columns as above, less `weight` (nothing rolls for them) — and the same
+// rule: `id` is permanent, `name` is not.
+
+export const TURKEY_SHEET = 'assets/animals/turkeys.png';
+
+export const TURKEY_KINDS = {
+  wildturkey: { name: 'Wild turkey', sheet: 'turkeys', row: 0, tame: 3, intimidating: 0 },
+  bronzeturkey: { name: 'Bronze turkey', sheet: 'turkeys', row: 1, tame: 3, intimidating: 0 },
+  bourbonred: { name: 'Bourbon Red turkey', sheet: 'turkeys', row: 2, tame: 3, intimidating: 0 },
+  narragansett: { name: 'Narragansett turkey', sheet: 'turkeys', row: 3, tame: 3, intimidating: 0 },
+  royalpalm: { name: 'Royal Palm turkey', sheet: 'turkeys', row: 4, tame: 3, intimidating: 0 },
+  blueslate: { name: 'Blue Slate turkey', sheet: 'turkeys', row: 5, tame: 3, intimidating: 0 },
+};
+
+export const TURKEY_IDS = Object.keys(TURKEY_KINDS);
+
+/** Anything that behaves as a wild animal: the table above, or a turkey. */
+export function wildDef(type) {
+  return WILD_KINDS[type] || TURKEY_KINDS[type] || null;
+}

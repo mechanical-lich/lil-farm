@@ -10,6 +10,7 @@ import { reconcileHay } from './sim/hay.js';
 import { reconcileFish } from './sim/fish.js';
 import { reconcileBalloons } from './sim/balloons.js';
 import { reconcileLanterns } from './sim/lanterns.js';
+import { reconcileLeaves } from './sim/thanksgiving.js';
 import { reconcileGourdDecor } from './sim/gourddecor.js';
 import { reconcileWildlife } from './sim/wildlife.js';
 import { newAchievementRecord } from './sim/achievements.js';
@@ -63,6 +64,8 @@ export function newGame(seed = (Date.now() ^ 0x5f3759df) >>> 0) {
     lanterns: {},   // tile key -> {face}; only in October, see sim/lanterns.js
     halloween: { on: false, day: null },
     gourdDecor: {},   // tile key -> gourd type; see sim/gourddecor.js
+    leaves: {},     // tile key -> {kind}; only in November, see sim/thanksgiving.js
+    thanksgiving: { on: false, day: null, turkeyDue: false },
     tasks: [],
     nextTaskId: 1,
     // See TESTING in config.js — a real farm starts with just a few seeds.
@@ -123,6 +126,8 @@ export function serialize(state) {
     lanterns: state.lanterns,
     halloween: state.halloween,
     gourdDecor: state.gourdDecor,
+    leaves: state.leaves,
+    thanksgiving: state.thanksgiving,
     tasks: state.tasks,
     nextTaskId: state.nextTaskId,
     inventory: state.inventory,
@@ -203,6 +208,10 @@ export function deserialize(data) {
     lanterns: data.lanterns || {},
     halloween: data.halloween || { on: false, day: null },
     gourdDecor: data.gourdDecor || {},
+    // Farms saved before the first November have neither. `on` is recomputed
+    // at boot from the real date, like the others.
+    leaves: data.leaves || {},
+    thanksgiving: data.thanksgiving || { on: false, day: null, turkeyDue: false },
     tasks: data.tasks || [],
     nextTaskId: data.nextTaskId || 1,
     inventory: data.inventory || {},
@@ -243,6 +252,10 @@ export function deserialize(data) {
   const lit = reconcileLanterns(state);
   if (lit.dropped) {
     console.warn(`jack-o'-lanterns cleared on load: ${lit.dropped} on land no longer owned`);
+  }
+  const fallen = reconcileLeaves(state);
+  if (fallen.dropped) {
+    console.warn(`leaves cleared on load: ${fallen.dropped} on land no longer owned`);
   }
   const setOut = reconcileGourdDecor(state);
   if (setOut.dropped) {

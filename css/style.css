@@ -620,6 +620,16 @@ li.market.glut .market-top small { color: #a33d2e; }
   background-size: 240px 384px;   /* 5 stages x 8 gourds at 48px */
 }
 
+.wild-art.sheet-leaves {
+  background-image: url(../assets/flora/leaves.png);
+  background-size: 576px 48px;    /* 12 leaves at 48px */
+}
+
+.wild-art.sheet-turkeys {
+  background-image: url(../assets/animals/turkeys.png);
+  background-size: 48px 288px;    /* 6 turkeys at 48px */
+}
+
 .event-shelf {
   font-size: 12px;
   font-weight: 700;

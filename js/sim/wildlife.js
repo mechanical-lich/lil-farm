@@ -29,7 +29,7 @@
 import { emitUnlessSuspended } from '../engine/events.js';
 import { findPath } from '../world/pathfind.js';
 import { PLOT, plotCoords } from '../world/land.js';
-import { WILD_KINDS, WILD_IDS } from './wildkinds.js';
+import { WILD_KINDS, WILD_IDS, TURKEY_IDS, wildDef } from './wildkinds.js';
 import { noteBefriended, noteMet } from './achievements.js';
 import {
   makeAnimal, showEmote, actorFor, FOOD_DURATION, WATER_DURATION,
@@ -77,7 +77,7 @@ const FLEE_TRIES = 4;
 
 const DIRECTIONS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 
-export function wildKind(type) { return WILD_KINDS[type] || null; }
+export function wildKind(type) { return wildDef(type); }
 
 /** The untamed ones, which are the ones that count against the cap. */
 export function wildOnes(state) {
@@ -95,9 +95,12 @@ export function updateWildlife(state) {
   }
 
   intimidate(state);
+  turkeyOfTheDay(state);
 
   if (state.tickCount % WILD_INTERVAL !== 0) return;
-  if (wildOnes(state).length >= WILD_CAP) return;
+  // November's turkeys are guests of the event, not of chance: they take
+  // nobody's place under the cap, and don't count as one of the day's five.
+  if (wildOnes(state).filter((a) => WILD_KINDS[a.type]).length >= WILD_CAP) return;
   if (arrivalsToday(state) >= WILD_PER_DAY) return;
   if (arrive(state)) {
     state.wildArrivals = recentArrivals(state);
@@ -114,6 +117,40 @@ function recentArrivals(state) {
 /** How many have arrived in the last twenty-four hours of farm time. */
 export function arrivalsToday(state) {
   return recentArrivals(state).length;
+}
+
+// --- November's turkeys -----------------------------------------------------
+
+/** Ticks between tries at putting today's turkey down, if the first found no room. */
+export const TURKEY_RETRY = 10;
+
+/**
+ * One turkey a day for the whole of November.
+ *
+ * Owed from the first look of each day in the season — sim/thanksgiving.js
+ * sets `turkeyDue` from the real date at boot, since nothing in here may read
+ * a clock — and paid the moment there is somewhere for it to stand. From then
+ * on it is a wild animal like any other: it stays a day, bolts when fussed
+ * over, and is won round by finding it again.
+ */
+export function turkeyOfTheDay(state) {
+  const season = state.thanksgiving;
+  if (!season?.on || !season.turkeyDue) return null;
+  if (state.tickCount % TURKEY_RETRY !== 0) return null;
+  const turkey = arrive(state, nextTurkey(state));
+  if (turkey) season.turkeyDue = false;
+  return turkey;
+}
+
+/**
+ * Which breed comes today: one she hasn't won over yet, while there is one.
+ * The season is short and there is only one a day, so a breed she already has
+ * turning up three days running would be a day wasted each time.
+ */
+export function nextTurkey(state) {
+  const fresh = TURKEY_IDS.filter((id) => !((state.wildJournal || {})[id]?.befriended > 0));
+  const pool = fresh.length ? fresh : TURKEY_IDS;
+  return pool[state.rng.int(pool.length)];
 }
 
 // --- scaring your animals -------------------------------------------------
@@ -169,7 +206,7 @@ const chebyshev = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 export function intimidate(state) {
   const yours = (state.animals || []).filter((a) => !a.wild);
   for (const w of wildOnes(state)) {
-    const k = WILD_KINDS[w.type]?.intimidating || 0;
+    const k = wildDef(w.type)?.intimidating || 0;
     const reach = triggerRadius(k);
     const before = new Set(w.inRange || []);
     const now = [];
@@ -241,7 +278,7 @@ export function arrive(state, type = rollKind(state)) {
 
 /** Puts one down. Separate from arrive() so tests can choose where. */
 export function spawnWild(state, type, x, y) {
-  if (!WILD_KINDS[type]) return null;
+  if (!wildDef(type)) return null;
   const a = makeAnimal(state, type, x, y, 0);
   a.wild = true;
   a.trust = 0;
@@ -263,7 +300,7 @@ export function rollKind(state) {
 
 function canStand(state, x, y, type) {
   if (!state.grid.inBounds(x, y) || !state.grid.isOwned(x, y)) return false;
-  const actor = WILD_KINDS[type]?.swims ? 'swimmer' : 'animal';
+  const actor = wildDef(type)?.swims ? 'swimmer' : 'animal';
   if (!state.grid.isWalkable(x, y, actor)) return false;
   if (state.farmer.x === x && state.farmer.y === y) return false;
   return !(state.animals || []).some((a) => a.x === x && a.y === y);
@@ -292,7 +329,7 @@ function removeAnimal(state, a, why) {
  */
 export function befriend(state, a) {
   if (!a || !a.wild) return null;
-  const kind = WILD_KINDS[a.type];
+  const kind = wildDef(a.type);
   meet(state, a.type);
 
   // Either way it didn't want fussing — mid-flight or not, a wild thing that
@@ -330,11 +367,11 @@ function tame(state, a) {
   const entry = journalEntry(state, a.type);
   entry.befriended += 1;
   emitUnlessSuspended('wild:befriended', {
-    id: a.id, type: a.type, name: WILD_KINDS[a.type].name, first: entry.befriended === 1,
+    id: a.id, type: a.type, name: wildDef(a.type).name, first: entry.befriended === 1,
   });
   // After the journal and the friend's own banner, so any award it earns is
   // the next thing on screen rather than the thing that beats it there.
-  noteBefriended(state);
+  noteBefriended(state, a.type);
 }
 
 /**
@@ -435,7 +472,7 @@ export function meet(state, type) {
   const first = entry.met === 0;
   entry.met += 1;
   if (first) {
-    emitUnlessSuspended('wild:met', { type, name: WILD_KINDS[type].name });
+    emitUnlessSuspended('wild:met', { type, name: wildDef(type).name });
     noteMet(state);
   }
   return first;
@@ -482,12 +519,12 @@ export function reconcileWildlife(state) {
   state.wildJournal = state.wildJournal || {};
   let dropped = 0;
   state.animals = (state.animals || []).filter((a) => {
-    const unknown = (a.wild || a.trust != null) && !WILD_KINDS[a.type];
+    const unknown = (a.wild || a.trust != null) && !wildDef(a.type);
     if (unknown) dropped++;
     return !unknown;
   });
   for (const id of Object.keys(state.wildJournal)) {
-    if (!WILD_KINDS[id]) delete state.wildJournal[id];
+    if (!wildDef(id)) delete state.wildJournal[id];
   }
   return { dropped };
 }

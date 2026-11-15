@@ -15,6 +15,7 @@ import { potAt, potList } from '../sim/pots.js';
 import { fishList } from '../sim/fish.js';
 import { balloonList } from '../sim/balloons.js';
 import { lanternList } from '../sim/lanterns.js';
+import { leafList, LEAF_IDS } from '../sim/thanksgiving.js';
 import { gourdDecorList } from '../sim/gourddecor.js';
 import { shadowFor, SHADOW_ALPHA } from './fishart.js';
 import { flowerAt, isWatered } from '../sim/flowers.js';
@@ -322,6 +323,7 @@ export function drawObjects(ctx, sheets, state, view, entityRows = null) {
   drawPots(ctx, sheets, state, view);
   const lanterns = lanternsByRow(state, view);
   const gourds = byRow(gourdDecorList(state), view);
+  const leaves = byRow(leafList(state), view);
 
   for (let y = view.y0; y <= view.y1; y++) {
     for (let x = view.x0; x <= view.x1; x++) {
@@ -334,6 +336,12 @@ export function drawObjects(ctx, sheets, state, view, entityRows = null) {
     // with them: the farmer walking up behind one is hidden by it.
     for (const l of lanterns.get(y) || []) {
       ctx.drawImage(sheets.lanterns, (l.face || 0) * TILE, 0, TILE, TILE, l.x * TILE, y * TILE, TILE, TILE);
+    }
+    // November's leaves lie on the ground the same way. Still, like the
+    // lanterns: a leaf that has landed doesn't move.
+    for (const l of leaves.get(y) || []) {
+      const col = LEAF_IDS.indexOf(l.kind);
+      if (col >= 0) ctx.drawImage(sheets.leaves, col * TILE, 0, TILE, TILE, l.x * TILE, y * TILE, TILE, TILE);
     }
     // And gourds she has set out, the same way.
     for (const g of gourds.get(y) || []) {

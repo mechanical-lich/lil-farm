@@ -39,14 +39,17 @@
 import { emitUnlessSuspended } from '../engine/events.js';
 import { ANIMALS, NOT_FOR_SALE } from './animals.js';
 import { CROPS, GOURDS } from './crops.js';
-import { grewEveryGourd, foundEveryFace, foundEveryMythical } from './events.js';
+import {
+  grewEveryGourd, foundEveryFace, foundEveryMythical, foundEveryLeaf, befriendedEveryTurkey,
+} from './events.js';
 import { MYTHICALS } from './balloons.js';
 import { LANTERN_FACES } from './lanterns.js';
+import { LEAF_IDS } from './thanksgiving.js';
 import { SPECIES, MUSHROOMS, journalCount } from './mushrooms.js';
 import { FLOWER_KINDS, WILD_HUES } from './flowergenes.js';
 import { FISH_IDS, caughtBefore, itemFor } from './fish.js';
 import { handTargeting } from './farmhand.js';
-import { WILD_KINDS, WILD_IDS } from './wildkinds.js';
+import { WILD_KINDS, WILD_IDS, TURKEY_KINDS, TURKEY_IDS } from './wildkinds.js';
 
 /**
  * Which bag items count toward which tally, built from the tables that own
@@ -308,6 +311,24 @@ export const ACHIEVEMENTS = [
     { at: 100, id: 'great_pumpkin', name: 'The Great Pumpkin' },
   ]),
 
+  // November's: leaves picked up, only while they are falling — the whole of
+  // the month — so, like the two above, the top rung is a good
+  // season's collecting. See sim/thanksgiving.js.
+  ...ladder('leaves', (n) => `Collected ${n} fallen leaves`, [
+    { at: 10, id: 'leaf_peeper', name: 'Leaf peeper' },
+    { at: 50, id: 'new_leaf', name: 'Turning over a new leaf' },
+    { at: 100, id: 'unbeleafable', name: 'Unbe-leaf-able' },
+  ]),
+
+  // And its turkeys. One a day at most and only for the season, so ten is a good
+  // third of a November of turning up — they count toward the wild-animal ladder
+  // below as well, being wild animals befriended.
+  ...ladder('turkeys', (n) => `Befriended ${n} turkeys`, [
+    { at: 1, id: 'talking_turkey', name: 'Talking turkey', blurb: 'Befriended a turkey' },
+    { at: 5, id: 'birds_of_a_feather', name: 'Birds of a feather' },
+    { at: 10, id: 'presidential_pardon', name: 'Presidential pardon' },
+  ]),
+
   // --- wild animals -------------------------------------------------------
   //
   // Befriended ones are counted as they are won over; the collections read the
@@ -429,6 +450,31 @@ export const ACHIEVEMENTS = [
     name: 'Gourd-geous',
     blurb: `Grew all ${GOURDS.length} gourds`,
     check: grewEveryGourd,
+  },
+  {
+    // One off every tree. The leaves are an even draw, so the last tree or two
+    // is the wait. Read off the Events journal — see sim/events.js.
+    id: 'arboretum',
+    name: 'Arboretum',
+    blurb: `Collected a leaf from all ${LEAF_IDS.length} trees`,
+    check: (s) => foundEveryLeaf(s),
+  },
+  {
+    // A proper pressed collection: a handful of every one, not a single lucky
+    // find of each.
+    id: 'pressed_collection',
+    name: 'Pressed between the pages',
+    blurb: `Collected five of every leaf, from all ${LEAF_IDS.length} trees`,
+    check: (s) => foundEveryLeaf(s, 5),
+  },
+  {
+    // Every breed won over, not merely met. The day's turkey is always a breed
+    // she hasn't got while there is one (see nextTurkey in sim/wildlife.js), so
+    // this is six good days rather than six lucky ones.
+    id: 'gobble_gobble',
+    name: 'Gobble, gobble',
+    blurb: `Befriended all ${TURKEY_IDS.length} breeds of turkey`,
+    check: befriendedEveryTurkey,
   },
   {
     id: 'bigger_boat',
@@ -588,6 +634,8 @@ export function noteTaskResult(state, task, gained) {
   else if (task.type === 'water') bump(state, 'watered');
   else if (task.type === 'clear' || task.type === 'chop') bump(state, 'cleared');
   else if (task.type === 'pop') bump(state, task.lantern ? 'lanterns' : 'balloons');
+  // A leaf somebody else got to first is no leaf; see the 'leaf' task in farmer.js.
+  else if (task.type === 'leaf' && !task.missed) bump(state, 'leaves');
 
   // Only counts if a farmhand was actually on its way to that animal. Merely
   // employing somebody and doing your own milking is not beating them to it.
@@ -667,7 +715,10 @@ export function noteSale(state, earned) {
  * A wild animal won over. Called by sim/wildlife.js once the journal already
  * says so, so the collection awards see the new friend in the same check.
  */
-export function noteBefriended(state) {
+export function noteBefriended(state, type) {
+  // A turkey is counted as a turkey first, so that if both ladders move the
+  // one about turkeys is the banner she sees first.
+  if (TURKEY_KINDS[type]) bump(state, 'turkeys');
   bump(state, 'befriended');
 }
 

@@ -150,6 +150,7 @@ function bareGround(state, x, y) {
   if (cropAt(state, x, y)) return false;
   // A gourd set out as a decoration, or a jack-o'-lantern, is sitting there.
   if ((state.gourdDecor || {})[`${x},${y}`] || (state.lanterns || {})[`${x},${y}`]) return false;
+  if ((state.leaves || {})[`${x},${y}`]) return false;   // or a fallen leaf
   return !isReserved(state, x, y);
 }
 

@@ -285,6 +285,7 @@ export function canSprout(state, x, y) {
   if (isReserved(state, x, y)) return false;      // a queued build owns it
   if ((state.lanterns || {})[`${x},${y}`]) return false;   // a jack-o'-lantern is sitting there
   if ((state.gourdDecor || {})[`${x},${y}`]) return false;  // or a gourd she set out
+  if ((state.leaves || {})[`${x},${y}`]) return false;      // or a leaf waiting to be picked up
   if (state.farmer.x === x && state.farmer.y === y) return false;
   return !(state.animals || []).some((a) => a.x === x && a.y === y);
 }

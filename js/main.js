@@ -24,6 +24,7 @@ import { fishAt } from './sim/fish.js';
 import { notePlayDay, earnedSince, achievementDef, notePet } from './sim/achievements.js';
 import { noteParty } from './sim/balloons.js';
 import { noteHalloween } from './sim/lanterns.js';
+import { noteThanksgiving } from './sim/thanksgiving.js';
 import { befriend, shoo } from './sim/wildlife.js';
 import { readSeedId, seedName } from './sim/flowergenes.js';
 import { drawAnimalSprite, drawHandSprite } from './render/entityrender.js';
@@ -287,6 +288,14 @@ async function boot() {
     toast(spooky.halloween
       ? "🎃 Happy Halloween! There are jack-o'-lanterns out on the farm"
       : "🎃 There are jack-o'-lanterns out on the farm");
+  }
+  // And November's leaves and turkeys. See sim/thanksgiving.js; the day's
+  // turkey announces itself when it arrives, a moment after this.
+  const harvest = noteThanksgiving(state, today());
+  if (harvest.fresh) {
+    toast(harvest.thanksgiving
+      ? '🦃 Happy Thanksgiving! There are leaves to collect out on the farm'
+      : '🍂 There are fallen leaves to collect out on the farm');
   }
   registerServiceWorker();
 }
@@ -912,6 +921,14 @@ function wireToastFeedback() {
       name: animalDef(type).name,
       blurb: 'stepped out of a birthday balloon',
     });
+  });
+
+  // A leaf puts nothing in the bag, so the task's own toast has nothing to
+  // say; this is the only word she gets that it was picked up.
+  events.on('leaf:collected', ({ name, first }) => {
+    toast(first
+      ? `New find: ${name} leaf! It's in your journal`
+      : `Picked up a ${name.toLowerCase()} leaf`);
   });
 
   events.on('mushroom:found', ({ name, first }) => {

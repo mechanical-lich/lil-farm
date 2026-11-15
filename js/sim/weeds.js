@@ -82,6 +82,7 @@ export function canSprout(state, x, y) {
   // Nor up through a jack-o'-lantern (see sim/lanterns.js).
   if ((state.lanterns || {})[`${x},${y}`]) return false;
   if ((state.gourdDecor || {})[`${x},${y}`]) return false;   // nor a gourd set out
+  if ((state.leaves || {})[`${x},${y}`]) return false;       // nor a fallen leaf (see sim/thanksgiving.js)
   // Not underfoot: sprouting on top of the farmer or an animal looks wrong even
   // though weeds don't block anyone.
   if (state.farmer.x === x && state.farmer.y === y) return false;

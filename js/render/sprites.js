@@ -10,6 +10,8 @@
 //   'flowers' — assets/flora/flowers.png               eight flowers in three greys
 //   'gourds'  — assets/flora/gourds.png                a row per gourd: growth stages, withered, set out
 //   'lanterns' — assets/flora/jackolanterns.png        one row of jack-o'-lantern faces
+//   'leaves'  — assets/flora/leaves.png                one row of November's fallen leaves
+//   'turkeys' — assets/animals/turkeys.png             one column of turkeys, a breed per row
 //
 // Both share the same palette (#84c669 grass, #eaa56c dirt), so tiles from the
 // two sheets sit next to each other seamlessly.
@@ -409,7 +411,7 @@ function loadImage(src) {
  */
 export async function loadSheets() {
   const [farm, town, emotes, shrooms, animals, battle, barn, flowers, decor, aquatic,
-    mythical, balloons, wildlife, exotic, gourds, lanterns] = await Promise.all([
+    mythical, balloons, wildlife, exotic, gourds, lanterns, leaves, turkeys] = await Promise.all([
     loadImage('assets/tilemap_packed.png'),
     loadImage('assets/town_tilemap_packed.png'),
     loadImage('assets/emotes.png'),
@@ -426,6 +428,8 @@ export async function loadSheets() {
     loadImage('assets/animals/exotic.png'),
     loadImage('assets/flora/gourds.png'),
     loadImage('assets/flora/jackolanterns.png'),
+    loadImage('assets/flora/leaves.png'),
+    loadImage('assets/animals/turkeys.png'),
   ]);
   buildCapsules(farm);
 
@@ -453,6 +457,9 @@ export async function loadSheets() {
     // October: the gourds' growth stages, and the jack-o'-lanterns' faces.
     // Both drawn by tools/make-gourds.mjs.
     gourds, lanterns,
+    // November: the fallen leaves and the turkeys, both drawn by
+    // tools/make-thanksgiving.mjs. See sim/thanksgiving.js.
+    leaves, turkeys,
   };
 }
 

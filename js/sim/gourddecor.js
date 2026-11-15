@@ -57,6 +57,7 @@ export function canPlaceGourd(state, x, y) {
   if (potAt(state, x, y) || decorGourdAt(state, x, y)) return false;
   const key = gourdKey(x, y);
   if ((state.lanterns || {})[key] || (state.balloons || {})[key]) return false;
+  if ((state.leaves || {})[key]) return false;
   return true;
 }
 

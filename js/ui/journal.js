@@ -163,15 +163,25 @@ export function initJournal(state, { onPlantFlower } = {}) {
       mythicals: (i) => ({ sheet: 'mythical', pos: `-${i.col * 48}px 0`, name: animalDef(i.id)?.name || i.id }),
       lanterns: (i) => ({ sheet: 'lanterns', pos: `-${i.col * 48}px 0`, name: i.id[0].toUpperCase() + i.id.slice(1) }),
       gourds: (i) => ({ sheet: 'gourds', pos: `-192px -${i.row * 48}px`, name: i.name }),
+      leaves: (i) => ({ sheet: 'leaves', pos: `-${i.col * 48}px 0`, name: i.name }),
+      turkeys: (i) => ({ sheet: 'turkeys', pos: `0 -${i.row * 48}px`, name: i.name }),
     };
-    const counted = { mythicals: (n) => `×${n}`, lanterns: (n) => `${n} popped`, gourds: (n) => `${n} grown` };
+    const counted = {
+      mythicals: (n) => `×${n}`,
+      lanterns: (n) => `${n} popped`,
+      gourds: (n) => `${n} grown`,
+      leaves: (n) => `×${n}`,
+      // Met is what shows a turkey at all; the heart is how many are friends,
+      // the same as the wildlife tab.
+      turkeys: (n, i) => (i.befriended ? `♥ ${i.befriended}` : '—'),
+    };
 
     const cell = (shelf, i) => {
       if (i.count <= 0) return '<figure class="wild unmet"><div class="wild-art"></div><figcaption>?</figcaption></figure>';
       const { sheet, pos, name } = look[shelf.id](i);
       return `<figure class="wild" title="${esc(name)}">
            <div class="wild-art sheet-${sheet}" style="background-position:${pos}"></div>
-           <figcaption>${esc(name)}<b>${counted[shelf.id](i.count)}</b></figcaption>
+           <figcaption>${esc(name)}<b>${counted[shelf.id](i.count, i)}</b></figcaption>
          </figure>`;
     };
 
@@ -268,6 +278,7 @@ export function initJournal(state, { onPlantFlower } = {}) {
   on('wild:met', refresh);
   on('wild:befriended', refresh);
   on('lantern:popped', refresh);
+  on('leaf:collected', refresh);
   on('balloon:mythical', refresh);
 
   return { render };

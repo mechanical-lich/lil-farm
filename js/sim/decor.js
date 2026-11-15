@@ -60,6 +60,7 @@ export function canPlaceDecor(state, x, y, kind = null) {
   // Not on a gourd she set out, or a jack-o'-lantern: each is a thing standing
   // there already.
   if ((state.gourdDecor || {})[`${x},${y}`] || (state.lanterns || {})[`${x},${y}`]) return false;
+  if ((state.leaves || {})[`${x},${y}`]) return false;   // nor on a leaf she hasn't picked up yet
   // A pot brings its own soil, so it may stand on a road or a dirt path where
   // nothing would otherwise grow — but not in water, and not two to a tile.
   if (decorDef(kind)?.overlay) return !isWater(grid.getGround(x, y)) && !potAt(state, x, y);

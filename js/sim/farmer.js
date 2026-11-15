@@ -27,7 +27,8 @@ import { removePot } from './pots.js';
 import { landFish, standFor } from './fish.js';
 import { popBalloon } from './balloons.js';
 import { popLantern, lanternAt } from './lanterns.js';
-import { recordHarvest, recordLantern, recordMythical } from './events.js';
+import { collectLeaf, LEAF_KINDS } from './thanksgiving.js';
+import { recordHarvest, recordLantern, recordMythical, recordLeaf } from './events.js';
 import { clearGourd } from './gourddecor.js';
 import { makeAnimal, freeSpotNear } from './animals.js';
 import { noteTaskResult, noteBuild, noteTroughFilled } from './achievements.js';
@@ -336,6 +337,17 @@ function applyTaskResult(state, task) {
       // pot to put in the bag — taking one away is undoing a purchase, which
       // is worth saying out loud rather than quietly refunding.
       removePot(state, task.x, task.y);
+      break;
+    }
+
+    case 'leaf': {
+      // Nothing for the bag: a leaf goes straight in the Events journal, which
+      // is the record the leaf awards read. Counted there before the task
+      // result is noted, so the award and the journal can never disagree.
+      const kind = collectLeaf(state, task.x, task.y);
+      if (!kind) { task.missed = true; break; }
+      const have = recordLeaf(state, kind);
+      emitUnlessSuspended('leaf:collected', { kind, name: LEAF_KINDS[kind].name, first: have === 1 });
       break;
     }
 
