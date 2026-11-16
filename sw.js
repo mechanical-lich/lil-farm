@@ -8,7 +8,7 @@
 // ⚠ Bump CACHE_VERSION on every deploy. Assets are served cache-first, so
 // without a bump a returning player keeps the old build indefinitely.
 
-const CACHE_VERSION = 'lil-farm-v68';
+const CACHE_VERSION = 'lil-farm-v69';
 
 const SHELL = [
   './',
@@ -111,12 +111,30 @@ const SHELL = [
   './js/ui/settingspanel.js',
 ];
 
+/**
+ * The same request, made past the browser's HTTP cache. Everything this worker
+ * stores is kept until the next CACHE_VERSION, so it must come from the server
+ * and not from whatever the browser happened to be holding.
+ */
+function fresh(request, mode) {
+  try {
+    return new Request(request, { cache: mode });
+  } catch {
+    return request;
+  }
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_VERSION);
     // addAll fails the whole install if any one file 404s, which would leave
     // the game uninstallable for a typo. Take what we can get instead.
-    await Promise.all(SHELL.map((url) => cache.add(url).catch(() => {})));
+    //
+    // `cache: 'reload'` matters: a plain fetch here is answered by the browser's
+    // own HTTP cache, and GitHub Pages lets that hold a file for ten minutes.
+    // Two deploys inside that window pinned the *previous* build's module into
+    // the new version's cache, under a new index.html that expected the new one.
+    await Promise.all(SHELL.map((url) => cache.add(fresh(url, 'reload')).catch(() => {})));
     await self.skipWaiting();
   })());
 });
@@ -139,7 +157,8 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith((async () => {
       try {
-        return await fetch(request);
+        // Revalidated, so the page and the modules under it are the same build.
+        return await fetch(fresh(request, 'no-cache'));
       } catch {
         const cache = await caches.open(CACHE_VERSION);
         return (await cache.match('./index.html')) || Response.error();
@@ -159,7 +178,7 @@ self.addEventListener('fetch', (event) => {
     const cached = await cache.match(request);
     if (cached) return cached;
     try {
-      const response = await fetch(request);
+      const response = await fetch(fresh(request, 'reload'));
       if (response.ok) cache.put(request, response.clone());
       return response;
     } catch {

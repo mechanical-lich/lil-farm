@@ -10633,6 +10633,15 @@ test('the factory fittings join up into runs', () => {
 
 
 
+test('the service worker never fills its cache from the browser cache', () => {
+  // A bare fetch(request) or cache.add(url) is answered by the HTTP cache, which
+  // on GitHub Pages can be ten minutes stale: the previous build's module gets
+  // pinned under the new version. Every fetch goes through fresh().
+  const sw = readFileSync('sw.js', 'utf8');
+  assertEqual(sw.match(/fetch\((?!fresh\()[^)]*\)/g) || [], [], 'fetches that could be served stale');
+  assertEqual(sw.match(/cache\.add\((?!fresh\()[^)]*\)/g) || [], [], 'precache adds that could be served stale');
+});
+
 test('every module is precached by the service worker', () => {
   // The shell list in sw.js is hand-written and drifts: a new module that isn't
   // in it is fetched from the network, and since main.js imports statically, a
