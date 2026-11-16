@@ -648,3 +648,125 @@ Thanksgiving's event (`sim/thanksgiving.js`), built the way October's is: the da
 - **Turkeys are wildlife in everything but the table.**  Six real breeds in `TURKEY_KINDS` (`sim/wildkinds.js`), kept apart from `WILD_KINDS` so chance never sends one and the wildlife tab and its "met all of them" awards stay about what can be met in any month.  They take nobody's place under the wildlife cap and don't count as one of the day's five arrivals.  The day's breed is one she hasn't won over while there is one.  They are recorded in the wildlife journal like anything wild and shown on a shelf of their own under Thanksgiving in the Events tab — a breed appears once met, with a heart for each friend.
 - Befriending a turkey counts on the wild-animal ladder as well as its own: 1, 5 and 10 earn *Talking turkey*, *Birds of a feather* and *Presidential pardon*, and every breed earns *Gobble, gobble*.
 - The art is generated, from text grids in `tools/make-thanksgiving.mjs`: `assets/flora/leaves.png` (a row of leaves) and `assets/animals/turkeys.png` (one silhouette in six coats, a breed per row, like the wildlife sheets).  A test holds both to the tool's output byte for byte.
+
+## Names
+
+Any animal that lives on the farm can be given a name — bought, befriended or out of a balloon. Not a wild one that has not been won over: it is not hers yet.
+
+- **The second tap names it.** The first tap on an animal is the fuss, as it always was. A tap on one that has just been fussed over used to do nothing but say so; that tap now opens the naming card. So naming has no tool of its own on a bar that is already full, and working down a row of animals petting each once is never interrupted. The first tap's message says "tap again to name it" until the animal has a name.
+- **Befriending asks straight away.** The moment a wild animal becomes hers the card comes up behind the banner, and "Not now" puts it off for good — it can be named any time by tapping twice.
+- **A name is one optional field on the animal's own record** (`name`), so it is saved with the animal and goes wherever the animal goes. Sixteen characters, counted by code point so an emoji is never cut in half; control characters out, runs of space collapsed. Saving an empty box takes the name away and leaves no field behind.
+- **The card is the only place the player types.** It sits towards the top of the screen because a phone keyboard takes the bottom half, and its field is 16px because Safari zooms the page on anything smaller and does not zoom back. The name is only ever set and read as text, never as markup.
+- Where the game talks about one animal — the fuss, the shoo — it uses the name if there is one: "Biscuit loves the attention".
+
+## The sanctuary
+
+A third map, where the animals she has won over can live (`sim/sanctuary.js`). A farm that befriends everything ends up with hundreds of animals, each wanting feeding and each walked through the simulation every tick. The sanctuary is somewhere for them to go: built with money the way the city is, where an animal wants nothing and can be fetched back whenever she likes.
+
+- **It is the city's kind of map with a different menu.** A ground layer and a list of pieces, bought outright and placed at once. The city's build code takes the place it is building in, and the sanctuary's catalogue is registered alongside the city's so one lookup prices, places and loads both. The menu mixes all three sheets: the farm's tree, rocks, hay, trough and pond; the town's fence ring, pines, well, dirt path and house; the city's bench, lamp, bin and planters.
+- **An enclosure is a piece other pieces can stand inside.** Dragged out by its corners like a block of flats, from 4x4 to 14x12, $1,500 plus $150 a tile. Trees, bushes, rocks, hay, a trough and pool water may go inside it, off the fence; nothing else may, and an enclosure needs open grass. A tap on a tree in a paddock is a tap on the tree, not the paddock.
+- **Room is floor, and comforts make more.** One animal to four tiles of floor, plus a tenth more for each comfort inside, up to five — and never more animals than tiles to stand them on. The same shape as apartments and their lamps.
+- **Who can go: animals she found or was given.** Anything befriended from the wild, the November turkeys, and the birthday mythicals. Not bought livestock: a cow is there to give milk, and "does it still give milk in the sanctuary?" has no good answer.
+- **Sending and fetching are on the animal's card** — the naming card, which is now the one place for anything about a particular animal. On the farm it offers "Send to the sanctuary", greyed out with the reason when there is no enclosure or no room; in the sanctuary it offers "Bring back to the farm". Both are instant. An animal goes to whichever enclosure has the most room to spare.
+- **A resident is the animal's own record, minus its needs.** It keeps its name, its affection and its colour and leaves `state.animals` entirely — which is the point: nothing on the farm has to think about it. It comes home beside the farmer, fed and watered as a bought animal arrives, so fetching one is never a chore.
+- **Residents stand about and now and then take a step,** inside their own fence, never onto a tree or into the pool, never two to a tile. The same one-tile move the townsfolk make and nothing else.
+- **Animals can be moved by hand.** The sanctuary's tool bar has the farm's **Move**: press on an animal and drag it to another free spot in its enclosure, or into another enclosure with room, where it then lives. It cannot be put on a fence, a tree, the pool, another animal, or outside every enclosure, and the tile under it turns red to say so before it is let go. Instant and free, like the farm's.
+- **An enclosure with animals in it cannot be taken down.** They have to go home first. And a save that somehow has a resident with no enclosure hands it back to the farm on load rather than losing it.
+- **Visitors leave donations, by variety.** With a visitor centre built, people come out from the city and leave $15 a day for each *kind* of animal kept, scaled by how full the city is — thirty rabbits are one thing to look at. The box holds three days' worth and then stops; tapping the visitor centre empties it. Forty-three kinds and a full city is about $600 a day, against a farm that clears thousands an hour: a thank-you, not a business. No city, no visitors.
+- **The place button became a menu.** With two places it was a toggle; with three it drops down the two that are not on screen.
+- The status chip shows who lives there against the room there is, with a coin when the box has anything in it. Only the coin: measured on the phone, the chip has room for the head count and one more character.
+- `lilfarm.demoSanctuary()` in the console puts down four enclosures, trails, a visitor centre and one of every animal that can go, for looking at.
+
+## The city
+
+A running farm earns more than it can spend. Once the valley is bought — $72,000, a long game — money piles up with nowhere to go, and a number that only climbs stops meaning anything. **The city is where it goes**: a second map, built the way the farm is built, at prices big enough to take a farm's income seriously (`sim/city.js`).
+
+**It is a map of its own, not a district of the farm's.** Everything that lives on the farm acts on `state.grid`: weeds sprout on its grass, mushrooms and flowers come up in it, wild animals wander in across it, balloons and lanterns land on it. None of that belongs in a street, and teaching some thirty systems that some grass is not for them would have been thirty chances to get it wrong. The city is `state.city` — nine lots of forty tiles square, all grass to start, the middle one owned — and none of them ever sees it. A test runs two hours of farm against a built city and checks not one tile of it moved.
+
+**Money is the whole price, and building is instant.** The farmer stays on the farm; the city has no task queue. That is the trade being offered: the farm is built with time, the city with money. It also keeps the farmer's queue about the farm, which is what the status chip and the away card report on.
+
+- The **🏙️ button** at the end of the top row swaps the view; on the city it becomes 🌾 and swaps back. One camera serves both maps, re-pointed at whichever is showing, so input and the renderer need know nothing about there being two — and each map remembers its own position and zoom, so a trip to the city puts you back where you were on the farm. **The farm keeps running** the whole time; only what is drawn changes.
+- In the city the tool bar is **Tap, Build, Demolish** and nothing else. Planting, watering, harvesting, tilling, moving and shooing act on the farm's own map, so they are not offered rather than offered and refused.
+- The build menu is grouped like the farm's, and held to the same budget. **Street** (road and pavement first, then the furniture), **Blocks** (the flats and the four shops), **Park**, **Factory**. Roads had a shelf of their own at first: measured at 393px, *Roads, Buildings, Street, Garden* came to 384px of the 385 the row has, which left no room for the factory shelf still to come. So the road moved to the front of the street it makes and *Buildings* became *Blocks*. With *Factory* on the end the row then measured 385 of 385, so *Green* became *Park*, which leaves 9px spare — the farm's own row keeps 7. A test holds the names to the farm's 25 characters.
+
+**Prices are guesses, on purpose all in one place.** Against $72,000 for the valley: a road tile is $30, pavement $20, street furniture $100 to $400, the smallest shop $5,000 and the smallest block of flats $8,000. A full city of a thousand people is about two hundred tiles of flats — upwards of $100,000 of building before a single road — so it is a longer game than the valley. A building is a flat base plus a rate per tile — the barn's shape — so one big block is cheaper per tile than several small ones. Fences are $40-50 a tile because they are laid in runs.
+
+**Demolishing hands back half**, rounded down, so building and taking down is always a loss and nothing can be churned for money. Small things come down on a tap. **A building asks first**: the confirm bar says what comes back ("Demolish for $7,000 back") and the building is tinted red, not green — green would say "this is a good spot for it", which is the wrong thing to say about something on its way out. Painting never takes a building down, so dragging across a street to lift the paving cannot take a block of flats with it.
+
+**Lots: the city and the sanctuary grow the way the valley does.** Each started as a single 40x40 map; each is now a 3x3 of 40x40 lots with the middle one owned, the same layout and the same code as the farm's land (`world/land.js`, which now takes which place it is buying in). The shop's **Land tab** has a row of three buttons — 🌾 Farm, 🏙️ City, 🐾 Sanctuary — over the little map, opening on whichever place is on screen, since that is the one a player who has run out of room is looking at. A lot must border one already owned, nothing can be put down on one not yet bought ("you don't own that lot — buy it from the shop's Land tab"), and unbought lots are washed over exactly as unbought farmland is. Buying one takes you to it. Prices step the way farmland does, each lot one step more than the last: **$25,000 a step in the city** ($900,000 for all nine) and **$10,000 in the sanctuary**, against farmland's $2,000, because a city lot only ever holds things that cost thousands themselves. Both are guesses. A save from before lots (version 12) has everything it built — ground, pieces, townsfolk, vehicles and animals — moved one lot across and one down into the middle lot, unchanged.
+
+**Fences go down in runs.** Fences, conveyors, pipes and the hazard strip join up, so they are laid with two taps, in the city and the sanctuary alike: the two ends of a straight run, or two opposite corners for a ring round the rectangle between. The first tap can be confirmed alone for a single piece. The bar says how many pieces and what they cost before anything is spent, and the ghost is drawn joined up, tinted along the run rather than over the ground it rings. A run goes round anything standing in its way and says how many tiles it skipped and why; a piece of the same fence already there is kept and not charged for. Before this a fence went down a tile a tap: watched in the sanctuary, an 8x9 paddock fence took thirty exact taps and still came out with a gap. A drag in paint mode still lays a tile at a time.
+
+**Nothing stands in the road.** Furniture and buildings go on grass or pavement; a building across a road would cut a street in half without saying so. Ground cannot be laid under something standing on it. Every refusal says which thing is in the way, the lesson the barn taught.
+
+### The art
+
+`assets/city_tilemap_packed.png`, catalogued in `CITY`, `CITY_ROOF` and `CITY_WALL` in `render/sprites.js`. Two building sets sit side by side, the second six columns right of the first: **red brick under a tan flat roof** (Apartments) and **brown brick under slate** (Shops).
+
+- **A city building is its footprint and nothing more.** A flat roof seen from above sits inside its walls, so unlike a farmhouse nothing overhangs and nothing behind it is hidden. The roof takes the back rows as a nine-slice — or the one-row strip the sheet also draws, on a three-deep building — and the walls take the front two, three on anything five deep, which reads as another storey. Windows every other tile upstairs; the door in the middle of the ground floor, the wide one (glass double doors on the flats, a garage door on the shop) where the width is even and it can sit dead centre.
+- **The road is assembled, not drawn.** The sheet has a two-lane road in a few fixed shapes, not an autotile set. But every situation a kerb can be in appears somewhere in those shapes — a straight kerb, the outside of a bend, the inside of one, plain asphalt — so four quarters of the sheet, mirrored and turned, make all thirteen pieces the farm's per-quarter autotiler wants (`render/cityart.js`). The kerb is a dashed line two pixels in, whose dashes are symmetric, so a mirrored kerb is indistinguishable from a drawn one. **Not one pixel is repainted**: a test runs the assembly over the PNG and checks every output pixel is a colour of the sheet, and the straight kerb is the sheet's own pixel for pixel.
+- Pavement is plain slabs with a cracked one scattered by position, as the farm's grass scatters its clumps.
+- Tall pieces — lamps, the power pole, the clipped trees, the bus shelter's roof — draw a row of art above the tile they stand on, like a tree's canopy, and everything sorts by the row it stands on.
+
+**An old farm simply has an empty city.** Save version 11 adds `city` and the migration gives every earlier farm an empty one; nothing about the farm, its money or its market is touched. Checked in the browser by writing a version-10 save with no city and reloading it.
+
+### People
+
+**The more the city is built up, the more people arrive** (`sim/citylife.js`). A block of flats houses four people a tile — a 3x3 houses 36 — and each lamp, bench or tree within three tiles of it adds 5%, up to six of them. That is the whole reason to buy street furniture beyond the look of it, and it is capped so a block cannot be buried in lamps for a fortune.
+
+- **A building needs a way to the road**: a road beside it, or a strip of pavement beside it that itself touches a road. Set back behind the paving is the ordinary arrangement, and refusing it would have made pavement a trap. Flats out in a field house nobody, and a shop there is shut. Tapping a building says so first, because it is the commonest thing to get wrong and the least visible.
+- **People drift in slowly.** Every minute the population closes 1/360th of the gap to what the city has room for, so a new block is about two thirds full after six hours and full after a day — something to come back and see rather than a number that jumps. Knocking a block down sends them away just as slowly. It snaps once it is within a person, so it settles rather than creeping toward a number it never reaches.
+- Done on one tick in sixty, as the market does, and **everything derived from the layout is worked out once per change** and kept, keyed on a counter every build and demolish bumps. The minute's update is then a subtraction; a week of catch-up never rescans forty by forty tiles ten thousand times.
+- **An empty city costs nothing and changes nothing.** It draws no random numbers — a test runs three days of it and checks the farm's dice have not moved — and tells the market nothing.
+- The status chip reads **👥 120/290** in the city — who lives there and how many it has room for, or just the head count once it has settled. The farmer's queue count is hidden there, since it would only crowd the number that matters.
+
+**Townsfolk and vehicles** appear in proportion: one person in view for every 25 residents up to 24, one parked vehicle for every 100 up to six. People stand on the pavement (or by the buildings, in a city with none); vehicles stand in the road, needing two tiles of it side by side. Every half a minute to two minutes one takes a single step, the same one-tile move the farm's animals make, interpolated the same way, and a vehicle keeps to its lane. **There is no other motion**: no bobbing, no walking cycle, nothing sliding about for decoration — that was built once and turned down as too much movement. Anyone built over is moved somewhere they may stand.
+
+### Shops
+
+The brown-brick building comes in four trades, chosen when it is built: **Bakery** (wheat), **Grocer** (carrots, corn, tomatoes, cabbages, eggplants), **Dairy** (milk, goat's milk, eggs) and **Tailor** (wool). Each has the bag's own picture of what it buys set on its roof above the door, so four brown buildings can be told apart without tapping each one — the icons are the existing ones, unchanged.
+
+### What the city does to the market
+
+The market is deliberately scale-free: it prices the *mix* a farm sells, not the volume. **The city must not undo that by simply raising prices**, so it acts in three ways that leave the mix in charge, and writes them into `market.city` once a minute for the market to read:
+
+- **Shops change what the town wants.** Each open shop raises the town's appetite for its goods by 15%, counting up to three of a trade. Appetite is a share, so a bakery makes wheat pay better and clear faster — but the glut is still measured against wheat's *normal* share, so a farm selling nothing but wheat still gluts it. And a shop for every trade favours nothing at all, which the market panel knows: its 🏙️ mark only goes on goods the city has actually tipped the town towards.
+- **People deepen it.** The town's own stock grows with the population, to half as deep again with a full city, so a farm's sales are diluted further and prices sit calmer. At the top end, where a farm sells far more than the town holds, depth stops mattering and the mix decides.
+- **A full city pays a little more for everything**: up to 15% at a thousand people, and no more however many arrive. It goes on after the price clamp, so it is a true cap rather than something the ceiling quietly eats.
+
+Measured over three weeks of simulated trading, five seeds, prices sampled every six hours after the first day:
+
+| what you sell | no city | full city | full city, three grocers |
+|---|---|---|---|
+| eggplant only, $50k a day | x0.64 | x0.77 | x0.85 |
+| seven goods, $50k a day | x0.96 | x1.11 | x1.16 |
+| eggplant only, $8k a day | x0.82 | x0.98 | x1.08 |
+| seven goods, $8k a day | x0.98 | x1.13 | x1.18 |
+| a beginner's carrots and wheat | x0.94 | x1.10 | x1.09 |
+
+The **no city** column is the market as it always was — the x0.64 monoculture is the figure the market section above was tuned to — and a test holds an empty city to it to the last cent. In every city, one crop is paid well under seven goods of the same size, and a big one-crop farm in the best city for it (x0.85) is still paid less than a varied farm with no city at all (x0.96). The grocers row is the hardest case on purpose: shops that want exactly the crop being grown are the city at its most generous to a monoculture. Depth turned out to matter much less than expected — 0.3 and 0.5 measured within a point of each other — and the premium is most of what a full city adds.
+
+**The market panel says what the city is contributing** in a line under the key: how many people, the premium they pay, and which shops want which goods. A price that moves for a reason the player cannot see is exactly what that panel exists to prevent.
+
+### The factory district
+
+The last shelf of the city menu, from `assets/factory_tilemap_packed.png` (catalogued in `FACTORY` in `render/sprites.js`). **Factory floor** ($40 a tile, orange concrete with a marked slab scattered now and then), four **machines** at $25,000 each, and fittings that join up and do nothing — plain and yellow-trimmed conveyors, pipes, the hazard strip — plus crates, a stack of boxes and a forklift. A factory floor should look like one.
+
+**A machine only goes down on factory floor.** That is what makes the district a place rather than machines dotted about the streets, and refusing the placement outright ("machines go on factory floor") is better than letting one be put on the pavement and sit there mysteriously idle.
+
+**One production line per colour of machine on the sheet** (`sim/factory.js`):
+
+| line | machine | takes | makes | one machine, kept fed |
+|---|---|---|---|---|
+| Mill | yellow | wheat ($12) | flour ($18) | 15 an hour |
+| Cannery | red | tomatoes ($20) | preserves ($30) | 10 an hour |
+| Creamery | blue | milk ($60) | cheese ($90) | 3 an hour |
+| Loom | green | wool ($100) | cloth ($150) | 2 an hour |
+
+- A line takes its raw good **out of the bag** at a steady rate and puts the made good back in, a minute's work at a time alongside the rest of the city. No randomness at all, and the work is a few additions, so catch-up does a week of it without noticing.
+- **Made goods sell at a flat price**, half as much again as what went in, outside the market the way mushrooms and gourds are. They have their own shelf in the sell list, *From the factory*.
+- **Throughput is what is capped, not the price.** A flat price is a way round the market, and a mill that would take every bushel a farm could grow would make growing nothing but wheat the best plan in the game — the one thing the market exists to prevent. So each machine works at a fixed pace, set by value rather than by count — about $4,300 of raw goods a day each — and **only three machines of a colour count**. At full stretch a line takes roughly $13,000 a day, about a quarter of a mature farm's $50,000; the rest of a big harvest still goes to market and is priced on its mix. A fed machine adds a little over $2,000 a day and pays for itself in about twelve.
+- Slow lines carry their part-done work over in whole machine-ticks, so a loom's thirtieths of a bolt add up to exactly one bolt. They were fractions at first, and thirty thirtieths came to 0.9999999 of a bolt and never delivered — caught by a test.
+- **An idle line does not bank its idle time.** A mill that stood empty all night does not grind a night's wheat in a second when some arrives.
+- **A line can be switched off.** Tapping a machine with the plain tool says what its line is doing — "Mill: 30 wheat into flour an hour, from your bag" — and offers to switch the whole line off, through the confirm bar, so a stray tap only ever asks. A switched-off line takes nothing and keeps its place, for when the wheat is wanted for hay bales or the bakery's appetite makes it worth selling raw.
+- A machine has three looks per colour on the sheet; which one is settled by its id, so a row of mills is not three of the same and none ever changes.

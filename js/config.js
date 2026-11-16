@@ -20,7 +20,7 @@ export const CATCHUP_HIDDEN_SLICE_MS = 1000;
 
 // --- Persistence --------------------------------------------------------
 export const SAVE_KEY = 'lilfarm.save.v1';
-export const SAVE_VERSION = 10;
+export const SAVE_VERSION = 13;
 export const AUTOSAVE_MIN_MS = 1000;    // never write more often than this
 export const AUTOSAVE_MAX_MS = 10000;   // always write at least this often when dirty
 
@@ -78,6 +78,25 @@ export const CELLS_Y = 3;
 
 export const MAP_W = CELL_W * CELLS_X;
 export const MAP_H = CELL_H * CELLS_Y;
+
+// The city is a map of its own, laid out the way the valley is: a 3x3 of
+// 40x40 lots, starting with the middle one and bought outward from the shop's
+// Land tab. One lot is a good few streets of buildings; the other eight are
+// for a farm whose money has outgrown it.
+export const CITY_W = CELL_W * CELLS_X;
+export const CITY_H = CELL_H * CELLS_Y;
+
+// The sanctuary is the same again: a third map of its own. See sim/sanctuary.js.
+export const SANCTUARY_W = CELL_W * CELLS_X;
+export const SANCTUARY_H = CELL_H * CELLS_Y;
+
+// What each lot after the first costs, times the number already owned, the
+// way the valley's land is priced (LAND_PRICE_STEP below). Guesses: a city lot
+// is $25,000, then $50,000 and so on, $900,000 for all nine, against
+// apartments from $8,000 and machines at $25,000 each. The sanctuary's
+// enclosures are cheaper, and so is its land.
+export const CITY_LOT_PRICE_STEP = 25000;
+export const SANCTUARY_LOT_PRICE_STEP = 10000;
 
 // What each new cell of land costs: this many dollars times the number of cells
 // already owned, so the second is one step and the ninth is eight. A cell is a

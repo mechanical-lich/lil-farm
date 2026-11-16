@@ -18,6 +18,7 @@ export const ITEM_GROUPS = [
   { id: 'produce', name: 'From the animals' },
   { id: 'fish', name: 'From the water' },
   { id: 'foraged', name: 'Foraged' },
+  { id: 'goods', name: 'From the factory' },
   { id: 'material', name: 'Materials' },
   { id: 'seed', name: 'Seeds' },
 ];
@@ -51,6 +52,13 @@ export const ITEMS = {
   // quicker and a cow earns more once it has. See the note in animals.js.
   goat_milk: { name: "Goat's milk", sell: 45, group: 'produce' },
   wool: { name: 'Wool', sell: 100, group: 'produce' },
+  // Made by the city's factory lines (sim/factory.js) from what the farm grows.
+  // A flat price, outside the market like a mushroom, and half as much again
+  // as what went in: the factory's throughput is what is capped, not its price.
+  flour: { name: 'Flour', sell: 18, group: 'goods' },
+  preserves: { name: 'Preserves', sell: 30, group: 'goods' },
+  cheese: { name: 'Cheese', sell: 90, group: 'goods' },
+  cloth: { name: 'Cloth', sell: 150, group: 'goods' },
   // Out of the water. Prices climb with rarity rather than with size alone —
   // the things that have no business in a farm pond are worth a fortune
   // precisely because landing one is a story.

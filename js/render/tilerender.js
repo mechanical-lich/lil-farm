@@ -168,7 +168,7 @@ export function riverPieceAt(state, x, y, same = isWaterAt(state)) {
   return { sprite: RIVER.straight, turns: (w || e) ? 1 : 0 };
 }
 
-const DIRT_SET = {
+export const DIRT_SET = {
   TL: TOWN.dirtTL, T: TOWN.dirtT, TR: TOWN.dirtTR,
   L: TOWN.dirtL, C: TOWN.dirtC, R: TOWN.dirtR,
   BL: TOWN.dirtBL, B: TOWN.dirtB, BR: TOWN.dirtBR,
@@ -511,9 +511,10 @@ function drawTools(ctx, sheets, state, view) {
  * dim too — the boundary has to read as "not yours yet" at a glance, and
  * dimming only the grass under a bright tree doesn't say that. The wash is
  * deliberately gentle: it's an invitation, not a wall.
+ *
+ * The city and the sanctuary pass their own `owns`, for their unbought lots.
  */
-export function drawUnowned(ctx, state, view) {
-  const { grid } = state;
+export function drawUnowned(ctx, state, view, owns = (x, y) => state.grid.isOwned(x, y)) {
   ctx.save();
   ctx.fillStyle = 'rgba(24, 38, 20, 0.42)';
   for (let y = view.y0; y <= view.y1; y++) {
@@ -521,7 +522,7 @@ export function drawUnowned(ctx, state, view) {
     // wide is a handful of fills instead of hundreds.
     let runStart = -1;
     for (let x = view.x0; x <= view.x1 + 1; x++) {
-      const unowned = x <= view.x1 && !grid.isOwned(x, y);
+      const unowned = x <= view.x1 && !owns(x, y);
       if (unowned && runStart < 0) runStart = x;
       if (!unowned && runStart >= 0) {
         ctx.fillRect(runStart * TILE, y * TILE, (x - runStart) * TILE, TILE);

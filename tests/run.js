@@ -13,7 +13,7 @@ import { findPath, besideBox, insideBox } from '../js/world/pathfind.js';
 import { Camera } from '../js/render/camera.js';
 import {
   PLOT, plotOfTile, plotBounds, plotIndex, startingPlot, landPrice, nextLandPrice,
-  canBuyPlot, buyPlot, buyablePlots, totalPlots,
+  canBuyPlot, buyPlot, buyablePlots, totalPlots, ownedCount, middlePlot,
 } from '../js/world/land.js';
 import { expandSaveToCells, centreCellIndex } from '../js/world/expand.js';
 import {
@@ -74,7 +74,7 @@ import {
   recordLeaf, leafCount, leavesCollected, foundEveryLeaf, befriendedEveryTurkey,
 } from '../js/sim/events.js';
 import { nextTurkey, rollKind, TURKEY_RETRY, SCARE_INTERVAL, updateWildlife } from '../js/sim/wildlife.js';
-import { SEEK_COOLDOWN, updateAnimals } from '../js/sim/animals.js';
+import { SEEK_COOLDOWN, updateAnimals, cleanName, nameAnimal, calledAs, NAME_MAX } from '../js/sim/animals.js';
 import {
   drawLeafSheet, drawTurkeySheet, LEAVES as LEAF_DESIGNS, TURKEY_COLOURS,
 } from '../tools/make-thanksgiving.mjs';
@@ -160,6 +160,35 @@ import {
   on, suspend, resume, startTally, stopTally, emitUnlessSuspended,
 } from '../js/engine/events.js';
 import { buildSummary } from '../js/ui/summary.js';
+import {
+  LINES, LINE_MACHINE_CAP, MACHINE_PRICE, lineRate, setLine, lineOn,
+} from '../js/sim/factory.js';
+import {
+  FLOOR_PRICE, cityStructureAt, ownsTile, NOT_OWNED, runTiles, cityRunPlan, cityBuildRun, cityDef,
+} from '../js/sim/city.js';
+import { runPiece, fencePiece } from '../js/render/cityrender.js';
+import { FACTORY, CITY } from '../js/render/sprites.js';
+import {
+  updateCity, housingCapacity, openShops, workingMachines, folkWanted, CAR_REST_MIN, CAR_REST_SPREAD, cityMarketEffect, cityFavours, CITY_INTERVAL,
+  RESIDENTS_PER_TILE, AMENITY_BONUS, AMENITY_CAP, POPULATION_TIME, FOLK_MAX, VEHICLE_MAX, FOLK_REST_MIN,
+  SHOP_APPETITE, SHOP_APPETITE_CAP, CITY_FULL_POPULATION, CITY_PREMIUM_MAX,
+} from '../js/sim/citylife.js';
+import { cityAppetite } from '../js/sim/market.js';
+import {
+  CITY_GROUND, CITY_BUILDABLES, CITY_GROUPS, CITY_REFUND, ROAD_PRICE, PAVEMENT_PRICE, APARTMENT_LIMITS,
+  cityGroup, cityBuild, cityDemolish, cityCost, cityRefund, cityPlacementProblem, cityGroundAt, cityToJSON,
+} from '../js/sim/city.js';
+import { buildRoadStrip, ROAD_PIECES, ROAD_SOURCES } from '../js/render/cityart.js';
+import { cityBuildingGrid, wallRows } from '../js/render/cityrender.js';
+import { buildDemoCity, buildDemoSanctuary } from '../js/sim/democity.js';
+import {
+  SANCTUARY_BUILDABLES, SANCTUARY_GROUPS, PEN_LIMITS, TILES_PER_ANIMAL, COMFORT_BONUS, DONATION_PER_KIND,
+  DONATION_BOX_DAYS, SANCTUARY_INTERVAL, penCost, pens, penCapacity, penComforts, residentsOf, sanctuaryCapacity,
+  canSendToSanctuary, sendToSanctuary, bringHome, sanctuaryDemolish, isSanctuaryKind, kindsKept, donationsPerDay,
+  collectDonations, updateSanctuary, visitorsWanted, residentAt, residentMoveProblem, moveResident,
+} from '../js/sim/sanctuary.js';
+import { CITY_TOOLS, SANCTUARY_TOOLS } from '../js/ui/toolbar.js';
+import { CITY_W, CITY_H, CITY_LOT_PRICE_STEP, SANCTUARY_LOT_PRICE_STEP } from '../js/config.js';
 import {
   TICK_MS, SAVE_VERSION, FARMER_SPEED, MAP_W, MAP_H, CELL_W, CELL_H, SAVE_KEY,
   TILE, ANIMAL_VARIANTS, MAX_CATCHUP_TICKS, CATCHUP_CHUNK,
@@ -9904,6 +9933,699 @@ test('the wildlife journal css agrees with both sheets', () => {
   }
 });
 
+// --- the city -----------------------------------------------------------
+
+/** A farm with money to spend in the city. */
+function cityFarm(seed = 7100, money = 100000) {
+  const s = newGame(seed);
+  s.money = money;
+  ownAllLots(s);
+  return s;
+}
+
+/**
+ * Every lot of the city and the sanctuary bought, so a test can build at any
+ * coordinates it likes. A new city owns only its middle lot; the tests written
+ * before lots build in the top-left one, and the lot rules have tests of their
+ * own that do not use this.
+ */
+function ownAllLots(s) {
+  for (const place of [s.city, s.sanctuary]) {
+    for (let i = 0; i < totalPlots(s, place === s.city ? 'city' : 'sanctuary'); i++) place.owned.add(i);
+    place.rev = (place.rev || 0) + 1;
+  }
+  return s;
+}
+
+test('a new farm has an empty city of its own', () => {
+  const s = newGameRaw(7101);
+  assertEqual(s.city.w, CITY_W, 'its own width');
+  assertEqual(s.city.h, CITY_H, 'and height');
+  assertEqual(s.city.pieces, [], 'nothing built');
+  assert(s.city.ground.every((g) => g === CITY_GROUND.GRASS), 'all grass');
+  assertEqual(s.city.population, 0, 'nobody living there');
+});
+
+test('the city survives a save round trip', () => {
+  const s = cityFarm(7102);
+  assert(cityBuild(s, 'road', 5, 5).ok, 'a road');
+  assert(cityBuild(s, 'pavement', 5, 6).ok, 'some paving');
+  assert(cityBuild(s, 'apartments', 10, 10, [4, 3]).ok, 'a block of flats');
+  assert(cityBuild(s, 'lamp', 6, 6).ok, 'a lamp');
+
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual(Array.from(back.city.ground), Array.from(s.city.ground), 'the same ground');
+  assertEqual(back.city.pieces, s.city.pieces, 'the same pieces');
+  assertEqual(back.city.nextPieceId, s.city.nextPieceId, 'and the next id carries on');
+});
+
+test('a farm saved before the city loads with an empty one and nothing else changed', () => {
+  const s = newGame(7103);
+  for (let i = 0; i < 50; i++) tick(s);
+  const data = JSON.parse(JSON.stringify(serialize(s)));
+  data.version = 10;
+  delete data.city;
+
+  const back = deserialize(migrate(JSON.parse(JSON.stringify(data))));
+  assertEqual(back.version, SAVE_VERSION, 'brought up to date');
+  assertEqual(back.city.pieces, [], 'an empty city');
+  assert(back.city.ground.every((g) => g === CITY_GROUND.GRASS), 'all grass');
+  assertEqual(back.money, s.money, 'the money is untouched');
+  assertEqual(Array.from(back.grid.objects), Array.from(s.grid.objects), 'and so is the farm');
+  assertEqual(back.market, s.market, 'and the market');
+});
+
+test('city building is paid in money and appears at once', () => {
+  const s = cityFarm(7104, 1000);
+  const tasks = s.tasks.length;
+  let spent = 0;
+  const off = on('money:changed', ({ delta }) => { spent -= delta; });
+  const res = cityBuild(s, 'road', 3, 3);
+  off();
+  assert(res.ok, 'built');
+  assertEqual(res.spent, ROAD_PRICE, 'at the road price');
+  assertEqual(s.money, 1000 - ROAD_PRICE, 'out of the money');
+  assertEqual(spent, ROAD_PRICE, 'and the HUD hears about it');
+  assertEqual(cityGroundAt(s.city, 3, 3), CITY_GROUND.ROAD, 'the road is there now');
+  assertEqual(s.tasks.length, tasks, 'and the farmer was not sent to lay it');
+});
+
+test('the city refuses what you cannot pay for, and charges nothing for it', () => {
+  const s = cityFarm(7105, 7999);
+  const res = cityBuild(s, 'apartments', 4, 4, [3, 3]);
+  assert(!res.ok, 'refused');
+  assert(/\$8000/.test(res.reason), `says what it costs: ${res.reason}`);
+  assertEqual(s.money, 7999, 'nothing was taken');
+  assertEqual(s.city.pieces, [], 'and nothing was built');
+});
+
+test('the city price list is on the agreed scale', () => {
+  // Against a whole valley of land at $72,000. Guesses, but these are the
+  // guesses that were agreed: a road is pocket money, a building a decision.
+  assert(ROAD_PRICE >= 20 && ROAD_PRICE <= 40, 'a road tile is $20-40');
+  assert(PAVEMENT_PRICE >= 20 && PAVEMENT_PRICE <= 40, 'and so is pavement');
+  assertEqual(cityCost('apartments', [3, 3]), 8000, 'the smallest flats are $8,000');
+  assertEqual(cityCost('bakery', [3, 3]), 5000, 'the smallest shop is $5,000');
+  assert(cityCost('apartments', [6, 5]) > cityCost('apartments', [3, 3]), 'a bigger block costs more');
+  const perTile = (w, h) => cityCost('apartments', [w, h]) / (w * h);
+  assert(perTile(6, 5) < perTile(3, 3), 'but less per tile, so one big block beats several small');
+  for (const [kind, def] of Object.entries(CITY_BUILDABLES)) {
+    if (def.building || def.ground != null || def.line || def.machine) continue;
+    assert(def.price >= 100 && def.price <= 400, `${kind} is street furniture at $100-400`);
+  }
+});
+
+test('nothing stands in the road, and nothing stands on anything else', () => {
+  const s = cityFarm(7106);
+  cityBuild(s, 'road', 8, 8);
+  assert(/road/.test(cityPlacementProblem(s, 'lamp', 8, 8)), 'no lamp in the road');
+  assert(/road/.test(cityPlacementProblem(s, 'grocer', 7, 6, [3, 3])), 'no shop across it either');
+  assert(cityBuild(s, 'bench', 10, 10).ok, 'a bench on the grass');
+  assert(/bench/.test(cityPlacementProblem(s, 'hydrant', 11, 10)), 'its second tile is taken');
+  assert(/bench/.test(cityPlacementProblem(s, 'road', 10, 10)), 'and no road under it');
+  assert(/already/.test(cityPlacementProblem(s, 'road', 8, 8)), 'road on road is nothing');
+  assert(/edge/.test(cityPlacementProblem(s, 'dairy', CITY_W - 2, 0, [3, 3])), 'and nothing off the edge');
+});
+
+test('a city building is held to its limits', () => {
+  const s = cityFarm(7107);
+  assert(/at least/.test(cityPlacementProblem(s, 'apartments', 2, 2, [2, 3])), 'too narrow');
+  assert(/at most/.test(cityPlacementProblem(s, 'tailor', 2, 2, [7, 3])), 'too wide');
+  assertEqual(cityPlacementProblem(s, 'apartments', 2, 2, [APARTMENT_LIMITS.maxW, APARTMENT_LIMITS.maxH]), null,
+    'the biggest allowed is allowed');
+});
+
+test('taking something down hands back half its price, rounded down', () => {
+  const s = cityFarm(7108, 20000);
+  cityBuild(s, 'apartments', 4, 4, [4, 3]);
+  cityBuild(s, 'road', 2, 2);
+  cityBuild(s, 'hydrant', 1, 1);
+  const before = s.money;
+
+  const flats = cityDemolish(s, 6, 5);   // any tile of it
+  assert(flats.ok, 'the whole building comes down from any tile');
+  assertEqual(flats.refund, Math.floor(cityCost('apartments', [4, 3]) * CITY_REFUND), 'half back');
+  assertEqual(s.city.pieces.filter((p) => p.kind === 'apartments'), [], 'and it is gone');
+
+  const road = cityDemolish(s, 2, 2);
+  assertEqual(road.refund, Math.floor(ROAD_PRICE * CITY_REFUND), 'a road refunds half too');
+  assertEqual(cityGroundAt(s.city, 2, 2), CITY_GROUND.GRASS, 'and goes back to grass');
+
+  const hydrant = cityDemolish(s, 1, 1);
+  assertEqual(s.money, before + flats.refund + road.refund + hydrant.refund, 'every refund was paid');
+  assert(!cityDemolish(s, 30, 30).ok, 'and empty grass has nothing to give');
+});
+
+test('building and demolishing in the city is always a loss', () => {
+  for (const kind of Object.keys(CITY_BUILDABLES)) {
+    assert(cityRefund(kind) < cityCost(kind), `${kind} cannot be churned for profit`);
+  }
+});
+
+test('every city buildable is in exactly one city group', () => {
+  const listed = CITY_GROUPS.flatMap((g) => g.kinds);
+  for (const kind of Object.keys(CITY_BUILDABLES)) {
+    assertEqual(listed.filter((k) => k === kind).length, 1, `${kind} should be in exactly one group`);
+  }
+  for (const kind of listed) assert(CITY_BUILDABLES[kind], `${kind} is listed but not buildable`);
+  for (const g of CITY_GROUPS) {
+    assert(g.kinds.length <= 12, `${g.name} is too long for one shelf`);
+    assertEqual(cityGroup(g.id), g, 'and can be looked up');
+  }
+});
+
+test('the city group buttons fit a phone without scrolling', () => {
+  // Measured at 393px: Roads, Buildings, Street and Garden came to 384px of
+  // the 385 the row has, which left no room for a fourth group to come. The
+  // farm's four names total 25 characters and fit; these are held to that.
+  const spent = CITY_GROUPS.reduce((n, g) => n + g.name.length, 0);
+  assert(spent <= 25, `city group names total ${spent} characters`);
+  assert(CITY_GROUPS.length <= 4, 'four buttons at most');
+});
+
+test('nothing on the farm reaches into the city', () => {
+  // Weeds, mushrooms, flowers, wild animals and the rest all act on
+  // state.grid. A long run of the farm must leave the city exactly as built.
+  const s = cityFarm(7109);
+  cityBuild(s, 'road', 3, 3);
+  cityBuild(s, 'bakery', 10, 10, [3, 3]);
+  const before = JSON.stringify(cityToJSON(s.city));
+  for (let i = 0; i < 2 * 3600; i++) tick(s);
+  const after = cityToJSON(s.city);
+  after.population = 0;
+  const was = JSON.parse(before);
+  was.population = 0;
+  assertEqual(after.ground, was.ground, 'the ground is as it was');
+  assertEqual(after.pieces, was.pieces, 'and so is everything on it');
+});
+
+test('building in the city leaves the farm alone', () => {
+  const s = cityFarm(7110);
+  const grid = Array.from(s.grid.objects);
+  const ground = Array.from(s.grid.ground);
+  cityBuild(s, 'road', s.farmer.x, s.farmer.y);
+  cityBuild(s, 'apartments', 2, 2, [5, 4]);
+  assertEqual(Array.from(s.grid.objects), grid, 'no farm object moved');
+  assertEqual(Array.from(s.grid.ground), ground, 'no farm ground changed');
+});
+
+test('the road pieces are the sheet\'s own pixels, moved and never repainted', () => {
+  const sheet = decodePng('assets/city_tilemap_packed.png');
+  const strip = buildRoadStrip(sheet.rgba, sheet.width);
+  assertEqual(strip.width, ROAD_PIECES.length * TILE, 'thirteen pieces in a row');
+
+  const colours = new Set();
+  for (let i = 0; i < sheet.rgba.length; i += 4) {
+    colours.add(sheet.rgba.slice(i, i + 4).join());
+  }
+  for (let i = 0; i < strip.rgba.length; i += 4) {
+    const c = Array.from(strip.rgba.slice(i, i + 4)).join();
+    assert(colours.has(c), `pixel ${i / 4} is a colour the sheet does not have`);
+  }
+
+  const px = (img, w, x, y) => Array.from(img.slice((y * w + x) * 4, (y * w + x) * 4 + 4)).join();
+  const piece = (key) => ROAD_PIECES.indexOf(key) * TILE;
+  // The top kerb is the sheet's own straight kerb, pixel for pixel.
+  for (let y = 0; y < 8; y++) {
+    for (let x = 0; x < 8; x++) {
+      assertEqual(px(strip.rgba, strip.width, piece('T') + x, y),
+        px(sheet.rgba, sheet.width, ROAD_SOURCES.edge.x + x, ROAD_SOURCES.edge.y + y), `T at ${x},${y}`);
+    }
+  }
+  // And it lands where the sheet's own side kerbs are: two pixels in.
+  const kerb = px(sheet.rgba, sheet.width, ROAD_SOURCES.edge.x + 3, ROAD_SOURCES.edge.y + 2);
+  assertEqual(px(strip.rgba, strip.width, piece('L') + 2, 4), kerb, 'the left kerb is two pixels in');
+  assertEqual(px(strip.rgba, strip.width, piece('R') + 13, 4), kerb, 'the right kerb two from the right');
+  assertEqual(px(strip.rgba, strip.width, piece('B') + 4, 13), kerb, 'the bottom kerb two from the bottom');
+  // Plain asphalt in the middle of the interior piece.
+  const asphalt = px(sheet.rgba, sheet.width, ROAD_SOURCES.plain.x, ROAD_SOURCES.plain.y);
+  assertEqual(px(strip.rgba, strip.width, piece('C') + 8, 8), asphalt, 'the middle is asphalt');
+});
+
+test('a city building fills its footprint with roof behind and walls in front', () => {
+  for (const type of ['apartments', 'shop']) {
+    for (let w = 3; w <= 8; w++) {
+      for (let h = 3; h <= 6; h++) {
+        const grid = cityBuildingGrid(type, w, h);
+        assertEqual(grid.length, h, `${type} ${w}x${h} is as deep as its footprint`);
+        assert(grid.every((row) => row.length === w && row.every(Boolean)), `${type} ${w}x${h} has no gaps`);
+        assert(grid.slice(0, h - wallRows(h)).flat().every((s) => s[1] <= 2), 'the back rows are roof');
+        assert(grid.slice(h - wallRows(h)).flat().every((s) => s[1] >= 3), 'the front rows are wall');
+      }
+    }
+  }
+  const odd = cityBuildingGrid('apartments', 5, 3).at(-1);
+  assertEqual(odd.filter((s) => s[0] === 4 && s[1] === 4).length, 1, 'an odd width has one door, in the middle');
+  assertEqual(odd[2], [4, 4, 'city'], 'right in the middle');
+  const even = cityBuildingGrid('shop', 4, 3).at(-1);
+  assertEqual([even[1], even[2]], [[8, 4, 'city'], [9, 4, 'city']], 'an even shop gets its garage door centred');
+});
+
+test('only the city\'s own tools are offered in the city', () => {
+  const ids = CITY_TOOLS.map((t) => t.id);
+  assertEqual(ids, ['auto', 'build', 'clear'], 'look, build, take down');
+  for (const farmOnly of ['plant', 'water', 'harvest', 'till', 'move', 'shoo', 'cancel']) {
+    assert(!ids.includes(farmOnly), `${farmOnly} acts on the farm only`);
+  }
+});
+
+// --- the city: people and the market --------------------------------------
+
+/** A city with a road along row 10 and whatever is built against it. */
+function streetFarm(seed = 7200, money = 1000000) {
+  const s = cityFarm(seed, money);
+  for (let x = 0; x < CITY_W; x++) cityBuild(s, 'road', x, 10);
+  return s;
+}
+
+/** Runs only the city's own clock: what updateCity does over `ticks`. */
+function runCity(s, ticks) {
+  for (let i = 0; i < ticks; i++) { s.tickCount++; updateCity(s); }
+}
+
+test('nobody lives in a block of flats with no way to the road', () => {
+  const s = streetFarm(7201);
+  cityBuild(s, 'apartments', 2, 2, [3, 3]);          // out in the grass
+  assertEqual(housingCapacity(s.city), 0, 'no road, nobody');
+
+  cityBuild(s, 'apartments', 2, 7, [3, 3]);          // its front row is beside the road
+  assertEqual(housingCapacity(s.city), 3 * 3 * RESIDENTS_PER_TILE, 'beside the road, a full house');
+
+  // Set back behind a strip of pavement is the ordinary arrangement.
+  cityBuild(s, 'pavement', 10, 11);
+  cityBuild(s, 'apartments', 9, 12, [3, 3]);
+  assertEqual(housingCapacity(s.city), 2 * 3 * 3 * RESIDENTS_PER_TILE, 'pavement to the road counts');
+
+  // But pavement that goes nowhere does not.
+  cityBuild(s, 'pavement', 20, 3);
+  cityBuild(s, 'apartments', 19, 0, [3, 3]);
+  assertEqual(housingCapacity(s.city), 2 * 3 * 3 * RESIDENTS_PER_TILE, 'paving to nowhere is not a street');
+});
+
+test('lamps, benches and trees nearby make room for more, up to a point', () => {
+  const s = streetFarm(7202);
+  cityBuild(s, 'apartments', 2, 7, [3, 3]);
+  const bare = housingCapacity(s.city);
+  cityBuild(s, 'lamp', 6, 8);
+  cityBuild(s, 'bench', 6, 6);
+  assert(housingCapacity(s.city) > bare, 'a lamp and a bench raise it');
+  for (let y = 3; y <= 9; y++) cityBuild(s, 'pottedGreen', 5, y);
+  const most = Math.round(bare * (1 + AMENITY_BONUS * AMENITY_CAP));
+  assertEqual(housingCapacity(s.city), most, `but only up to ${AMENITY_CAP} of them count`);
+  cityBuild(s, 'topiaryGreen', 30, 2);
+  assertEqual(housingCapacity(s.city), most, 'and one far away does nothing');
+});
+
+test('people arrive slowly, over hours rather than at once', () => {
+  const s = streetFarm(7203);
+  cityBuild(s, 'apartments', 2, 7, [5, 3]);
+  const cap = housingCapacity(s.city);
+  runCity(s, CITY_INTERVAL);
+  assert(s.city.population > 0 && s.city.population < cap * 0.01, 'a trickle after a minute');
+  runCity(s, POPULATION_TIME - CITY_INTERVAL);
+  const share = s.city.population / cap;
+  assert(share > 0.55 && share < 0.7, `about two thirds after ${POPULATION_TIME / 3600} hours (${share.toFixed(2)})`);
+  runCity(s, 3 * TICKS_PER_DAY);
+  assertEqual(s.city.population, cap, 'and settles exactly at capacity');
+
+  cityDemolish(s, 3, 8);
+  runCity(s, CITY_INTERVAL);
+  assert(s.city.population < cap && s.city.population > cap * 0.9, 'and leaves slowly too');
+});
+
+test('an empty city draws nothing from the random numbers and touches no price', () => {
+  const s = cityFarm(7204);
+  const before = s.rng.getState();
+  runCity(s, 3 * TICKS_PER_DAY);
+  assertEqual(s.rng.getState(), before, 'the farm\'s dice are left exactly where they were');
+  assertEqual(s.market.city, undefined, 'and the market hears nothing from it');
+});
+
+test('the townsfolk come with the population and stand where people stand', () => {
+  const s = streetFarm(7205);
+  for (let x = 0; x < CITY_W; x++) cityBuild(s, 'pavement', x, 9);
+  cityBuild(s, 'apartments', 2, 5, [8, 4]);
+  cityBuild(s, 'apartments', 12, 5, [8, 4]);
+  s.city.population = housingCapacity(s.city);
+  runCity(s, CITY_INTERVAL);
+
+  const want = folkWanted(s.city.population);
+  const folk = s.city.folk.filter((m) => m.kind === 'folk');
+  const cars = s.city.folk.filter((m) => m.kind === 'car');
+  assertEqual(folk.length, want.folk, `${want.folk} townsfolk for ${Math.round(s.city.population)} people`);
+  assertEqual(cars.length, want.vehicles, 'and vehicles in proportion');
+  for (const m of folk) {
+    assertEqual(cityGroundAt(s.city, m.x, m.y), CITY_GROUND.PAVEMENT, 'townsfolk stand on the pavement');
+  }
+  for (const m of cars) {
+    assertEqual(cityGroundAt(s.city, m.x, m.y), CITY_GROUND.ROAD, 'vehicles stand in the road');
+    assertEqual(cityGroundAt(s.city, m.x + 1, m.y), CITY_GROUND.ROAD, 'both halves of them');
+  }
+  assertEqual(folkWanted(1e6), { folk: FOLK_MAX, vehicles: VEHICLE_MAX }, 'and there is a ceiling on the crowd');
+});
+
+test('townsfolk take one step now and then, and no more', () => {
+  const s = streetFarm(7206);
+  for (let x = 0; x < CITY_W; x++) cityBuild(s, 'pavement', x, 9);
+  cityBuild(s, 'apartments', 2, 5, [8, 4]);
+  s.city.population = housingCapacity(s.city);
+  runCity(s, CITY_INTERVAL);
+
+  // Counted apart: people stand about, vehicles drive.
+  const moves = { folk: 0, car: 0 };
+  for (let t = 0; t < 600; t++) {
+    const was = s.city.folk.map((m) => [m.x, m.y]);
+    runCity(s, 1);
+    s.city.folk.forEach((m, i) => {
+      if (!was[i]) return;
+      const d = Math.abs(m.x - was[i][0]) + Math.abs(m.y - was[i][1]);
+      assert(d <= 1, 'never more than a tile in a tick');
+      if (d) {
+        moves[m.kind]++;
+        assertEqual([m.px, m.py], was[i], 'and the step is drawn from where they stood');
+      }
+    });
+  }
+  const people = s.city.folk.filter((m) => m.kind === 'folk').length;
+  const perFolk = moves.folk / people;
+  assert(perFolk > 1 && perFolk < 600 / FOLK_REST_MIN, `they reposition occasionally (${perFolk.toFixed(1)} steps in ten minutes)`);
+});
+
+test('vehicles drive along the street rather than shuffling on the spot', () => {
+  const s = streetFarm(7208);
+  for (let x = 0; x < CITY_W; x++) cityBuild(s, 'pavement', x, 9);
+  cityBuild(s, 'apartments', 2, 5, [8, 4]);
+  s.city.population = housingCapacity(s.city);
+  runCity(s, CITY_INTERVAL);
+  const cars = s.city.folk.filter((m) => m.kind === 'car');
+  assert(cars.length > 0, 'there are vehicles about');
+
+  let moves = 0;
+  let turns = 0;
+  for (let t = 0; t < 600; t++) {
+    const was = cars.map((m) => [m.x, m.flip]);
+    runCity(s, 1);
+    cars.forEach((m, i) => {
+      if (m.x !== was[i][0]) moves++;
+      if (m.flip !== was[i][1]) turns++;
+    });
+  }
+  const perCar = moves / cars.length;
+  assert(perCar > 600 / (CAR_REST_MIN + CAR_REST_SPREAD), `they keep moving (${perCar.toFixed(1)} tiles in ten minutes)`);
+  assert(perCar <= 600 / CAR_REST_MIN, 'but still rest between tiles');
+  assert(turns < moves / 4, `and mostly carry on the way they were going (${turns} turns in ${moves} moves)`);
+});
+
+test('anyone built over moves somewhere they may stand', () => {
+  const s = streetFarm(7207);
+  for (let x = 0; x < CITY_W; x++) cityBuild(s, 'pavement', x, 9);
+  cityBuild(s, 'apartments', 2, 5, [8, 4]);
+  s.city.population = housingCapacity(s.city);
+  runCity(s, CITY_INTERVAL);
+  const who = s.city.folk.find((f) => f.kind === 'folk');
+  const m = { x: who.x, y: who.y };
+  cityDemolish(s, m.x, m.y);       // dig the paving up from under them
+  assert(cityBuild(s, 'hydrant', m.x, m.y).ok, 'and put a hydrant there');
+  runCity(s, CITY_INTERVAL);
+  for (const f of s.city.folk.filter((x) => x.kind === 'folk')) {
+    assert(!(f.x === m.x && f.y === m.y), 'nobody is left standing in a hydrant');
+    assertEqual(cityGroundAt(s.city, f.x, f.y), CITY_GROUND.PAVEMENT, 'everyone is back on the paving');
+  }
+});
+
+test('a city full of life replays identically, as catch-up must', () => {
+  const build = (s) => {
+    for (let x = 0; x < CITY_W; x++) { cityBuild(s, 'road', x, 10); cityBuild(s, 'pavement', x, 9); }
+    cityBuild(s, 'apartments', 2, 5, [8, 4]);
+    cityBuild(s, 'bakery', 12, 6, [3, 3]);
+  };
+  const [a, b] = twinGames(7208);
+  a.money = b.money = 1000000;
+  ownAllLots(a);
+  ownAllLots(b);
+  build(a);
+  build(b);
+  for (let i = 0; i < 4000; i++) tick(a);
+  const resumed = deserialize(JSON.parse(JSON.stringify(serialize(a))));
+  for (let i = 0; i < 4000; i++) tick(b);
+  for (let i = 0; i < 4000; i++) { tick(a); tick(resumed); }
+  for (let i = 0; i < 4000; i++) tick(b);
+  assertEqual(serialize(a), serialize(b), 'one burst and two halves agree');
+  assertEqual(serialize(resumed), serialize(a), 'and so does a farm reloaded halfway');
+  assert(a.city.folk.length > 0, 'with people about to make it a real test');
+});
+
+test('a shop only reaches the market once people can get to it', () => {
+  const s = streetFarm(7209);
+  cityBuild(s, 'bakery', 2, 2, [3, 3]);
+  runCity(s, CITY_INTERVAL);
+  assertEqual(openShops(s.city), {}, 'a bakery in a field is not open');
+  cityBuild(s, 'bakery', 2, 7, [3, 3]);
+  runCity(s, CITY_INTERVAL);
+  assertEqual(openShops(s.city), { bakery: 1 }, 'one on the street is');
+  assertEqual(cityAppetite(s.market, 'wheat'), 1 + SHOP_APPETITE, 'and the town wants more wheat');
+  assertEqual(cityAppetite(s.market, 'eggplant'), 1, 'and no more eggplant than before');
+  for (let i = 0; i < 6; i++) cityBuild(s, 'bakery', 6 + i * 4, 7, [3, 3]);
+  runCity(s, CITY_INTERVAL);
+  assertEqual(cityAppetite(s.market, 'wheat'), 1 + SHOP_APPETITE * SHOP_APPETITE_CAP, `capped at ${SHOP_APPETITE_CAP} bakeries`);
+});
+
+test('a bakery makes wheat pay better without touching what wheat gluts at', () => {
+  const s = streetFarm(7210);
+  const plain = { tickCount: 0, rng: makeRng(5), market: newMarket() };
+  cityBuild(s, 'bakery', 2, 7, [3, 3]);
+  runCity(s, CITY_INTERVAL);
+  const town = { tickCount: 0, rng: makeRng(5), market: { ...newMarket(), city: s.market.city } };
+  assert(priceMultiplier(town, 'wheat') > priceMultiplier(plain, 'wheat'), 'wheat pays more');
+  assert(priceMultiplier(town, 'eggplant') <= priceMultiplier(plain, 'eggplant'), 'nothing else does');
+  assertEqual(glutRatio(town.market, 'wheat'), glutRatio(plain.market, 'wheat'), 'and the glut rule is unchanged');
+});
+
+test('a shop for every trade favours nothing', () => {
+  const s = streetFarm(7211);
+  ['bakery', 'grocer', 'dairy', 'tailor'].forEach((kind, i) => cityBuild(s, kind, 2 + i * 4, 7, [3, 3]));
+  runCity(s, CITY_INTERVAL);
+  assertEqual([...cityFavours(s.market)], [], 'appetites are shares, so an even boost is no boost');
+  cityBuild(s, 'grocer', 20, 7, [3, 3]);
+  runCity(s, CITY_INTERVAL);
+  assert(cityFavours(s.market).has('eggplant'), 'a second grocer tips it towards vegetables');
+});
+
+/** What a full city does to the market, with these shops open. */
+function fullCityEffect(shops = []) {
+  const s = streetFarm(7212);
+  shops.forEach((kind, i) => cityBuild(s, kind, 1 + i * 4, 7, [3, 3]));
+  s.city.population = CITY_FULL_POPULATION;
+  return cityMarketEffect(s.city);
+}
+
+/** overSeeds, but trading in a town shaped by a city. */
+function overSeedsIn(effect, mix, days = 8) {
+  const seeds = [1, 7, 42, 99, 900];
+  return seeds.reduce((sum, seed) => {
+    const s = marketFarm(seed);
+    if (effect) s.market.city = effect;
+    trade(s, days, mix);
+    return sum + realised(s, mix);
+  }, 0) / seeds.length;
+}
+
+test('an empty city leaves a beginner\'s market exactly as it was', () => {
+  const s = cityFarm(7213);
+  runCity(s, TICKS_PER_DAY);
+  assertEqual(cityMarketEffect(s.city), null, 'nothing to say');
+  const beginner = { carrot: 150, wheat: 120 };
+  assertEqual(overSeedsIn(cityMarketEffect(s.city), beginner), overSeeds(beginner, 8), 'to the last cent');
+});
+
+test('a full city still pays a monoculture clearly less than a varied farm', () => {
+  // Measured over three weeks across five seeds, the numbers in the design
+  // doc: one crop x0.64 with no city, x0.77 in a full one, x0.85 if the city
+  // has three grocers wanting exactly that crop — against x1.11 and x1.16 for
+  // seven goods in the same towns. Held here at eight days for speed.
+  const mono = { eggplant: 50000 };
+  const seven = {
+    eggplant: 20000, cabbage: 8000, tomato: 6000, corn: 5000, milk: 6000, egg: 3000, wool: 2000,
+  };
+  const empty = overSeedsIn(null, seven);
+  for (const [name, effect] of [
+    ['a full city', fullCityEffect()],
+    ['a full city of grocers', fullCityEffect(['grocer', 'grocer', 'grocer'])],
+  ]) {
+    const one = overSeedsIn(effect, mono);
+    const many = overSeedsIn(effect, seven);
+    assert(one < many * 0.8, `in ${name} one crop earns x${one.toFixed(2)} against x${many.toFixed(2)}`);
+    assert(one < empty, `and less than a varied farm with no city at all (x${empty.toFixed(2)})`);
+  }
+});
+
+test('the city\'s premium is small and capped', () => {
+  const seven = {
+    eggplant: 20000, cabbage: 8000, tomato: 6000, corn: 5000, milk: 6000, egg: 3000, wool: 2000,
+  };
+  const empty = overSeedsIn(null, seven, 4);
+  const full = overSeedsIn(fullCityEffect(), seven, 4);
+  const lift = full / empty - 1;
+  assert(lift > 0.1 && lift <= 0.2, `a full city lifts a varied farm by ${(lift * 100).toFixed(0)}%`);
+  const s = streetFarm(7214);
+  s.city.population = CITY_FULL_POPULATION * 10;
+  assertEqual(cityMarketEffect(s.city).premium, 1 + CITY_PREMIUM_MAX, 'and more people never add more');
+});
+
+// --- the city: the factory district -----------------------------------------
+
+/** A patch of factory floor at 2..12 x 2..6, and money to fill it. */
+function factoryFarm(seed = 7300) {
+  const s = cityFarm(seed, 1000000);
+  for (let y = 2; y <= 6; y++) for (let x = 2; x <= 12; x++) cityBuild(s, 'floor', x, y);
+  return s;
+}
+
+test('one production line for each colour of machine on the sheet', () => {
+  const colours = Object.values(LINES).map((l) => l.colour).sort();
+  assertEqual(colours, ['blue', 'green', 'red', 'yellow'], 'four lines, four colours');
+  for (const [kind, l] of Object.entries(LINES)) {
+    assert(CITY_BUILDABLES[kind]?.machine === kind, `${kind} is a machine you can build`);
+    assert(cityGroup('factory').kinds.includes(kind), `and it is on the Factory shelf`);
+    assert(ITEMS[l.output], `${l.output} is a real item`);
+    assert(!TRADED.includes(l.output), `${l.output} is kept off the market`);
+    assert(TRADED.includes(l.input), `${l.input} is something the farm trades`);
+    assert(ITEMS[l.output].sell > ITEMS[l.input].sell, `${l.output} is worth more than ${l.input}`);
+  }
+  assertEqual(LINES.mill.output, 'flour', 'flour from wheat');
+  assertEqual(LINES.creamery.output, 'cheese', 'cheese from milk');
+  assertEqual(LINES.loom.output, 'cloth', 'cloth from wool');
+  assertEqual(LINES.cannery.output, 'preserves', 'preserves from tomatoes');
+});
+
+test('a machine only goes down on factory floor', () => {
+  const s = factoryFarm(7301);
+  assert(/factory floor/.test(cityPlacementProblem(s, 'mill', 20, 20)), 'not on grass');
+  cityBuild(s, 'pavement', 20, 21);
+  assert(/factory floor/.test(cityPlacementProblem(s, 'loom', 20, 21)), 'not on pavement');
+  assert(cityBuild(s, 'mill', 3, 3).ok, 'on the floor it goes down');
+  assertEqual(s.money, 1000000 - 11 * 5 * FLOOR_PRICE - PAVEMENT_PRICE - MACHINE_PRICE, 'for the price of a machine');
+  assertEqual(cityStructureAt(s.city, 20, 20), null, 'grass is still grass');
+  assertEqual(cityStructureAt(s.city, 5, 5).kind, 'floor', 'and floor can be taken up again');
+});
+
+test('a line takes its raw good from the bag at a steady rate', () => {
+  const s = factoryFarm(7302);
+  cityBuild(s, 'mill', 3, 3);
+  s.inventory.wheat = 100;
+  runCity(s, 60 * 60);
+  const perHour = Math.round(lineRate('mill', 1) * 60);
+  assertEqual(s.inventory.flour, perHour, `one mill makes ${perHour} flour an hour`);
+  assertEqual(s.inventory.wheat, 100 - perHour, 'from exactly that much wheat');
+});
+
+test('a slow line delivers whole units as its work adds up', () => {
+  const s = factoryFarm(7303);
+  cityBuild(s, 'loom', 3, 3);
+  s.inventory.wool = 10;
+  runCity(s, LINES.loom.ticksPerUnit - CITY_INTERVAL);
+  assertEqual(s.inventory.cloth, undefined, 'nothing until the first bolt is done');
+  runCity(s, CITY_INTERVAL);
+  assertEqual(s.inventory.cloth, 1, 'then one');
+  assertEqual(s.inventory.wool, 9, 'out of one fleece');
+});
+
+test('a line switched off makes nothing and keeps its place', () => {
+  const s = factoryFarm(7304);
+  cityBuild(s, 'mill', 3, 3);
+  s.inventory.wheat = 100;
+  runCity(s, 6 * 60);
+  const made = s.inventory.flour || 0;
+  setLine(s.city, 'mill', false);
+  assert(!lineOn(s.city, 'mill'), 'off');
+  runCity(s, 60 * 60);
+  assertEqual(s.inventory.flour || 0, made, 'an hour switched off makes nothing');
+  assertEqual(s.inventory.wheat, 100 - made, 'and takes nothing');
+  setLine(s.city, 'mill', true);
+  runCity(s, 60 * 60);
+  assert(s.inventory.flour > made, 'and it starts again when switched back on');
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  setLine(s.city, 'mill', false);
+  const again = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assert(lineOn(back.city, 'mill'), 'a line that was on loads on');
+  assert(!lineOn(again.city, 'mill'), 'and one that was off loads off');
+});
+
+test('an idle line does not bank the time it stood idle', () => {
+  // A mill that stood empty all night must not grind a night's wheat in a
+  // second when some arrives.
+  const s = factoryFarm(7305);
+  cityBuild(s, 'mill', 3, 3);
+  runCity(s, 8 * 3600);
+  s.inventory.wheat = 1000;
+  runCity(s, CITY_INTERVAL);
+  assert((s.inventory.flour || 0) <= 1, 'one minute\'s work, not eight hours\'');
+});
+
+test('only so many machines on a line count', () => {
+  const s = factoryFarm(7306);
+  for (let x = 3; x < 3 + LINE_MACHINE_CAP + 2; x++) cityBuild(s, 'creamery', x, 3);
+  s.inventory.milk = 10000;
+  runCity(s, TICKS_PER_DAY);
+  const day = Math.round(lineRate('creamery', LINE_MACHINE_CAP) * 60 * 24);
+  assertEqual(s.inventory.cheese, day, `${LINE_MACHINE_CAP} creameries' worth, however many are built`);
+});
+
+test('a full factory takes part of a big farm\'s harvest, not all of it', () => {
+  // A flat price is a way round the market. Throughput is what stops the
+  // factory making a monoculture the best plan: a line at its cap takes about
+  // a quarter of a mature farm's $50,000 a day, not the whole of it.
+  for (const [line, def] of Object.entries(LINES)) {
+    const perDay = lineRate(line, LINE_MACHINE_CAP) * 60 * 24 * ITEMS[def.input].sell;
+    assert(perDay > 8000 && perDay < 20000, `${def.name} at full stretch takes $${Math.round(perDay)} of ${def.input} a day`);
+  }
+});
+
+test('factory goods sell at a flat price, whatever the market is doing', () => {
+  const s = factoryFarm(7307);
+  for (let i = 0; i < 50; i++) recordSale(s, 'flour', 100, 1800);
+  s.market.city = cityMarketEffect({ ...s.city, population: CITY_FULL_POPULATION }) || s.market.city;
+  for (const def of Object.values(LINES)) {
+    assertEqual(priceOf(s, def.output), ITEMS[def.output].sell, `${def.output} is always ${ITEMS[def.output].sell}`);
+  }
+  assertEqual(s.market.supply.flour, undefined, 'and selling it records nothing against the market');
+});
+
+test('a farm with a working factory replays identically', () => {
+  const build = (s) => {
+    s.money = 1000000;
+    for (let y = 2; y <= 4; y++) for (let x = 2; x <= 8; x++) cityBuild(s, 'floor', x, y);
+    cityBuild(s, 'mill', 3, 3);
+    cityBuild(s, 'creamery', 5, 3);
+    s.inventory.wheat = 500;
+    s.inventory.milk = 200;
+  };
+  const [a, b] = twinGames(7308);
+  ownAllLots(a);
+  ownAllLots(b);
+  build(a);
+  build(b);
+  for (let i = 0; i < 7200; i++) tick(a);
+  for (let i = 0; i < 3600; i++) tick(b);
+  const resumed = deserialize(JSON.parse(JSON.stringify(serialize(b))));
+  for (let i = 0; i < 3600; i++) tick(resumed);
+  assertEqual(serialize(resumed), serialize(a), 'a reloaded factory carries on exactly');
+  assert(a.inventory.flour > 0, 'having actually made something');
+});
+
+test('the factory fittings join up into runs', () => {
+  const s = factoryFarm(7309);
+  for (let x = 3; x <= 6; x++) cityBuild(s, 'conveyor', x, 4);
+  assertEqual(runPiece(s.city, 'conveyor', 3, 4, FACTORY.belt), FACTORY.belt.left, 'a left end');
+  assertEqual(runPiece(s.city, 'conveyor', 4, 4, FACTORY.belt), FACTORY.belt.mid, 'a middle');
+  assertEqual(runPiece(s.city, 'conveyor', 6, 4, FACTORY.belt), FACTORY.belt.right, 'a right end');
+  for (let y = 2; y <= 4; y++) cityBuild(s, 'conveyorTrim', 10, y);
+  assertEqual(runPiece(s.city, 'conveyorTrim', 10, 2, FACTORY.beltTrim), FACTORY.beltTrim.top, 'a belt down has a top');
+  assertEqual(runPiece(s.city, 'conveyorTrim', 10, 4, FACTORY.beltTrim), FACTORY.beltTrim.bottom, 'and a bottom');
+  cityBuild(s, 'pipe', 12, 6);
+  assertEqual(runPiece(s.city, 'pipe', 12, 6, FACTORY.pipe), FACTORY.pipe.single, 'and one alone stands alone');
+});
+
 // --- offline shell ------------------------------------------------------
 
 
@@ -9962,6 +10684,294 @@ test('the service worker does not precache files that no longer exist', () => {
   assertEqual(stale, [], 'the install step would fail to cache these');
 });
 
+test('the demonstration city fits its own layout and costs nothing', () => {
+  const s = newGame(7);
+  const money = s.money;
+  const res = buildDemoCity(s);
+  assert(res.ok, 'it builds on an empty city');
+  assertEqual(res.refused, [], 'every piece of the layout is somewhere it may go');
+  assertEqual(s.money, money, 'the purse is put back');
+  assertEqual(Object.keys(openShops(s.city)).sort(), ['bakery', 'dairy', 'grocer', 'tailor'], 'all four shops are open');
+  assertEqual(Object.keys(workingMachines(s.city)).sort(), ['cannery', 'creamery', 'loom', 'mill'], 'all four lines run');
+  assert(s.city.population > 0 && s.city.population === housingCapacity(s.city), 'and everyone is home');
+  assert(!buildDemoCity(s).ok, 'it will not clear a city that is already built');
+  assert(buildDemoCity(s, { force: true }).ok, 'unless told to');
+});
+
+test('a name is kept as tidy text, and cut by whole characters', () => {
+  assertEqual(cleanName('  Sir   Fluffs\n a lot of the manor  '), 'Sir Fluffs a lot', 'trimmed, collapsed and cut');
+  assertEqual(cleanName(''), '', 'nothing stays nothing');
+  assertEqual(cleanName(null), '', 'and so does no value at all');
+  assertEqual(cleanName('   '), '', 'spaces alone are not a name');
+  assertEqual([...cleanName('🦊'.repeat(40))].length, NAME_MAX, 'an emoji counts once and is never halved');
+  assertEqual(cleanName('<b>x</b>'), '<b>x</b>', 'markup is just letters; the UI only ever sets it as text');
+});
+
+test('naming an animal sets, changes and removes its name', () => {
+  const s = newGame(8101);
+  const cow = makeAnimal(s, 'cow', 5, 5);
+  assertEqual(calledAs(cow), 'the cow', 'unnamed, it goes by its kind');
+  assert(nameAnimal(s, cow, '  Biscuit ').ok, 'it can be named');
+  assertEqual(cow.name, 'Biscuit', 'cleaned on the way in');
+  assertEqual(calledAs(cow), 'Biscuit', 'and goes by it');
+  nameAnimal(s, cow, 'Crumpet');
+  assertEqual(cow.name, 'Crumpet', 'renamed');
+  nameAnimal(s, cow, '   ');
+  assert(!('name' in cow), 'an empty name takes it away, leaving no field behind');
+});
+
+test('a wild animal cannot be named until it is won over', () => {
+  const s = newGame(8102);
+  const fox = makeAnimal(s, WILD_IDS[0], 5, 5);
+  fox.wild = true;
+  assert(!nameAnimal(s, fox, 'Rusty').ok, 'not while it is wild');
+  assert(!('name' in fox), 'and nothing is written');
+  fox.wild = false;
+  assert(nameAnimal(s, fox, 'Rusty').ok, 'but once it is hers');
+});
+
+test('a name survives a save and a load', () => {
+  const s = newGame(8103);
+  const hen = makeAnimal(s, 'chicken', 6, 6);
+  nameAnimal(s, hen, 'Henrietta 🐔');
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual(back.animals.find((a) => a.id === hen.id).name, 'Henrietta 🐔', 'the same name comes back');
+});
+
+// --- the sanctuary ------------------------------------------------------
+
+/** A farm with money and one small enclosure at 5,5. */
+function sanctuaryFarm(seed = 8200, size = [6, 6]) {
+  const s = newGame(seed);
+  s.money = 1000000;
+  ownAllLots(s);
+  assert(cityBuild(s, 'paddock', 5, 5, size, s.sanctuary).ok, 'an enclosure goes up');
+  return s;
+}
+
+/** A befriended animal of the first wild kind, standing on the farm. */
+function friend(s, type = WILD_IDS[0]) {
+  return makeAnimal(s, type, s.farmer.x, s.farmer.y);
+}
+
+test('every sanctuary buildable is on exactly one shelf, and every shelf entry exists', () => {
+  const listed = SANCTUARY_GROUPS.flatMap((g) => g.kinds);
+  for (const kind of Object.keys(SANCTUARY_BUILDABLES)) {
+    assertEqual(listed.filter((k) => k === kind).length, 1, `${kind} should be in exactly one group`);
+  }
+  for (const kind of listed) {
+    assert(cityCost(kind) > 0, `${kind} is something that can be bought`);
+    assertEqual(listed.filter((k) => k === kind).length, 1, `${kind} is listed once`);
+  }
+  assert(SANCTUARY_GROUPS.length <= 4, 'four buttons at most, as the city has');
+});
+
+test('the sanctuary and the city are separate maps', () => {
+  const s = sanctuaryFarm();
+  assertEqual(s.city.pieces.length, 0, 'building in the sanctuary leaves the city alone');
+  assertEqual(pens(s.sanctuary).length, 1, 'and the enclosure is where it was put');
+  assertEqual(s.money, 1000000 - penCost(6, 6), 'paid for in money, at the quoted price');
+});
+
+test('an enclosure holds animals by its floor, and comforts make room for more', () => {
+  const s = sanctuaryFarm(8201, [6, 6]);
+  const pen = pens(s.sanctuary)[0];
+  const floor = 4 * 4;
+  assertEqual(penCapacity(s.sanctuary, pen), floor / TILES_PER_ANIMAL, 'bare, it is floor over room-per-animal');
+  assert(cityBuild(s, 'oak', 6, 6, undefined, s.sanctuary).ok, 'a tree goes inside');
+  assert(cityBuild(s, 'pool', 8, 8, undefined, s.sanctuary).ok, 'and so does a pool');
+  assertEqual(penComforts(s.sanctuary, pen), 2, 'each is a comfort');
+  assertEqual(penCapacity(s.sanctuary, pen), Math.floor((floor / TILES_PER_ANIMAL) * (1 + 2 * COMFORT_BONUS)),
+    'and each makes room');
+});
+
+test('comforts keep off the fence, and nothing else goes inside an enclosure', () => {
+  const s = sanctuaryFarm(8202, [6, 6]);
+  assert(!cityBuild(s, 'oak', 5, 5, undefined, s.sanctuary).ok, 'not on the corner post');
+  assert(!cityBuild(s, 'oak', 7, 5, undefined, s.sanctuary).ok, 'nor along the fence');
+  assert(!cityBuild(s, 'bench', 6, 6, undefined, s.sanctuary).ok, 'a bench is for visitors, outside');
+  assert(!cityBuild(s, 'trail', 6, 6, undefined, s.sanctuary).ok, 'and a trail does not run through one');
+  assert(!cityBuild(s, 'paddock', 8, 8, [4, 4], s.sanctuary).ok, 'nor one enclosure across another');
+  assert(cityBuild(s, 'trail', 4, 5, undefined, s.sanctuary).ok, 'a trail runs alongside');
+  assert(!cityBuild(s, 'paddock', 1, 4, [4, 4], s.sanctuary).ok, 'and an enclosure will not go over a trail');
+});
+
+test('an enclosure cannot be dragged past its limits', () => {
+  const s = sanctuaryFarm();
+  assert(!cityBuild(s, 'paddock', 20, 20, [PEN_LIMITS.minW - 1, 4], s.sanctuary).ok, 'too small');
+  assert(!cityBuild(s, 'paddock', 20, 20, [PEN_LIMITS.maxW + 1, 4], s.sanctuary).ok, 'too wide');
+});
+
+test('only befriended and gifted animals can go, and only once there is room', () => {
+  const s = newGame(8203);
+  const fox = friend(s);
+  assertEqual(canSendToSanctuary(s, fox).reason, 'build an enclosure in the sanctuary first', 'nowhere to go yet');
+  s.money = 1000000;
+  ownAllLots(s);
+  cityBuild(s, 'paddock', 5, 5, [4, 4], s.sanctuary);
+
+  const cow = makeAnimal(s, 'cow', 3, 3);
+  assert(!isSanctuaryKind('cow'), 'a cow is livestock');
+  assert(!canSendToSanctuary(s, cow).ok, 'and stays on the farm');
+  assert(isSanctuaryKind('unicorn'), 'a birthday mythical may go');
+
+  const wild = friend(s, WILD_IDS[1]);
+  wild.wild = true;
+  assertEqual(canSendToSanctuary(s, wild).reason, 'it is still wild', 'not before it is won over');
+
+  assert(sendToSanctuary(s, fox).ok, 'the fox goes');
+  const second = friend(s, WILD_IDS[2]);
+  assert(/full/.test(canSendToSanctuary(s, second).reason), 'a 4x4 enclosure holds one, and then it is full');
+});
+
+test('an animal keeps who it is there and back, and comes home fed', () => {
+  const s = sanctuaryFarm();
+  const fox = friend(s);
+  nameAnimal(s, fox, 'Rusty');
+  fox.affection = 60;
+  fox.food = 1;
+  fox.water = 1;
+  const variant = fox.variant;
+  const onFarm = s.animals.length;
+
+  const sent = sendToSanctuary(s, fox);
+  assert(sent.ok, 'it goes');
+  assertEqual(s.animals.length, onFarm - 1, 'and leaves the farm entirely');
+  assert(!s.animals.includes(fox), 'the farm no longer has it');
+  const r = s.sanctuary.residents[0];
+  assertEqual([r.name, r.affection, r.type, r.variant], ['Rusty', 60, fox.type, variant], 'the same animal');
+  assert(!('food' in r) && !('water' in r), 'with no hunger or thirst to keep track of');
+  const pen = pens(s.sanctuary)[0];
+  assert(r.x > pen.x && r.x < pen.x + pen.w - 1 && r.y > pen.y && r.y < pen.y + pen.h - 1, 'standing inside the fence');
+
+  const home = bringHome(s, r);
+  assert(home.ok, 'and comes back');
+  assertEqual(s.sanctuary.residents.length, 0, 'leaving the sanctuary');
+  const a = home.animal;
+  assertEqual([a.name, a.affection, a.type, a.variant], ['Rusty', 60, fox.type, variant], 'still the same animal');
+  assert(a.food > 1 && a.water > 1, 'fed and watered, as a bought one arrives');
+  assert(!a.wild, 'and still hers');
+});
+
+test('residents stay inside their own enclosure however long they wander', () => {
+  const s = sanctuaryFarm(8204, [7, 7]);
+  cityBuild(s, 'oak', 8, 8, undefined, s.sanctuary);
+  cityBuild(s, 'pool', 7, 7, undefined, s.sanctuary);
+  for (let i = 0; i < 4; i++) assert(sendToSanctuary(s, friend(s, WILD_IDS[i])).ok, `animal ${i} goes`);
+  const pen = pens(s.sanctuary)[0];
+  let moves = 0;
+  for (let t = 0; t < 3000; t++) {
+    const was = s.sanctuary.residents.map((r) => [r.x, r.y]);
+    s.tickCount++;
+    updateSanctuary(s);
+    s.sanctuary.residents.forEach((r, i) => {
+      const d = Math.abs(r.x - was[i][0]) + Math.abs(r.y - was[i][1]);
+      assert(d <= 1, 'never more than a tile in a tick');
+      if (d) moves++;
+      assert(r.x > pen.x && r.x < pen.x + pen.w - 1 && r.y > pen.y && r.y < pen.y + pen.h - 1, 'inside the fence');
+      assert(!(r.x === 8 && r.y === 8), 'not in the tree');
+      assert(!(r.x === 7 && r.y === 7), 'nor in the pool');
+    });
+    const spots = new Set(s.sanctuary.residents.map((r) => `${r.x},${r.y}`));
+    assertEqual(spots.size, s.sanctuary.residents.length, 'and never two on one tile');
+  }
+  assert(moves > 4, `they do move about (${moves} steps)`);
+});
+
+test('an enclosure with animals in it cannot be taken down', () => {
+  const s = sanctuaryFarm();
+  const sent = sendToSanctuary(s, friend(s));
+  assertEqual(sanctuaryDemolish(s, 5, 5).reason, 'bring its animals home first', 'not while someone lives there');
+  bringHome(s, sent.resident);
+  const before = s.money;
+  assert(sanctuaryDemolish(s, 5, 5).ok, 'once it is empty it comes down');
+  assertEqual(s.money, before + Math.floor(penCost(6, 6) * CITY_REFUND), 'for half its price back');
+});
+
+test('visitors leave donations by the variety of animals and the size of the city', () => {
+  const s = sanctuaryFarm(8205, [10, 10]);
+  sendToSanctuary(s, friend(s, WILD_IDS[0]));
+  sendToSanctuary(s, friend(s, WILD_IDS[0]));
+  sendToSanctuary(s, friend(s, WILD_IDS[1]));
+  assertEqual(kindsKept(s.sanctuary), 2, 'two of one kind are one thing to see');
+  s.city.population = 1000;
+  assertEqual(donationsPerDay(s), 0, 'nothing without a visitor centre to leave it at');
+  assert(cityBuild(s, 'visitorCentre', 20, 20, [3, 2], s.sanctuary).ok, 'a visitor centre');
+  assertEqual(donationsPerDay(s), DONATION_PER_KIND * 2, 'a full city, two kinds');
+  s.city.population = 500;
+  assertEqual(donationsPerDay(s), DONATION_PER_KIND, 'half a city, half as much');
+  s.city.population = 0;
+  assertEqual(donationsPerDay(s), 0, 'and nobody to visit, nothing');
+  assertEqual(visitorsWanted(s), 0, 'nor anyone to draw');
+});
+
+test('the donation box fills, stops when full, and empties into the purse', () => {
+  const s = sanctuaryFarm(8206, [10, 10]);
+  sendToSanctuary(s, friend(s, WILD_IDS[0]));
+  cityBuild(s, 'visitorCentre', 20, 20, [3, 2], s.sanctuary);
+  s.city.population = 1000;
+  const day = 24 * 60 * 60;
+  for (let t = 0; t < day; t += SANCTUARY_INTERVAL) { s.tickCount += SANCTUARY_INTERVAL; updateSanctuary(s); }
+  assert(Math.abs(s.sanctuary.donations - DONATION_PER_KIND) < 0.5, `a day's worth after a day (${s.sanctuary.donations})`);
+  for (let t = 0; t < 10 * day; t += SANCTUARY_INTERVAL) { s.tickCount += SANCTUARY_INTERVAL; updateSanctuary(s); }
+  assert(Math.abs(s.sanctuary.donations - DONATION_PER_KIND * DONATION_BOX_DAYS) < 0.001, 'and no more than the box holds');
+  const before = s.money;
+  const got = collectDonations(s);
+  assertEqual(got.got, DONATION_PER_KIND * DONATION_BOX_DAYS, 'all of it comes out');
+  assertEqual(s.money, before + got.got, 'into the purse');
+  assert(!collectDonations(s).ok, 'and an empty box gives nothing');
+});
+
+test('the sanctuary survives a save, and a farm from before it gets an empty one', () => {
+  const s = sanctuaryFarm();
+  cityBuild(s, 'oak', 6, 6, undefined, s.sanctuary);
+  cityBuild(s, 'trail', 2, 2, undefined, s.sanctuary);
+  const fox = friend(s);
+  nameAnimal(s, fox, 'Rusty');
+  sendToSanctuary(s, fox);
+  s.sanctuary.donations = 12.5;
+  const data = JSON.parse(JSON.stringify(serialize(s)));
+  const back = deserialize(data);
+  assertEqual(back.sanctuary.pieces.length, s.sanctuary.pieces.length, 'the same pieces');
+  assertEqual(back.sanctuary.residents[0].name, 'Rusty', 'the same animal');
+  assertEqual(back.sanctuary.donations, 12.5, 'the same box');
+  assertEqual(sanctuaryCapacity(back.sanctuary), sanctuaryCapacity(s.sanctuary), 'the same room');
+
+  delete data.sanctuary;
+  const old = deserialize(data);
+  assertEqual([old.sanctuary.pieces.length, old.sanctuary.residents.length], [0, 0], 'an empty one, ready to build');
+});
+
+test('a resident whose enclosure is missing from a save is brought home, not lost', () => {
+  const s = sanctuaryFarm();
+  const fox = friend(s);
+  nameAnimal(s, fox, 'Rusty');
+  sendToSanctuary(s, fox);
+  const data = JSON.parse(JSON.stringify(serialize(s)));
+  data.sanctuary.pieces = [];
+  const back = deserialize(data);
+  assertEqual(back.sanctuary.residents.length, 0, 'nobody is left with nowhere to stand');
+  assert(back.animals.some((a) => a.name === 'Rusty'), 'the fox is back on the farm');
+});
+
+test('a farm with a busy sanctuary replays identically', () => {
+  const build = (s) => {
+    buildDemoCity(s);
+    const res = buildDemoSanctuary(s);
+    assert(res.ok && res.refused.length === 0, 'the demonstration sanctuary fits its own layout');
+    assert(res.animals > 30, `and is well stocked (${res.animals})`);
+  };
+  const [a, b] = twinGames(8207);
+  build(a);
+  build(b);
+  for (let i = 0; i < 7200; i++) tick(a);
+  for (let i = 0; i < 3600; i++) tick(b);
+  const resumed = deserialize(JSON.parse(JSON.stringify(serialize(b))));
+  for (let i = 0; i < 3600; i++) tick(resumed);
+  assertEqual(serialize(resumed), serialize(a), 'a reloaded sanctuary carries on exactly');
+  assert(a.sanctuary.folk.length > 0, 'with visitors about');
+});
+
 /** Files of the given kinds under a directory, as shell-relative paths. */
 function shippedFiles(dir, extensions) {
   const out = [];
@@ -9974,6 +10984,262 @@ function shippedFiles(dir, extensions) {
   }(dir));
   return out;
 }
+
+// --- lots for the city and the sanctuary ---------------------------------
+
+/** The tile bounds of a place's middle lot: where a new one starts. */
+function middleLot(place) {
+  const { px, py } = middlePlot(place.w, place.h);
+  return { px, py, ...plotBounds(px, py) };
+}
+
+test('a new city and sanctuary are a 3x3 of lots with the middle one owned', () => {
+  const s = newGame(8300);
+  for (const where of ['city', 'sanctuary']) {
+    const place = s[where];
+    assertEqual([place.w, place.h], [PLOT * 3, PLOT * 3], `${where}: nine lots of ${PLOT}`);
+    assertEqual(totalPlots(s, where), 9, `${where}: nine to own`);
+    assertEqual(ownedCount(s, where), 1, `${where}: one owned`);
+    const m = middleLot(place);
+    assert(ownsTile(place, m.x0, m.y0) && ownsTile(place, m.x1 - 1, m.y1 - 1), `${where}: the middle one`);
+    assert(!ownsTile(place, m.x0 - 1, m.y0) && !ownsTile(place, 0, 0), `${where}: and none of the others`);
+  }
+  assertEqual(ownedCount(s), s.grid.owned.size, 'the farm still counts its own plots');
+});
+
+test('nothing goes down on a lot that is not owned', () => {
+  const s = newGame(8301);
+  s.money = 1000000;
+  const m = middleLot(s.city);
+  assertEqual(cityPlacementProblem(s, 'road', m.x0 - 1, m.y0), NOT_OWNED, 'no road next door');
+  assertEqual(cityPlacementProblem(s, 'lamp', m.x0 - 1, m.y0), NOT_OWNED, 'no lamp');
+  assertEqual(cityPlacementProblem(s, 'apartments', m.x0 - 1, m.y0, [3, 3]), NOT_OWNED, 'no block straddling the line');
+  assert(cityBuild(s, 'road', m.x0, m.y0).ok, 'but on the owned lot, yes');
+  const sm = middleLot(s.sanctuary);
+  assertEqual(cityPlacementProblem(s, 'paddock', sm.x1 - 2, sm.y0, [4, 4], s.sanctuary), NOT_OWNED,
+    'nor an enclosure over the sanctuary\'s edge');
+  assert(cityBuild(s, 'paddock', sm.x0, sm.y0, [4, 4], s.sanctuary).ok, 'inside it, yes');
+  assertEqual(s.money, 1000000 - ROAD_PRICE - penCost(4, 4), 'and the refusals cost nothing');
+});
+
+test('city and sanctuary lots are bought the way farmland is, each at its own price', () => {
+  const s = newGame(8302);
+  const m = middleLot(s.city);
+  s.money = CITY_LOT_PRICE_STEP - 1;
+  assert(!canBuyPlot(s, m.px + 1, m.py, 'city').ok, 'not without the money');
+  s.money = 10000000;
+  assert(/border/.test(canBuyPlot(s, m.px + 1, m.py + 1, 'city').reason), 'a corner lot has to wait for a neighbour');
+  assert(/already/.test(canBuyPlot(s, m.px, m.py, 'city').reason), 'and the middle is already yours');
+  assertEqual(buyablePlots(s, 'city').length, 4, 'four lots border the middle');
+
+  const farmPrice = nextLandPrice(s);
+  const before = s.money;
+  assertEqual(buyPlot(s, m.px + 1, m.py, 'city').price, CITY_LOT_PRICE_STEP, 'the second lot is one step');
+  assertEqual(nextLandPrice(s, 'city'), 2 * CITY_LOT_PRICE_STEP, 'the third is two');
+  assertEqual(s.money, before - CITY_LOT_PRICE_STEP, 'paid for');
+  assertEqual(nextLandPrice(s), farmPrice, 'and farmland costs what it did');
+  assertEqual(nextLandPrice(s, 'sanctuary'), SANCTUARY_LOT_PRICE_STEP, 'and so does the sanctuary\'s first');
+
+  assert(cityBuild(s, 'apartments', m.x1 - 1, m.y0, [3, 3]).ok, 'a block can now straddle the two lots');
+  assert(buyPlot(s, m.px + 1, m.py + 1, 'city').ok, 'and the corner can be bought now it has a neighbour');
+  assert(buyPlot(s, m.px, m.py - 1, 'sanctuary').ok, 'a sanctuary lot buys the same way');
+  assertEqual(ownedCount(s, 'sanctuary'), 2, 'two sanctuary lots');
+  assertEqual(ownedCount(s, 'city'), 3, 'three city lots');
+});
+
+test('bought lots survive a save', () => {
+  const s = newGame(8303);
+  s.money = 10000000;
+  const m = middleLot(s.city);
+  buyPlot(s, m.px - 1, m.py, 'city');
+  buyPlot(s, m.px, m.py + 1, 'sanctuary');
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual([...back.city.owned].sort(), [...s.city.owned].sort(), 'the city\'s lots');
+  assertEqual([...back.sanctuary.owned].sort(), [...s.sanctuary.owned].sort(), 'the sanctuary\'s lots');
+});
+
+test('a city and sanctuary from before lots move whole into the middle lot', () => {
+  // Built in a fixture that owns everything, at the coordinates a single-lot
+  // save would have used, then cut down to the old 40x40 shape.
+  const s = cityFarm(8304, 10000000);
+  for (let x = 0; x < PLOT; x++) { cityBuild(s, 'road', x, 10); cityBuild(s, 'pavement', x, 9); }
+  cityBuild(s, 'apartments', 2, 5, [8, 4]);
+  cityBuild(s, 'bakery', 12, 6, [3, 3]);
+  cityBuild(s, 'paddock', 5, 5, [6, 6], s.sanctuary);
+  const fox = friend(s);
+  nameAnimal(s, fox, 'Rusty');
+  assert(sendToSanctuary(s, fox).ok, 'a fox goes to live there');
+  s.city.population = housingCapacity(s.city);
+  runCity(s, CITY_INTERVAL);
+  assert(s.city.folk.length > 0, 'with people about');
+
+  const data = JSON.parse(JSON.stringify(serialize(s)));
+  const shrink = (place) => {
+    const w = place.w;
+    place.ground = place.ground.filter((_, i) => i % w < PLOT && Math.floor(i / w) < PLOT);
+    place.w = PLOT;
+    place.h = PLOT;
+    delete place.lots;
+  };
+  shrink(data.city);
+  shrink(data.sanctuary);
+  data.version = 12;
+
+  const back = deserialize(migrate(data));
+  assertEqual(back.version, SAVE_VERSION, 'brought up to date');
+  const m = middleLot(back.city);
+  assertEqual([back.city.w, back.sanctuary.w], [PLOT * 3, PLOT * 3], 'both are nine lots now');
+  assertEqual([ownedCount(back, 'city'), ownedCount(back, 'sanctuary')], [1, 1], 'with the middle one owned');
+  assertEqual(back.city.pieces.map((p) => [p.kind, p.x - m.x0, p.y - m.y0]),
+    s.city.pieces.map((p) => [p.kind, p.x, p.y]), 'every piece where it was, one lot across and down');
+  assertEqual(cityGroundAt(back.city, m.x0 + 3, m.y0 + 10), CITY_GROUND.ROAD, 'the road with them');
+  assertEqual(cityGroundAt(back.city, 3, 10), CITY_GROUND.GRASS, 'and nothing left behind');
+  assertEqual(housingCapacity(back.city), housingCapacity(s.city), 'room for just as many people');
+  assertEqual(back.city.folk.map((f) => [f.x - m.x0, f.y - m.y0]), s.city.folk.map((f) => [f.x, f.y]),
+    'who are standing where they were');
+  const r = back.sanctuary.residents[0];
+  assertEqual(r.name, 'Rusty', 'the fox is still there');
+  assertEqual([r.x - m.x0, r.y - m.y0], [s.sanctuary.residents[0].x, s.sanctuary.residents[0].y], 'in its enclosure');
+  assertEqual(sanctuaryCapacity(back.sanctuary), sanctuaryCapacity(s.sanctuary), 'which holds as many as before');
+  for (const p of [...back.city.pieces, ...back.sanctuary.pieces]) {
+    assert(ownsTile(back.city, p.x, p.y), `the ${p.kind} is on owned land`);
+  }
+});
+
+test('the demonstration city and sanctuary are built in the lot a new one owns', () => {
+  const s = newGame(8305);
+  const city = buildDemoCity(s);
+  assertEqual(city.refused, [], 'nothing refused');
+  const sanctuary = buildDemoSanctuary(s);
+  assertEqual(sanctuary.refused, [], 'nothing refused there either');
+  for (const p of [...s.city.pieces, ...s.sanctuary.pieces]) {
+    assert(ownsTile(s.city, p.x, p.y), `the ${p.kind} is on the middle lot`);
+  }
+});
+
+// --- fences and the rest, laid in runs ------------------------------------
+
+test('a run is a straight line between two ends, or a ring between two corners', () => {
+  assertEqual(runTiles(3, 5, 6, 5), [{ x: 3, y: 5 }, { x: 4, y: 5 }, { x: 5, y: 5 }, { x: 6, y: 5 }], 'across');
+  assertEqual(runTiles(2, 4, 2, 1).length, 4, 'down, from either end');
+  assertEqual(runTiles(7, 7, 7, 7), [{ x: 7, y: 7 }], 'one tile');
+  const ring = runTiles(48, 38, 56, 45);
+  assertEqual(ring.length, 2 * 9 + 2 * 6, 'a 9x8 ring is its outline: thirty tiles');
+  assertEqual(new Set(ring.map((t) => `${t.x},${t.y}`)).size, ring.length, 'each tile once');
+  assert(ring.every((t) => t.x === 48 || t.x === 56 || t.y === 38 || t.y === 45), 'and none inside');
+  assertEqual(runTiles(56, 45, 48, 38).length, ring.length, 'whichever corner comes first');
+});
+
+test('a ring of fence goes up in one go, paid for once', () => {
+  const s = sanctuaryFarm(8400);
+  const before = s.money;
+  const res = cityBuildRun(s, 'picketFence', runTiles(20, 20, 28, 27), s.sanctuary);
+  assert(res.ok, 'laid');
+  assertEqual(res.count, 30, 'thirty pieces');
+  assertEqual(before - s.money, 30 * cityDef('picketFence').price, 'for thirty pieces\' money');
+  for (const t of runTiles(20, 20, 28, 27)) {
+    assertEqual(cityStructureAt(s.sanctuary, t.x, t.y)?.kind, 'picketFence', `fence at ${t.x},${t.y}`);
+  }
+  assertEqual(cityStructureAt(s.sanctuary, 24, 24), null, 'and the middle left open');
+});
+
+test('a run goes round what is in its way, keeps what is there, and says so', () => {
+  const s = sanctuaryFarm(8401);
+  cityBuild(s, 'oak', 33, 30, undefined, s.sanctuary);
+  cityBuild(s, 'picketFence', 31, 30, undefined, s.sanctuary);
+  const plan = cityRunPlan(s, 'picketFence', runTiles(30, 30, 36, 30), s.sanctuary);
+  assertEqual(plan.already, 1, 'the fence already there is kept');
+  assertEqual(plan.skipped, [{ x: 33, y: 30 }], 'the tree is gone round');
+  assert(/tree is in the way/.test(plan.problem), 'and named');
+  assertEqual(plan.lay.length, 5, 'the rest goes up');
+  assertEqual(plan.cost, 5 * cityDef('picketFence').price, 'and only that is charged');
+  assert(!cityBuildRun(s, 'picketFence', [{ x: 31, y: 30 }], s.sanctuary).ok, 'a run of nothing new is refused');
+});
+
+test('a run that cannot be afforded lays none of it', () => {
+  const s = sanctuaryFarm(8402);
+  s.money = 5 * cityDef('picketFence').price;
+  const res = cityBuildRun(s, 'picketFence', runTiles(20, 20, 29, 20), s.sanctuary);
+  assert(!res.ok && /costs/.test(res.reason), 'refused');
+  assertEqual(cityStructureAt(s.sanctuary, 20, 20), null, 'not even the first five');
+  assertEqual(s.money, 5 * cityDef('picketFence').price, 'and nothing spent');
+});
+
+test('everything laid in runs in the city joins up, and nothing else is laid in runs', () => {
+  const s = cityFarm(8403, 1000000);
+  assert(cityBuildRun(s, 'chainFence', runTiles(3, 3, 8, 3)).ok, 'a wire fence across');
+  assert(!cityBuildRun(s, 'lamp', runTiles(3, 5, 8, 5)).ok, 'but not a row of lamps');
+  assertEqual(cityStructureAt(s.city, 3, 5), null, 'none of which went down');
+});
+
+test('a fenced ring\'s right wall has its posts on the right, under the right-hand corners', () => {
+  // The post line has two pieces on the sheet, posts at the left edge of the
+  // tile or the right. With only the left one, a ring's right wall stood a
+  // tile's width inside its own corners.
+  const s = sanctuaryFarm(8404);
+  for (const kind of ['picketFence', 'chainFence']) {
+    const y0 = kind === 'picketFence' ? 20 : 30;
+    cityBuildRun(s, kind, runTiles(20, y0, 26, y0 + 5), s.sanctuary);
+    const [v, vr] = kind === 'picketFence' ? [CITY.picketV, CITY.picketVR] : [CITY.chainV, CITY.chainVR];
+    for (let y = y0 + 1; y < y0 + 5; y++) {
+      assertEqual(fencePiece(s.sanctuary, kind, 20, y), v, `${kind}: the left wall at ${y}, posts on the left`);
+      assertEqual(fencePiece(s.sanctuary, kind, 26, y), vr, `${kind}: the right wall at ${y}, posts on the right`);
+    }
+  }
+  cityBuildRun(s, 'picketFence', runTiles(40, 20, 40, 25), s.sanctuary);
+  assertEqual(fencePiece(s.sanctuary, 'picketFence', 40, 22), CITY.picketV, 'a line on its own keeps its posts on the left');
+});
+
+// --- moving animals in the sanctuary ---------------------------------------
+
+test('the sanctuary has a Move tool', () => {
+  assert(SANCTUARY_TOOLS.some((t) => t.id === 'move'), 'Move is on the sanctuary\'s tool bar');
+  assert(!CITY_TOOLS.some((t) => t.id === 'move'), 'and not the city\'s, which has no animals');
+});
+
+test('an animal can be put down anywhere free in its own enclosure', () => {
+  // The paddock is 5..12 square, so its floor is 6..11.
+  const s = sanctuaryFarm(8500, [8, 8]);
+  cityBuild(s, 'oak', 9, 9, undefined, s.sanctuary);
+  cityBuild(s, 'pool', 10, 6, undefined, s.sanctuary);
+  assert(sendToSanctuary(s, friend(s, WILD_IDS[0])).ok, 'one goes');
+  assert(sendToSanctuary(s, friend(s, WILD_IDS[1])).ok, 'and another');
+  const [a, b] = s.sanctuary.residents;
+  const spot = [[6, 6], [6, 11], [11, 11], [7, 10]].find(([x, y]) => !residentAt(s.sanctuary, x, y));
+
+  assert(moveResident(s, a, spot[0], spot[1]).ok, 'into a free spot');
+  assertEqual([a.x, a.y, a.px, a.py], [spot[0], spot[1], spot[0], spot[1]], 'standing there, not sliding there');
+  assertEqual(residentMoveProblem(s, a, 20, 20), 'animals stay inside an enclosure', 'not out on the grass');
+  assertEqual(residentMoveProblem(s, a, 5, 7), 'animals stay inside an enclosure', 'nor on the fence');
+  assertEqual(residentMoveProblem(s, a, 9, 9), 'something is standing there', 'nor in the tree');
+  assertEqual(residentMoveProblem(s, a, 10, 6), 'that is water', 'nor in the pool');
+  assertEqual(residentMoveProblem(s, a, b.x, b.y), 'another animal is there', 'nor on top of another');
+  assertEqual(residentMoveProblem(s, a, a.x, a.y), null, 'putting it back where it was is fine');
+  const at = [a.x, a.y];
+  assert(!moveResident(s, a, 20, 20).ok, 'a refusal');
+  assertEqual([a.x, a.y], at, 'leaves it where it was');
+});
+
+test('an animal can be moved into another enclosure with room, and stays there', () => {
+  const s = sanctuaryFarm(8501, [6, 6]);
+  assert(cityBuild(s, 'paddock', 20, 5, [4, 4], s.sanctuary).ok, 'a small second enclosure');
+  const [first, small] = pens(s.sanctuary);
+  assertEqual(penCapacity(s.sanctuary, small), 1, 'with room for one');
+  for (let i = 0; i < 3; i++) sendToSanctuary(s, friend(s, WILD_IDS[i]));
+  const inFirst = () => s.sanctuary.residents.filter((r) => r.pen === first.id);
+  const [a, b] = inFirst();
+
+  const res = moveResident(s, a, 21, 6);
+  assert(res.ok && res.moved, 'moved across');
+  assertEqual(a.pen, small.id, 'it lives there now');
+  assertEqual(residentMoveProblem(s, b, 22, 7), 'that enclosure is full', 'and that one is now full');
+
+  for (let t = 0; t < 2000; t++) { s.tickCount++; updateSanctuary(s); }
+  assert(a.x > small.x && a.x < small.x + small.w - 1 && a.y > small.y && a.y < small.y + small.h - 1,
+    'it wanders inside its new fence');
+  const back = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+  assertEqual(back.sanctuary.residents.find((r) => r.id === a.id).pen, small.id, 'and a save remembers where');
+});
 
 // --- report -------------------------------------------------------------
 

@@ -254,12 +254,31 @@ export function drawPlacementGhost(ctx, sheets, pending) {
   if (pending.draw) pending.draw(ctx, sheets, { x, y, w, h });
   ctx.restore();
 
+  // Something about to be taken down is marked in red even when it may be:
+  // green would be saying "this is a good place for it", which is the wrong
+  // thing to say about a building on its way out.
+  const green = valid && !pending.danger;
+  // A run of fence is tinted along the run, not over the whole rectangle it
+  // rings, and a tile it has to skip is red among the green.
+  if (pending.tiles) {
+    for (const t of pending.tiles) {
+      const ok = green && !t.skip;
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = ok ? '#5ec24f' : '#e5533d';
+      ctx.fillRect(t.x * TILE, t.y * TILE, TILE, TILE);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = ok ? '#bdf5b0' : '#ffb4a6';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(t.x * TILE + 0.5, t.y * TILE + 0.5, TILE - 1, TILE - 1);
+    }
+    return;
+  }
   ctx.globalAlpha = 0.35;
-  ctx.fillStyle = valid ? '#5ec24f' : '#e5533d';
+  ctx.fillStyle = green ? '#5ec24f' : '#e5533d';
   ctx.fillRect(x * TILE, y * TILE, w * TILE, h * TILE);
   ctx.globalAlpha = 1;
 
-  ctx.strokeStyle = valid ? '#bdf5b0' : '#ffb4a6';
+  ctx.strokeStyle = green ? '#bdf5b0' : '#ffb4a6';
   ctx.lineWidth = 1;
   ctx.strokeRect(x * TILE + 0.5, y * TILE + 0.5, w * TILE - 1, h * TILE - 1);
 }

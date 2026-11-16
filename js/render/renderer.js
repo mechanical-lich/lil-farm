@@ -3,6 +3,9 @@
 import { COLORS, MAX_FPS, MAX_DPR, TILE } from '../config.js';
 import { drawGround, drawCrops, drawObjects, drawUnowned } from './tilerender.js';
 import { drawEffects, drawCastLine, anyEffects } from './effects.js';
+import { drawCity, drawSanctuary } from './cityrender.js';
+import { sanctuaryMoving } from '../sim/sanctuary.js';
+import { cityMoving } from '../sim/citylife.js';
 import {
   entitiesByRow, drawTaskMarkers, drawTillAnchor, drawPlacementGhost, drawEmotes,
   drawCarriedGhost,
@@ -15,6 +18,9 @@ export class Renderer {
     this.sheets = sheets;
     this.camera = camera;
     this.dpr = 1;
+    // Which map is on screen: 'farm' or 'city'. The farm keeps simulating
+    // either way; this only decides what is drawn.
+    this.scene = 'farm';
 
     // Frame skipping. This is an idle game: most of the time nothing on screen
     // is different from the last frame, and redrawing it anyway is pure heat.
@@ -53,6 +59,13 @@ export class Renderer {
     this.forceNext = true;         // the canvas was just cleared by resizing
   }
 
+  /** Switches which map is drawn. The camera is the caller's to move. */
+  setScene(scene) {
+    if (this.scene === scene) return;
+    this.scene = scene;
+    this.forceNext = true;
+  }
+
   /** Redraw on the next opportunity even if nothing looks different. */
   invalidate() { this.forceNext = true; }
 
@@ -76,7 +89,10 @@ export class Renderer {
     // A landed fish is on the wall clock rather than the tick, so it has to be
     // able to keep the renderer awake by itself — the frame key would happily
     // skip every frame of it.
-    if (!this.forceNext && same && !anythingMoving(state) && !anyEffects()) return false;
+    const moving = this.scene === 'city' ? cityMoving(state)
+      : this.scene === 'sanctuary' ? sanctuaryMoving(state)
+        : anythingMoving(state) || anyEffects();
+    if (!this.forceNext && same && !moving) return false;
     // Even when there is something to show, there is no sense drawing it more
     // often than MAX_FPS.
     if (!this.forceNext && now - this.lastDrawAt < this.minFrameMs) return false;
@@ -111,6 +127,14 @@ export class Renderer {
     ctx.scale(camera.zoom, camera.zoom);
 
     const view = camera.visibleTiles();
+    if (this.scene !== 'farm') {
+      if (this.scene === 'sanctuary') drawSanctuary(ctx, this.sheets, state, view, alpha);
+      else drawCity(ctx, this.sheets, state, view, alpha);
+      if (overlay?.pending) drawPlacementGhost(ctx, this.sheets, overlay.pending);
+      if (overlay?.carried) drawCarriedGhost(ctx, this.sheets, state, overlay.carried);
+      ctx.restore();
+      return;
+    }
     drawGround(ctx, this.sheets, state, view);
     drawTaskMarkers(ctx, state, view);
     drawCrops(ctx, this.sheets, state, view);

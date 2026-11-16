@@ -11,8 +11,24 @@ import {
 import { animalCapacity } from '../sim/build.js';
 import {
   PLOT, nextLandPrice, ownedCount, totalPlots, buyablePlots, buyPlot, canBuyPlot,
-  plotsAcross, plotsDown, plotIndex,
+  plotsAcross, plotsDown, plotIndex, LANDS,
 } from '../world/land.js';
+
+/** The three places land is bought in, as the Land tab names them. */
+const LAND_PLACES = {
+  farm: {
+    icon: '🌾', name: 'Farm', all: 'You own the whole valley. Nothing left to buy!',
+    about: `Each cell is a whole ${PLOT}x${PLOT} farm, and costs more than the last.`,
+  },
+  city: {
+    icon: '🏙️', name: 'City', all: 'You own every lot in the city. Nothing left to buy!',
+    about: `Each lot is ${PLOT}x${PLOT} of open ground to build on, and costs more than the last.`,
+  },
+  sanctuary: {
+    icon: '🐾', name: 'Sanctuary', all: 'You own every lot in the sanctuary. Nothing left to buy!',
+    about: `Each lot is ${PLOT}x${PLOT} of open ground for enclosures, and costs more than the last.`,
+  },
+};
 import { countItem } from '../sim/inventory.js';
 import { decorList } from '../sim/decor.js';
 
@@ -39,6 +55,11 @@ export function initShopPanel(state, {
   // Which land cell is armed for a second tap. A cell costs thousands, so it
   // doesn't go through on a stray thumb.
   let armedCell = null;
+  // Whose land the Land tab is showing: the farm's, the city's or the
+  // sanctuary's. It follows the place on screen, since that is the one a
+  // player who has run out of room is looking at, and can be switched.
+  let landWhere = 'farm';
+  on('scene:changed', (scene) => { landWhere = LANDS[scene] ? scene : 'farm'; armedCell = null; });
 
   const setOpen = (v) => {
     if (open === v) return;
@@ -93,6 +114,13 @@ export function initShopPanel(state, {
     // world: a cell is a whole 40x40 farm, five screens wide, so a ghost laid
     // over the map would just wash the whole view green with no way to tell
     // which cell you had. Nine buttons say it in one glance.
+    if (act === 'land-where') {
+      if (LANDS[btn.dataset.where]) landWhere = btn.dataset.where;
+      armedCell = null;
+      render();
+      return;
+    }
+
     if (act === 'land') {
       const px = Number(btn.dataset.px);
       const py = Number(btn.dataset.py);
@@ -105,10 +133,14 @@ export function initShopPanel(state, {
       }
       armedCell = null;
 
-      const res = buyPlot(state, px, py);
+      const res = buyPlot(state, px, py, landWhere);
       if (!res.ok) { onMessage?.(res.reason, 'warn'); render(); return; }
-      onMessage?.(`Land bought for $${res.price}`);
-      onLandBought?.(px, py);
+      // Said here rather than in buyPlot, which imports nothing on purpose.
+      // Without it the money chip went on showing the price of the land until
+      // something else happened to change the money.
+      emit('money:changed', { delta: -res.price });
+      onMessage?.(`${landWhere === 'farm' ? 'Land' : `A ${landWhere} lot`} bought for $${res.price.toLocaleString('en-US')}`);
+      onLandBought?.(px, py, landWhere);
       render();
       return;
     }
@@ -191,7 +223,8 @@ export function initShopPanel(state, {
     } else if (tab === 'decor') {
       note.textContent = `Just for the look of the place · $${state.money}`;
     } else if (tab === 'land') {
-      note.textContent = `You own ${ownedCount(state)} of ${totalPlots(state)} plots · $${state.money}`;
+      const what = landWhere === 'farm' ? 'plots' : `${landWhere} lots`;
+      note.textContent = `You own ${ownedCount(state, landWhere)} of ${totalPlots(state, landWhere)} ${what} · $${state.money}`;
     } else {
       note.textContent = `$${state.money}`;
     }
@@ -208,39 +241,47 @@ export function initShopPanel(state, {
 
   /**
    * The valley as a little map: your land in the middle, the cells you can buy
-   * around it. Tap one to arm it, tap again to buy.
+   * around it. Tap one to arm it, tap again to buy. The city and the sanctuary
+   * are laid out the same way, in lots, and a row of three buttons above the
+   * map says whose land it is.
    */
   function renderLand() {
-    const price = nextLandPrice(state);
-    const buyable = new Set(buyablePlots(state).map((p) => `${p.px},${p.py}`));
+    const where = landWhere;
+    const map = where === 'city' ? state.city : where === 'sanctuary' ? state.sanctuary : state.grid;
+    const chooser = `<li class="land-where">${Object.entries(LAND_PLACES).map(([id, p]) => (
+      `<button data-act="land-where" data-where="${id}" class="${id === where ? 'on' : ''}">${p.icon} ${p.name}</button>`
+    )).join('')}</li>`;
+
+    const price = nextLandPrice(state, where);
+    const buyable = new Set(buyablePlots(state, where).map((p) => `${p.px},${p.py}`));
     if (buyable.size === 0) {
-      return '<li class="empty">You own the whole valley. Nothing left to buy!</li>';
+      return `${chooser}<li class="empty">${LAND_PLACES[where].all}</li>`;
     }
 
     const cells = [];
-    for (let py = 0; py < plotsDown(state.grid.h); py++) {
-      for (let px = 0; px < plotsAcross(state.grid.w); px++) {
+    for (let py = 0; py < plotsDown(map.h); py++) {
+      for (let px = 0; px < plotsAcross(map.w); px++) {
         const key = `${px},${py}`;
-        if (state.grid.owned.has(plotIndex(px, py, state.grid.w))) {
+        if (map.owned.has(plotIndex(px, py, map.w))) {
           cells.push('<span class="land-cell yours">Yours</span>');
         } else if (!buyable.has(key)) {
           cells.push('<span class="land-cell locked"></span>');
         } else {
           const armed = armedCell === key;
-          const afford = canBuyPlot(state, px, py).ok;
+          const afford = canBuyPlot(state, px, py, where).ok;
           cells.push(`<button class="land-cell${armed ? ' armed' : ''}"
             data-act="land" data-px="${px}" data-py="${py}"
-            ${afford ? '' : 'disabled'}>${armed ? 'Buy?' : `$${price}`}</button>`);
+            ${afford ? '' : 'disabled'}>${armed ? 'Buy?' : `$${price.toLocaleString('en-US')}`}</button>`);
         }
       }
     }
 
-    return `
+    return `${chooser}
       <li class="land-map"><div class="land-grid"
-        style="grid-template-columns: repeat(${plotsAcross(state.grid.w)}, 1fr)">
+        style="grid-template-columns: repeat(${plotsAcross(map.w)}, 1fr)">
         ${cells.join('')}
       </div></li>
-      <li class="empty">Each cell is a whole ${PLOT}x${PLOT} farm, and costs more than the last.</li>`;
+      <li class="empty">${LAND_PLACES[where].about}</li>`;
   }
 
   function renderAnimals() {

@@ -27,7 +27,12 @@
         <span id="task-count">0</span>
       </button>
       <button class="hud-chip" id="shop-toggle">🏪 Shop</button>
+      <!-- Farm or city: which map is on screen. The farm keeps working either way. -->
+      <button class="hud-chip" id="scene-toggle" title="Go somewhere else" aria-label="Go somewhere else"
+        aria-haspopup="true" aria-expanded="false">🗺️</button>
     </div>
+    <!-- Where the place button goes: the two places that are not on screen. -->
+    <div id="place-menu" role="menu"></div>
 
     <div id="debug"></div>
 
@@ -153,6 +158,23 @@
       <ul id="summary-lines"></ul>
       <button id="summary-close">Back to the farm</button>
     </div>
+  </div>
+
+  <!-- The naming card: the one place the player types. See ui/namepanel.js. -->
+  <div id="namer">
+    <form id="namer-form" autocomplete="off">
+      <h2 id="namer-title"></h2>
+      <input id="namer-input" type="text" inputmode="text" enterkeyhint="done"
+        autocapitalize="words" autocorrect="off" spellcheck="false" aria-labelledby="namer-title">
+      <p id="namer-hint"></p>
+      <div id="namer-row">
+        <button type="button" id="namer-cancel">Not now</button>
+        <button type="submit" id="namer-save">Save</button>
+      </div>
+      <!-- Sending it to the sanctuary, or fetching it home. Only for animals that can go. -->
+      <button type="button" id="namer-action" hidden></button>
+      <p id="namer-action-note" hidden></p>
+    </form>
   </div>
 
   <div id="boot">

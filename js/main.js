@@ -36,11 +36,12 @@ import { DECOR, decorDef, canPlaceDecor, placeDecor } from './sim/decor.js';
 import { movableAt, canMoveTo, moveTo } from './sim/moving.js';
 import {
   animalDef, animalAt, animalShownAt, petAnimal, isReady, animalVariantCount,
+  nameAnimal, calledAs,
 } from './sim/animals.js';
 import { buyAnimal, canPlaceAnimal, hireHand } from './sim/shop.js';
 import { PLOT, plotBounds } from './world/land.js';
 import { attachInput } from './ui/input.js';
-import { initToolbar, TOOLS } from './ui/toolbar.js';
+import { initToolbar, TOOLS, CITY_TOOLS, SANCTUARY_TOOLS } from './ui/toolbar.js';
 import { initTaskPanel } from './ui/taskpanel.js';
 import { initMarketPanel } from './ui/marketpanel.js';
 import { initShopPanel } from './ui/shoppanel.js';
@@ -50,6 +51,20 @@ import { initJournal } from './ui/journal.js';
 import { initToasts, toast } from './ui/toast.js';
 import { initAwards, showAward, clearAwards } from './ui/award.js';
 import { buildSummary, showSummary } from './ui/summary.js';
+import { openNamePanel, namePanelOpen } from './ui/namepanel.js';
+import {
+  cityDef, cityBuild, cityCost, cityPlacementProblem, cityStructureAt, cityDemolish, isBuilding,
+  runTiles, cityRunPlan, cityBuildRun,
+} from './sim/city.js';
+import { drawPieceGhost } from './render/cityrender.js';
+import { buildDemoCity, buildDemoSanctuary } from './sim/democity.js';
+import {
+  canSendToSanctuary, sendToSanctuary, bringHome, isSanctuaryKind, residentAt, residentsOf, penCapacity,
+  penComforts, sanctuaryDemolish, collectDonations, donationsPerDay, kindsKept,
+  residentMoveProblem, moveResident, residentLabel,
+} from './sim/sanctuary.js';
+import { hasAccess, housed, amenitiesNear, workingMachines } from './sim/citylife.js';
+import { LINES, lineOn, setLine, lineRate } from './sim/factory.js';
 import * as events from './engine/events.js';
 
 const els = {
@@ -82,6 +97,7 @@ async function boot() {
   const isNew = !saved;
 
   const camera = new Camera(state.grid.w, state.grid.h);
+  sceneView.camera = camera;
   const renderer = new Renderer(els.canvas, sheets, camera);
   camera.centerOnTile(state.farmer.x, state.farmer.y);
 
@@ -127,7 +143,10 @@ async function boot() {
     onMessage: (msg, kind) => toast(msg, kind),
     // Land is bought from the little map in the shop, so nothing to site here —
     // just take the player out to look at what they just bought.
-    onLandBought: (px, py) => {
+    // A city or sanctuary lot takes the player to that place first.
+    onLandBought: (px, py, where = 'farm') => {
+      if (where !== sceneView.scene) sceneView.goTo?.(where);
+      if (where !== 'farm') events.emit('city:changed', {});
       const b = plotBounds(px, py);
       camera.centerOnTile(b.x0 + PLOT / 2, b.y0 + PLOT / 2);
     },
@@ -163,7 +182,7 @@ async function boot() {
     toast(first ? `A ${name.toLowerCase()} — your first!` : `Caught a ${name.toLowerCase()}`);
   });
 
-  wireToastFeedback();
+  wireToastFeedback(state);
 
   const toolbar = initToolbar(state, {
     // One-shot buttons on the bar, which do something and leave the tool alone.
@@ -176,7 +195,10 @@ async function boot() {
       // Leaving the till tool mid-selection must not strand a dangling anchor.
       tillSelection.tillAnchor = null;
       clearPlacement();
-      const def = TOOLS.find((x) => x.id === t);
+      // Each place has its own tool list, and its own words for what a tool
+      // does there: the farm's Clear chops trees, the city's Demolish does not.
+      const list = sceneView.scene === 'city' ? CITY_TOOLS : sceneView.scene === 'sanctuary' ? SANCTUARY_TOOLS : TOOLS;
+      const def = list.find((x) => x.id === t);
       if (def) toast(def.hint);
     },
   });
@@ -185,6 +207,7 @@ async function boot() {
     autosaver,
     onMessage: (msg, kind) => toast(msg, kind),
   });
+  sceneView.goTo = wireSceneToggle(state, camera, renderer, toolbar).goTo;
   const paintMode = wirePaintToggle();
   wirePlacementButtons();
   wirePanelTracking();
@@ -197,7 +220,19 @@ async function boot() {
 
     // Carrying things about, with the move tool selected.
     onGrab: (x, y) => {
+      if (sceneView.scene === 'city') return false;
       if (toolbar.getTool() !== 'move' || openPanel || placement.pending) return false;
+      // In the sanctuary the move tool picks up a resident, to put down
+      // elsewhere in its enclosure or in another one with room.
+      if (sceneView.scene === 'sanctuary') {
+        const resident = residentAt(state.sanctuary, x, y);
+        if (!resident) return false;
+        carried.what = { kind: 'animal', ref: resident, resident: true };
+        carried.x = x;
+        carried.y = y;
+        carried.valid = true;
+        return true;
+      }
       const found = movableAt(state, x, y);
       if (!found) return false;
       carried.what = found;
@@ -210,12 +245,23 @@ async function boot() {
       if (!carried.what) return;
       carried.x = x;
       carried.y = y;
-      carried.valid = canMoveTo(state, carried.what, x, y);
+      carried.valid = carried.what.resident
+        ? !residentMoveProblem(state, carried.what.ref, x, y)
+        : canMoveTo(state, carried.what, x, y);
     },
     onDrop: (x, y) => {
       const what = carried.what;
       carried.what = null;
       if (!what) return;
+      if (what.resident) {
+        const stayed = what.ref.x === x && what.ref.y === y;
+        const res = moveResident(state, what.ref, x, y);
+        const who = capitalise(residentLabel(what.ref));
+        if (!res.ok) toast(capitalise(res.reason), 'warn');
+        else if (res.moved) toast(`${who} moved to another enclosure`);
+        else if (!stayed) toast(`Moved ${residentLabel(what.ref)}`);
+        return;
+      }
       const res = moveTo(state, what, x, y);
       toast(res.ok ? `Moved the ${what.name}` : res.reason, res.ok ? undefined : 'warn');
     },
@@ -265,6 +311,23 @@ async function boot() {
      * lilfarm.give() for the full testing kit. Beats wiping when you want to
      * keep the farm you were already testing on.
      */
+    /**
+     * Puts down a finished, fully lived-in city for looking at — see
+     * sim/democity.js. lilfarm.demoCity(true) replaces a city already built.
+     */
+    demoCity: (force = false) => {
+      const res = buildDemoCity(state, { force });
+      if (res.ok) { renderer.invalidate(); hud.render(); autosaver.saveNow(); }
+      return res;
+    },
+
+    /** The same for the sanctuary: enclosures, trails and one of every animal. */
+    demoSanctuary: (force = false) => {
+      const res = buildDemoSanctuary(state, { force });
+      if (res.ok) { renderer.invalidate(); hud.render(); autosaver.saveNow(); }
+      return res;
+    },
+
     give: (items = START_INVENTORY, money = 0) => {
       for (const [id, qty] of Object.entries(items)) addItem(state, id, qty);
       if (money) { state.money += money; events.emit('money:changed', { delta: money }); }
@@ -714,6 +777,12 @@ function queueTileTask(state, toolbar, x, y, { announce }) {
     return;
   }
 
+  // The city has its own short list of tools and none of them queue work.
+  if (sceneView.scene !== 'farm') {
+    cityTap(state, toolbar, x, y, { announce });
+    return;
+  }
+
   // Calling work off rather than adding any. It sits after the panel and
   // placement guards — a tap meant to dismiss a panel must not cancel work
   // instead — but before every tool below, because it is the one that wants
@@ -742,13 +811,13 @@ function queueTileTask(state, toolbar, x, y, { announce }) {
       if (announce) toast('Nothing there to shoo');
       return;
     }
-    const name = animalDef(animal.type).name.toLowerCase();
+    const who = capitalise(calledAs(animal));
     const wasWild = !!animal.wild;
     const res = shoo(state, animal);
     if (announce) {
       toast(wasWild
-        ? `Shoo! The ${name} runs off the farm`
-        : res.ran ? `The ${name} bolts, then settles` : `The ${name} has nowhere to run`);
+        ? `Shoo! ${who} runs off the farm`
+        : res.ran ? `${who} bolts, then settles` : `${who} has nowhere to run`);
     }
     return;
   }
@@ -804,14 +873,23 @@ function queueTileTask(state, toolbar, x, y, { announce }) {
 
     const animal = animalAt(state, x, y);
     if (animal && !isReady(animal)) {
-      const name = animalDef(animal.type).name.toLowerCase();
+      const who = capitalise(calledAs(animal));
       const { gained } = petAnimal(state, animal);
       // Counted here rather than inside petAnimal, which would close an import
       // cycle — see notePet. Nothing else in the game pets an animal.
       notePet(state, gained);
-      toast(gained
-        ? `The ${name} loves the attention`
-        : `The ${name} has had plenty of fuss for now`);
+      // The first tap is the fuss, as it always was. A tap on an animal that
+      // has just been fussed over had nothing left to do but say so, and that
+      // is the tap that now opens its naming card — so naming needs no tool of
+      // its own on a bar that is already full, and never gets in the way of
+      // working down a row of animals petting each once.
+      if (gained) {
+        toast(animal.name
+          ? `${who} loves the attention`
+          : `${who} loves the attention — tap again to name it`);
+      } else {
+        askName(state, animal);
+      }
       return;
     }
   }
@@ -866,6 +944,428 @@ function noWorkReason(state, tool, toolbar, x, y) {
   }
 }
 
+/**
+ * Which map is on screen, and where the view was left on each.
+ *
+ * One camera serves both maps, re-pointed at whichever is showing, so input,
+ * the renderer and the overscroll insets need to know nothing about there
+ * being two. Each map remembers its own position and zoom: going to the city
+ * and back puts you where you were on the farm.
+ */
+const sceneView = { scene: 'farm', camera: null, saved: { farm: null, city: null, sanctuary: null } };
+
+/** The places there are to be, and what is said on arriving at each. */
+const PLACES = {
+  farm: { icon: '🌾', name: 'The farm', hello: 'Back on the farm' },
+  city: { icon: '🏙️', name: 'The city', hello: 'The city — build it with money. The farm keeps working.' },
+  sanctuary: {
+    icon: '🐾', name: 'The sanctuary',
+    hello: 'The sanctuary — a home for animals you have befriended. The farm keeps working.',
+  },
+};
+
+/** The map a scene shows: the farm's grid, or one of the built places. */
+function placeMap(state, scene = sceneView.scene) {
+  return scene === 'city' ? state.city : scene === 'sanctuary' ? state.sanctuary : state.grid;
+}
+
+/**
+ * The place button. With two places it was a toggle; with three it opens a
+ * short menu of the two that are not on screen.
+ */
+function wireSceneToggle(state, camera, renderer, toolbar) {
+  const btn = document.getElementById('scene-toggle');
+  const menu = document.getElementById('place-menu');
+
+  const setMenu = (open) => {
+    menu.classList.toggle('open', open);
+    btn.setAttribute('aria-expanded', String(open));
+    if (open) {
+      menu.innerHTML = Object.entries(PLACES)
+        .filter(([id]) => id !== sceneView.scene)
+        .map(([id, p]) => `<button role="menuitem" data-place="${id}">${p.icon} ${p.name}</button>`)
+        .join('');
+    }
+  };
+
+  const render = () => {
+    const scene = sceneView.scene;
+    btn.classList.toggle('on', scene !== 'farm');
+    document.body.classList.toggle('in-city', scene === 'city');
+    document.body.classList.toggle('in-sanctuary', scene === 'sanctuary');
+  };
+
+  const goTo = (next) => {
+    if (!PLACES[next] || next === sceneView.scene) return;
+    sceneView.saved[sceneView.scene] = { x: camera.x, y: camera.y, zoom: camera.zoom };
+    sceneView.scene = next;
+    // Anything half-done on one map means nothing on the other.
+    clearPlacement();
+    tillSelection.tillAnchor = null;
+    carried.what = null;
+    events.emit('panel:dismiss');
+
+    const map = placeMap(state, next);
+    camera.mapW = map.w;
+    camera.mapH = map.h;
+    const back = sceneView.saved[next];
+    if (back) {
+      camera.zoom = back.zoom;
+      camera.x = back.x;
+      camera.y = back.y;
+      camera.clamp();
+    } else {
+      // The first visit opens on the middle of the map, where building it
+      // would naturally start.
+      camera.centerOnTile(Math.floor(map.w / 2), Math.floor(map.h / 2));
+    }
+    toolbar.setMode(next);
+    renderer.setScene(next);
+    render();
+    events.emit('scene:changed', next);
+    toast(PLACES[next].hello);
+  };
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setMenu(!menu.classList.contains('open'));
+  });
+  menu.addEventListener('click', (e) => {
+    const hit = e.target.closest('button[data-place]');
+    if (!hit) return;
+    setMenu(false);
+    goTo(hit.dataset.place);
+  });
+  // A tap anywhere else puts the menu away, as it does every other panel.
+  document.addEventListener('pointerdown', (e) => {
+    if (!menu.contains(e.target) && e.target !== btn) setMenu(false);
+  });
+  events.on('panel:open', () => setMenu(false));
+
+  events.on('city:changed', () => renderer.invalidate());
+  render();
+  return { goTo };
+}
+
+/**
+ * A tap on the city. Building is paid for and appears at once; there is no
+ * farmer to send and nothing to queue. Big things — a building, or taking
+ * one down — go through the confirm bar, because a stray tap should not cost
+ * thousands either way.
+ */
+function cityTap(state, toolbar, x, y, { announce }) {
+  const tool = toolbar.getTool();
+  const city = placeMap(state);
+  const inSanctuary = sceneView.scene === 'sanctuary';
+  if (x < 0 || y < 0 || x >= city.w || y >= city.h) return;
+
+  if (tool === 'build') {
+    const kind = toolbar.getCityKind();
+    const def = cityDef(kind);
+    if (!def) return;
+    if (def.building) {
+      if (announce) beginPlacement(cityBuildingPlacement(state, kind, city), x, y);
+      return;
+    }
+    // Fences and the rest that join up are laid in runs, from a tap at each
+    // end. A drag in paint mode still lays them a tile at a time.
+    if (def.line && announce) {
+      beginPlacement(cityRunPlacement(state, kind, city), x, y);
+      return;
+    }
+    const res = cityBuild(state, kind, x, y, undefined, city);
+    if (!res.ok) {
+      if (announce) toast(capitalise(res.reason), 'warn');
+      return;
+    }
+    if (announce) toast(`${def.name} — $${res.spent.toLocaleString('en-US')}`);
+    return;
+  }
+
+  if (tool === 'clear') {
+    const found = cityStructureAt(city, x, y);
+    if (!found) {
+      if (announce) toast('Nothing built there');
+      return;
+    }
+    // A building is thousands of dollars; taking one down asks first. Paint
+    // never demolishes one, so dragging across a street to lift the paving
+    // cannot take a block of flats with it.
+    if (found.piece && isBuilding(found.piece)) {
+      if (announce) beginPlacement(cityDemolishPlacement(state, found.piece, city), found.piece.x, found.piece.y);
+      return;
+    }
+    const res = cityDemolish(state, x, y, city);
+    if (res.ok && announce) {
+      toast(`Took down the ${cityDef(res.kind).name.toLowerCase()}${res.refund ? ` — $${res.refund} back` : ''}`);
+    }
+    return;
+  }
+
+  // A tap with the move tool, rather than a press and drag, says how it works.
+  if (tool === 'move') {
+    if (announce) toast('Press on an animal and drag it where you want it');
+    return;
+  }
+
+  if (inSanctuary) {
+    if (announce) sanctuaryTap(state, x, y);
+    return;
+  }
+
+  // A machine is the one thing in the city a tap does something to: it offers
+  // to switch that machine's whole line on or off, through the confirm bar so
+  // a stray tap only ever asks.
+  const piece = cityStructureAt(city, x, y)?.piece;
+  const line = piece && cityDef(piece.kind)?.machine;
+  if (line && announce) {
+    beginPlacement(lineSwitchPlacement(state, line, piece), piece.x, piece.y);
+    return;
+  }
+
+  if (announce) toast(describeCityTile(state, x, y));
+}
+
+/**
+ * Switching a factory line on or off. The bar says what the line is doing now
+ * and what it would do, which is the whole of what the player needs to decide.
+ */
+function lineSwitchPlacement(state, line, piece) {
+  const def = LINES[line];
+  const on = lineOn(state.city, line);
+  const machines = workingMachines(state.city)[line] || 0;
+  const perHour = Math.round(lineRate(line, machines) * 60);
+  const what = `${itemName(def.input).toLowerCase()} into ${itemName(def.output).toLowerCase()}`;
+  return {
+    w: 1,
+    h: 1,
+    snap: () => ({ x: piece.x, y: piece.y }),
+    validate: () => true,
+    confirmLabel: on ? `⏸ Switch the ${def.name.toLowerCase()} off` : `▶ Switch the ${def.name.toLowerCase()} on`,
+    hint: machines
+      ? `${def.name}: ${perHour} ${what} an hour, from your bag${on ? '' : ' — switched off'}`
+      : `${def.name}: not running — machines only work on factory floor`,
+    confirm: () => {
+      setLine(state.city, line, !on);
+      return { ok: true, message: `${def.name} switched ${on ? 'off' : 'on'}` };
+    },
+  };
+}
+
+/** What a tap with the plain tool says about a city tile. */
+function describeCityTile(state, x, y) {
+  const found = cityStructureAt(state.city, x, y);
+  if (!found) return 'Open ground — pick Build to put something here';
+  const def = cityDef(found.kind);
+  const p = found.piece;
+  if (!p || !isBuilding(p)) {
+    if (def.amenity || def.tree) return `${def.name} — folk like living near one`;
+    if (found.kind === 'floor') return 'Factory floor — machines work standing on this';
+    return def.name;
+  }
+  // A building with no way to the road is the commonest thing to get wrong,
+  // and the least visible, so it is the first thing said.
+  if (!hasAccess(state.city, p)) return `${def.name} — needs a road or pavement to the road beside it`;
+  if (p.kind === 'apartments') {
+    const near = amenitiesNear(state.city, p);
+    return `Apartments — room for ${Math.round(housed(state.city, p))}`
+      + (near
+        ? `, helped by ${near === 1 ? 'a nearby lamp, bench or tree' : `${near} nearby lamps, benches and trees`}`
+        : ' — lamps, benches and trees nearby make room for more');
+  }
+  const goods = def.goods.map((id) => itemName(id).toLowerCase());
+  // Said as what it does to the price. "The town wants more wheat" was read as
+  // a request — something to deliver — when there is nothing to do but sell.
+  const list = goods.length > 1 ? `${goods.slice(0, -1).join(', ')} and ${goods.at(-1)}` : goods[0];
+  return `${def.name} — ${list} ${goods.length > 1 ? 'sell' : 'sells'} for more while it's open`;
+}
+
+/**
+ * A tap in the sanctuary with the plain tool. An animal opens its card, the
+ * visitor centre empties its donation box, and anything else says what it is.
+ */
+function sanctuaryTap(state, x, y) {
+  const place = state.sanctuary;
+  const resident = residentAt(place, x, y);
+  if (resident) {
+    askName(state, resident);
+    return;
+  }
+
+  const found = cityStructureAt(place, x, y);
+  if (!found) {
+    toast('Open ground — pick Build to put something here');
+    return;
+  }
+  const def = cityDef(found.kind);
+  const p = found.piece;
+
+  if (found.kind === 'visitorCentre') {
+    const got = collectDonations(state);
+    if (got.ok) { toast(`Collected $${got.got.toLocaleString('en-US')} from the donation box`); return; }
+    const perDay = Math.round(donationsPerDay(state));
+    if (perDay > 0) toast(`Visitor centre — about $${perDay} a day in donations; the box is empty just now`);
+    else if (kindsKept(place) === 0) toast('Visitor centre — visitors come once there are animals to see');
+    else toast('Visitor centre — visitors come out from the city, once people live there');
+    return;
+  }
+
+  if (p && def.pen) {
+    const here = residentsOf(place, p).length;
+    const room = penCapacity(place, p);
+    const comforts = penComforts(place, p);
+    toast(`Enclosure — ${here} of ${room} ${room === 1 ? 'animal' : 'animals'}`
+      + (comforts ? `, with ${comforts} ${comforts === 1 ? 'comfort' : 'comforts'} inside`
+        : ' — trees, water and hay inside make room for more'));
+    return;
+  }
+
+  toast(def.inPen ? `${def.name} — in an enclosure, it makes room for more animals` : def.name);
+}
+
+function capitalise(text) { return text ? text[0].toUpperCase() + text.slice(1) : text; }
+
+/**
+ * Siting a city building: two taps for the corners, as a barn is sized, and a
+ * confirm that says what the drawn rectangle costs before any money moves.
+ */
+function cityBuildingPlacement(state, kind, city = state.city) {
+  const def = cityDef(kind);
+  const limits = def.limits;
+  const noun = def.name.toLowerCase();
+  let anchor = null;
+
+  return {
+    w: 1,
+    h: 1,
+    draw: (ctx, sheets, at) => {
+      if (at.w < limits.minW || at.h < limits.minH) return;
+      drawPieceGhost(ctx, sheets, city, kind, at);
+    },
+    pick: (x, y) => {
+      if (!anchor) {
+        anchor = { x, y };
+        return { x, y, w: 1, h: 1, valid: false, label: `✓ Build ${noun}`, hint: 'Now tap the opposite corner' };
+      }
+      const box = snapBarn(anchor.x, anchor.y, x, y, limits);
+      if (!box) {
+        return {
+          x: Math.min(anchor.x, x), y: Math.min(anchor.y, y),
+          w: Math.abs(x - anchor.x) + 1, h: Math.abs(y - anchor.y) + 1,
+          valid: false, label: `✓ Build ${noun}`,
+          hint: `${def.name} must be at least ${limits.minW} by ${limits.minH}`,
+        };
+      }
+      const size = [box.w, box.h];
+      const cost = cityCost(kind, size);
+      const label = `✓ Build ${box.w}×${box.h} for $${cost.toLocaleString('en-US')}`;
+      const problem = cityPlacementProblem(state, kind, box.x, box.y, size, city);
+      if (problem) return { ...box, valid: false, label, hint: capitalise(problem) };
+      if (state.money < cost) {
+        return { ...box, valid: false, label, hint: `Needs $${cost.toLocaleString('en-US')} — you have $${state.money.toLocaleString('en-US')}` };
+      }
+      return { ...box, valid: true, label, hint: `${def.name}, ${box.w}×${box.h}` };
+    },
+    confirm: (x, y) => {
+      const p = placement.pending;
+      const res = cityBuild(state, kind, x, y, [p.w, p.h], city);
+      return res.ok
+        ? { ok: true, message: `Built ${p.w}×${p.h} ${noun} for $${res.spent.toLocaleString('en-US')}` }
+        : { ok: false, reason: capitalise(res.reason) };
+    },
+  };
+}
+
+/**
+ * Laying a run of fence (or conveyor, pipe or hazard strip). The first tap is
+ * one end and can be confirmed on its own, for a single piece; a second tap is
+ * the other end of a straight run, or the opposite corner of a ring round the
+ * rectangle between. The bar says how many pieces and what they cost, and how
+ * many tiles were skipped because something stands there.
+ */
+function cityRunPlacement(state, kind, city = state.city) {
+  const def = cityDef(kind);
+  const noun = def.name.toLowerCase();
+  let anchor = null;
+  let tiles = [];
+
+  const verdict = (box, ring) => {
+    const plan = cityRunPlan(state, kind, tiles, city);
+    const skip = new Set(plan.skipped.map((t) => `${t.x},${t.y}`));
+    tiles = tiles.map((t) => ({ x: t.x, y: t.y, skip: skip.has(`${t.x},${t.y}`) }));
+    const n = plan.lay.length;
+    const label = `✓ Lay ${n} for $${plan.cost.toLocaleString('en-US')}`;
+    const out = { ...box, tiles };
+    if (n === 0) return { ...out, valid: false, label, hint: capitalise(plan.problem || `That is all ${noun} already`) };
+    if (state.money < plan.cost) {
+      return { ...out, valid: false, label, hint: `Needs $${plan.cost.toLocaleString('en-US')} — you have $${state.money.toLocaleString('en-US')}` };
+    }
+    const what = !anchor || (box.w === 1 && box.h === 1)
+      ? 'Tap the other end for a run, or the opposite corner for a ring'
+      : ring ? `A ${box.w}×${box.h} ring of ${noun}` : `${n} ${noun}`;
+    const skipped = plan.skipped.length
+      ? ` — ${plan.skipped.length} skipped: ${plan.problem}`
+      : '';
+    return { ...out, valid: true, label, hint: `${what}${skipped}` };
+  };
+
+  return {
+    w: 1,
+    h: 1,
+    // Drawn against the run itself, so the ghost fence joins up the way the
+    // real one will: a fence picks its art from its neighbours.
+    draw: (ctx, sheets) => {
+      const run = tiles.filter((t) => !t.skip).map((t) => ({ kind, x: t.x, y: t.y, w: 1, h: 1 }));
+      const preview = { ...city, pieces: city.pieces.filter((p) => p.kind === kind).concat(run) };
+      for (const t of run) drawPieceGhost(ctx, sheets, preview, kind, t);
+    },
+    pick: (x, y) => {
+      if (!anchor) {
+        anchor = { x, y };
+        tiles = [{ x, y }];
+        return verdict({ x, y, w: 1, h: 1 }, false);
+      }
+      tiles = runTiles(anchor.x, anchor.y, x, y);
+      const box = {
+        x: Math.min(anchor.x, x), y: Math.min(anchor.y, y),
+        w: Math.abs(x - anchor.x) + 1, h: Math.abs(y - anchor.y) + 1,
+      };
+      return verdict(box, box.w > 1 && box.h > 1);
+    },
+    confirm: () => {
+      const res = cityBuildRun(state, kind, tiles, city);
+      return res.ok
+        ? { ok: true, message: `Laid ${res.count} ${noun} for $${res.spent.toLocaleString('en-US')}` }
+        : { ok: false, reason: capitalise(res.reason) };
+    },
+  };
+}
+
+/** Taking a building down: the confirm bar says what comes back first. */
+function cityDemolishPlacement(state, piece, city = state.city) {
+  const def = cityDef(piece.kind);
+  const found = cityStructureAt(city, piece.x, piece.y);
+  const takeDown = () => (city === state.sanctuary
+    ? sanctuaryDemolish(state, piece.x, piece.y)
+    : cityDemolish(state, piece.x, piece.y, city));
+  return {
+    w: piece.w,
+    h: piece.h,
+    // Pinned to the building: tapping elsewhere does not move the target.
+    snap: () => ({ x: piece.x, y: piece.y }),
+    validate: () => city.pieces.includes(piece),
+    danger: true,
+    confirmLabel: `✓ Demolish for $${found.refund.toLocaleString('en-US')} back`,
+    hint: `Take down the ${def.name.toLowerCase()}? It cost $${cityCost(piece.kind, [piece.w, piece.h]).toLocaleString('en-US')}`,
+    confirm: () => {
+      const res = takeDown();
+      return res.ok
+        ? { ok: true, message: `Took down the ${def.name.toLowerCase()} — $${res.refund.toLocaleString('en-US')} back` }
+        : { ok: false, reason: capitalise(res.reason || 'it is already gone') };
+    },
+  };
+}
+
 function wirePaintToggle() {
   let on = false;
   const render = () => {
@@ -892,8 +1392,71 @@ function announceAward(def) {
   if (def) showAward({ name: def.name, blurb: def.blurb });
 }
 
+/**
+ * Puts up an animal's card and applies whatever comes back: its name, and —
+ * for the animals the sanctuary takes — the button that sends it there or
+ * fetches it home. One card for both, so there is one place to go for
+ * anything that is about a particular animal rather than about the farm.
+ *
+ * Held by id rather than by reference across the wait: the card can sit open
+ * while the farm ticks, and an animal could in principle be gone by the time
+ * the player presses a button.
+ */
+function askName(state, animal, title) {
+  if (namePanelOpen()) return;
+  const kind = animalDef(animal.type).name.toLowerCase();
+  const id = animal.id;
+  const away = state.sanctuary.residents.includes(animal);
+  const find = () => (away
+    ? state.sanctuary.residents.find((x) => x.id === id)
+    : state.animals.find((x) => x.id === id));
+
+  let action = null;
+  if (away) {
+    action = {
+      label: '🌾 Bring back to the farm',
+      onClick: () => {
+        const r = find();
+        if (!r) return;
+        const who = capitalise(calledAs(r));
+        const res = bringHome(state, r);
+        toast(res.ok ? `${who} is back on the farm, beside the farmer` : capitalise(res.reason), res.ok ? undefined : 'warn');
+      },
+    };
+  } else if (isSanctuaryKind(animal.type) && !animal.wild) {
+    const can = canSendToSanctuary(state, animal);
+    action = {
+      label: '🐾 Send to the sanctuary',
+      disabled: !can.ok,
+      note: can.ok ? '' : capitalise(can.reason),
+      onClick: () => {
+        const a = find();
+        if (!a) return;
+        const who = capitalise(calledAs(a));
+        const res = sendToSanctuary(state, a);
+        toast(res.ok ? `${who} has gone to live in the sanctuary` : capitalise(res.reason), res.ok ? undefined : 'warn');
+      },
+    };
+  }
+
+  openNamePanel({
+    title: title || (animal.name ? `Rename ${animal.name}` : `Name your ${kind}`),
+    current: animal.name || '',
+    action,
+    onSave: (text) => {
+      const a = find();
+      if (!a) return;
+      const had = a.name;
+      const res = nameAnimal(state, a, text);
+      if (!res.ok) return;
+      if (res.name) toast(`The ${kind} is now called ${res.name}`);
+      else if (had) toast(`The ${kind} goes without a name again`);
+    },
+  });
+}
+
 /** Turns simulation events into player-visible feedback. */
-function wireToastFeedback() {
+function wireToastFeedback(state) {
   // Deliberately the loudest thing the game says: an achievement is rare, and
   // it is the only toast that is worth interrupting whatever else is on screen.
   events.on('achievement:earned', ({ id }) => announceAward(achievementDef(id)));
@@ -908,13 +1471,17 @@ function wireToastFeedback() {
   });
   events.on('wild:met', ({ name }) => toast(`New find: ${name}! It's in your journal`));
   // Winning one over is a moment, so it gets the banner rather than a toast.
-  events.on('wild:befriended', ({ name, first }) => {
+  events.on('wild:befriended', ({ id, name, first }) => {
     showAward({
       icon: '❤️',
       kicker: first ? 'New friend' : 'Another friend',
       name,
       blurb: 'has decided you are all right, and is staying',
     });
+    // And the moment it becomes hers is the moment to ask what it is called.
+    // Skippable, and it can be named any time afterwards by tapping it twice.
+    const friend = state.animals.find((a) => a.id === id);
+    if (friend) askName(state, friend, 'Name your new friend');
   });
 
   // A mythical gets the achievement banner, because it is the same size of

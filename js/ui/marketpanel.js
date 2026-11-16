@@ -12,6 +12,8 @@
 
 import { on, emit } from '../engine/events.js';
 import { marketRows, GLUT_RATIO, PRICE_FLOOR, PRICE_CEILING } from '../sim/market.js';
+import { cityMarketSummary, cityFavours } from '../sim/citylife.js';
+import { itemName } from '../sim/inventory.js';
 
 export function initMarketPanel(state) {
   const panel = document.getElementById('market-panel');
@@ -71,9 +73,40 @@ export function initMarketPanel(state) {
       + `<i class="wants"></i>wants`
       + `<i class="has"></i>has`
       + `<em>red is more than they need</em>`
-      + `</span>`;
+      + `</span>`
+      + cityLine();
 
+    favoured = cityFavours(state.market);
     list.innerHTML = rows.map(row).join('');
+  }
+
+  // Goods the city's shops have the town wanting more of than the rest.
+  let favoured = new Set();
+
+  /**
+   * What the city is adding, if anything. Said in the panel because the city
+   * changes prices, and a price that moves for a reason the player cannot see
+   * is the thing this panel exists to prevent.
+   */
+  function cityLine() {
+    const city = cityMarketSummary(state);
+    if (!city) return '';
+    const parts = [];
+    if (city.population > 0) {
+      parts.push(`<b>${city.population.toLocaleString('en-US')}</b> people in the city pay`
+        + ` <b>+${city.premium}%</b> on everything and steady the market`);
+    }
+    for (const shop of city.shops) {
+      const goods = shop.goods.map((id) => itemName(id).toLowerCase());
+      const list = goods.length > 1 ? `${goods.slice(0, -1).join(', ')} and ${goods.at(-1)}` : goods[0];
+      // "Lifts the price of", not "wants": wanting read as an order to fill.
+      const name = shop.name.toLowerCase();
+      const who = shop.count > 1
+        ? `${shop.count} ${name.replace(/y$/, 'ie')}s lift`
+        : `a ${name} lifts`;
+      parts.push(`${who} the price of ${list}`);
+    }
+    return `<span class="market-city">🏙️ ${parts.join('; ')}.</span>`;
   }
 
   /**
@@ -91,11 +124,15 @@ export function initMarketPanel(state) {
     const change = Math.round((r.multiplier - 1) * 100);
     const label = change === 0 ? 'usual price' : `${change > 0 ? '+' : ''}${change}%`;
     const keen = r.appetite > 1.25 ? 'wanted' : r.appetite < 0.8 ? 'out of favour' : '';
+    // A shop in the city is part of why this good is wanted; say so. Only
+    // where it actually tips the balance: a shop for every trade wants
+    // everything equally, which is the same as favouring nothing.
+    const shop = favoured.has(r.id) ? ' <em>🏙️</em>' : '';
 
     return `
       <li class="market ${mood}">
         <div class="market-top">
-          <span>${r.name}${keen ? ` <em>${keen}</em>` : ''}</span>
+          <span>${r.name}${keen ? ` <em>${keen}</em>` : ''}${shop}</span>
           <b>$${r.price}<small>${label}</small></b>
         </div>
         <div class="market-bars" role="img" aria-label="${describe(r)}">

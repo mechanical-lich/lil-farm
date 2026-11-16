@@ -8,7 +8,7 @@
 // ⚠ Bump CACHE_VERSION on every deploy. Assets are served cache-first, so
 // without a bump a returning player keeps the old build indefinitely.
 
-const CACHE_VERSION = 'lil-farm-v57';
+const CACHE_VERSION = 'lil-farm-v67';
 
 const SHELL = [
   './',
@@ -33,6 +33,8 @@ const SHELL = [
   './assets/animals/farm.png',
   './assets/battle_tilemap_packed.png',
   './assets/barn.png',
+  './assets/city_tilemap_packed.png',
+  './assets/factory_tilemap_packed.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',
@@ -51,6 +53,8 @@ const SHELL = [
   './js/render/renderer.js',
   './js/render/camera.js',
   './js/render/tilerender.js',
+  './js/render/cityrender.js',
+  './js/render/cityart.js',
   './js/render/entityrender.js',
   './js/world/grid.js',
   './js/world/land.js',
@@ -59,6 +63,11 @@ const SHELL = [
   './js/world/worldgen.js',
   './js/world/pathfind.js',
   './js/sim/tick.js',
+  './js/sim/city.js',
+  './js/sim/citylife.js',
+  './js/sim/democity.js',
+  './js/sim/sanctuary.js',
+  './js/sim/factory.js',
   './js/sim/weeds.js',
   './js/sim/mushrooms.js',
   './js/sim/lanterns.js',
@@ -91,6 +100,7 @@ const SHELL = [
   './js/ui/toolbar.js',
   './js/ui/taskpanel.js',
   './js/ui/marketpanel.js',
+  './js/ui/namepanel.js',
   './js/ui/shoppanel.js',
   './js/ui/hud.js',
   './js/ui/toast.js',

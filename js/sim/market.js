@@ -141,11 +141,28 @@ export function baseShares() {
 
 /** Demand shares as they stand today, normalised to sum to one. */
 export function wantedShares(market) {
-  const total = TRADED.reduce((n, id) => n + (market.demand[id] || 0), 0) || 1;
+  const want = (id) => (market.demand[id] || 0) * cityAppetite(market, id);
+  const total = TRADED.reduce((n, id) => n + want(id), 0) || 1;
   const out = {};
-  for (const id of TRADED) out[id] = (market.demand[id] || 0) / total;
+  for (const id of TRADED) out[id] = want(id) / total;
   return out;
 }
+
+// --- the city -------------------------------------------------------------
+//
+// The city writes what it is doing to the market into market.city once a
+// minute (see sim/citylife.js), and these read it. With no city — every farm
+// that has not built one — each is exactly one, and the market is the market
+// it always was.
+
+/** How much more of a good the town wants because a shop sells it. */
+export function cityAppetite(market, id) { return market.city?.appetite?.[id] || 1; }
+
+/** How much deeper the town's own stock is for the people living there. */
+export function cityDepth(market) { return market.city?.depth || 1; }
+
+/** The small, capped premium a populous city pays on everything traded. */
+export function cityPremium(market) { return market.city?.premium || 1; }
 
 /**
  * What the town is holding, by value, as a share of everything it holds.
@@ -156,10 +173,11 @@ export function wantedShares(market) {
  */
 export function stockShares(market) {
   const wanted = baseShares();
-  let total = MARKET_DEPTH;
+  const depth = MARKET_DEPTH * cityDepth(market);
+  let total = depth;
   const value = {};
   for (const id of TRADED) {
-    value[id] = (market.supply[id] || 0) + MARKET_DEPTH * wanted[id];
+    value[id] = (market.supply[id] || 0) + depth * wanted[id];
     total += market.supply[id] || 0;
   }
   const out = {};
@@ -222,7 +240,9 @@ export function priceOf(state, id) {
 export function priceMultiplier(state, id) {
   if (!state.market || !TRADED.includes(id)) return 1;
   const raw = multiplierFor(glutRatio(state.market, id)) * demandTilt(state.market, id);
-  return Math.min(PRICE_CEILING, Math.max(PRICE_FLOOR, raw));
+  // The city's premium goes on after the clamp, so it is a true cap on what
+  // the city adds rather than something the ceiling quietly eats.
+  return Math.min(PRICE_CEILING, Math.max(PRICE_FLOOR, raw)) * cityPremium(state.market);
 }
 
 /**

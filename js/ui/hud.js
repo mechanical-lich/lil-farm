@@ -10,6 +10,8 @@ import { inventoryList } from '../sim/inventory.js';
 import { isFlowerSeed } from '../sim/flowergenes.js';
 import { taskLabel } from '../sim/tasks.js';
 import { isGourd } from '../sim/crops.js';
+import { housingCapacity } from '../sim/citylife.js';
+import { sanctuaryCapacity } from '../sim/sanctuary.js';
 
 export function initHud(state, { onPlaceGourd } = {}) {
   const money = document.getElementById('hud-money');
@@ -73,6 +75,29 @@ export function initHud(state, { onPlaceGourd } = {}) {
   });
 
   function renderStatus() {
+    // In the city the farmer is out of sight, and the question is how the
+    // place is filling up: who lives there now, and how many it has room for.
+    if (document.body.classList.contains('in-city')) {
+      const now = Math.round(state.city.population);
+      const room = housingCapacity(state.city);
+      // Just the head count once it has settled; "now/room" while it fills.
+      status.textContent = !room && !now ? '👥 Nobody yet' : now === room ? `👥 ${now}` : `👥 ${now}/${room}`;
+      return;
+    }
+    // And in the sanctuary, who lives there against the room there is, with
+    // what is waiting in the donation box once there is anything in it.
+    if (document.body.classList.contains('in-sanctuary')) {
+      const place = state.sanctuary;
+      const here = place.residents.length;
+      const room = sanctuaryCapacity(place);
+      const box = Math.floor(place.donations || 0);
+      // Only a coin for the box, not the sum: measured on the phone the chip
+      // has room for the head count and one more character, and the amount is
+      // said when the visitor centre is tapped.
+      status.textContent = (!room && !here ? '🐾 Nobody yet' : `🐾 ${here}/${room}`)
+        + (box > 0 ? ' 💰' : '');
+      return;
+    }
     const task = state.tasks.find((t) => t.id === state.farmer.taskId);
     status.textContent = task ? `${taskLabel(task)}…` : 'Idle';
   }
@@ -86,6 +111,8 @@ export function initHud(state, { onPlaceGourd } = {}) {
   on('money:changed', render);
   on('tasks:changed', render);
   on('task:done', render);
+  on('city:changed', renderStatus);
+  on('scene:changed', renderStatus);
   render();
 
   return { render, renderStatus };

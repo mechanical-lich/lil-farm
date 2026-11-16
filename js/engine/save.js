@@ -4,10 +4,11 @@
 // one: a schema change must never destroy an existing save.
 
 import {
-  SAVE_KEY, SAVE_VERSION, AUTOSAVE_MIN_MS, AUTOSAVE_MAX_MS, ANIMAL_VARIANTS,
+  SAVE_KEY, SAVE_VERSION, AUTOSAVE_MIN_MS, AUTOSAVE_MAX_MS, ANIMAL_VARIANTS, CELL_W, CELLS_X, CELLS_Y,
 } from '../config.js';
 import { expandSaveToCells } from '../world/expand.js';
 import { newMarket } from '../sim/market.js';
+import { newCity, cityToJSON } from '../sim/city.js';
 import { makeGenome, seedIdFor } from '../sim/flowergenes.js';
 
 /**
@@ -133,7 +134,72 @@ const migrations = {
     data.version = 10;
     return data;
   },
+
+  // The city arrives. An established farm gets an empty one — all grass,
+  // nobody living there — and the farm itself is untouched: nothing about the
+  // city changes a price or a crop until something is built in it.
+  10: (data) => {
+    if (!data.city) data.city = cityToJSON(newCity());
+    data.version = 11;
+    return data;
+  },
+  // The sanctuary arrives, the same way: an empty one, which changes nothing
+  // about a farm until an animal is sent to it. Nothing to write here — a save
+  // with no sanctuary loads as an empty one (see sanctuaryFromJSON) — but the
+  // version moves so a game from before cannot be mistaken for one after.
+  11: (data) => { data.version = 12; return data; },
+
+  // Lots for the city and the sanctuary. Each was one 40x40 map; each is now a
+  // 3x3 of 40x40 lots, the way the valley was grown in migration 2, with the
+  // middle lot owned. Everything already built moves into that middle lot,
+  // unchanged, and the eight around it wait to be bought.
+  12: (data) => {
+    if (data.city) data.city = growPlaceToLots(data.city);
+    if (data.sanctuary) data.sanctuary = growPlaceToLots(data.sanctuary);
+    data.version = 13;
+    return data;
+  },
 };
+
+/**
+ * One old single-lot place, re-laid as the middle lot of a 3x3. Every
+ * coordinate in it moves by one lot across and one down: the ground, every
+ * piece, and everyone standing about (townsfolk, vehicles, animals), whose
+ * `px`/`py` are where they were a tick ago. A place that already has lots is
+ * left alone.
+ */
+export function growPlaceToLots(place) {
+  if (!place || Array.isArray(place.lots) || !(place.w > 0) || !(place.h > 0)) return place;
+  const lot = CELL_W;
+  const w = place.w * CELLS_X;
+  const h = place.h * CELLS_Y;
+  const ox = place.w * Math.floor(CELLS_X / 2);
+  const oy = place.h * Math.floor(CELLS_Y / 2);
+  const ground = new Array(w * h).fill(0);
+  const old = Array.isArray(place.ground) ? place.ground : [];
+  for (let y = 0; y < place.h; y++) {
+    for (let x = 0; x < place.w; x++) ground[(y + oy) * w + x + ox] = old[y * place.w + x] || 0;
+  }
+  const move = (m) => {
+    if (!m || typeof m !== 'object') return m;
+    const out = { ...m };
+    for (const k of ['x', 'px']) if (typeof out[k] === 'number') out[k] += ox;
+    for (const k of ['y', 'py']) if (typeof out[k] === 'number') out[k] += oy;
+    return out;
+  };
+  const across = Math.ceil(w / lot);
+  const middle = Math.floor(oy / lot) * across + Math.floor(ox / lot);
+  return {
+    ...place,
+    w,
+    h,
+    ground,
+    pieces: (place.pieces || []).map(move),
+    folk: (place.folk || []).map(move),
+    ...(Array.isArray(place.residents) ? { residents: place.residents.map(move) } : {}),
+    lots: [middle],
+  };
+}
 
 /** The swing the old `split` flag applied to the middle tone. */
 const SPLIT_SHIFT = 35;

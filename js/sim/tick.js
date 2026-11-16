@@ -21,6 +21,8 @@ import { updateLeaves } from './thanksgiving.js';
 import { updateWildlife } from './wildlife.js';
 import { updateMarket } from './market.js';
 import { updateFlowers, updateBreeding } from './flowers.js';
+import { updateCity } from './citylife.js';
+import { updateSanctuary } from './sanctuary.js';
 
 /** @param {object} state */
 export function tick(state) {
@@ -43,5 +45,8 @@ export function tick(state) {
   updateWildlife(state);
   updateFlowers(state);
   updateBreeding(state);
+  // Before the market, so a minute's trading sees the city as it now stands.
+  updateCity(state);
+  updateSanctuary(state);
   updateMarket(state);
 }

@@ -478,6 +478,49 @@ export function animalAt(state, x, y) {
   return (state.animals || []).find((a) => a.x === x && a.y === y) || null;
 }
 
+// --- names ------------------------------------------------------------------
+//
+// Any animal that lives here can be given a name. It is one optional string on
+// the animal's own record, so it is saved with it, travels with it, and an
+// animal nobody has named costs nothing. A wild one that has not been won over
+// cannot be named: it is not hers yet, and most of them leave within the day.
+
+/** Short enough to fit a toast on the phone with a sentence after it. */
+export const NAME_MAX = 16;
+
+/**
+ * A name as it will be kept: control characters out, runs of space collapsed,
+ * trimmed, and cut to NAME_MAX whole characters — counted by code point, so an
+ * emoji is one character and is never cut in half.
+ */
+export function cleanName(raw) {
+  const text = String(raw ?? '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return [...text].slice(0, NAME_MAX).join('').trim();
+}
+
+/**
+ * Names an animal, or takes its name away if given nothing.
+ *
+ * @returns {{ok: boolean, name?: string|null, reason?: string}}
+ */
+export function nameAnimal(state, animal, raw) {
+  if (!animal) return { ok: false, reason: 'no such animal' };
+  if (animal.wild) return { ok: false, reason: 'it is still wild' };
+  const name = cleanName(raw);
+  if (name) animal.name = name;
+  else delete animal.name;
+  emitUnlessSuspended('animal:named', { id: animal.id, type: animal.type, name: name || null });
+  return { ok: true, name: name || null };
+}
+
+/** What to call it mid-sentence: "Biscuit", or "the fox" if it has no name. */
+export function calledAs(animal) {
+  return animal?.name || `the ${animalDef(animal.type).name.toLowerCase()}`;
+}
+
 export function makeAnimal(state, type, x, y, variant = rollVariant(state)) {
   const animal = {
     id: state.nextAnimalId++,

@@ -17,6 +17,8 @@ import { newAchievementRecord } from './sim/achievements.js';
 import { newEventRecord, backfillBirthday } from './sim/events.js';
 import { seedStartingMushrooms } from './sim/mushrooms.js';
 import { newMarket } from './sim/market.js';
+import { newCity, cityToJSON, cityFromJSON } from './sim/city.js';
+import { newSanctuary, sanctuaryToJSON, sanctuaryFromJSON, reconcileSanctuary } from './sim/sanctuary.js';
 import { reconcileFlowers } from './sim/flowers.js';
 import { startingPlot } from './world/land.js';
 import { makeRng } from './engine/rng.js';
@@ -71,6 +73,10 @@ export function newGame(seed = (Date.now() ^ 0x5f3759df) >>> 0) {
     // See TESTING in config.js — a real farm starts with just a few seeds.
     inventory: { ...START_INVENTORY },
     market: newMarket(),
+    // The second map, built with money. See sim/city.js.
+    city: newCity(),
+    // The third map, where befriended animals can live. See sim/sanctuary.js.
+    sanctuary: newSanctuary(),
   };
 
   // Every farm starts with one barn. It gives the opening view a centre to sit
@@ -132,6 +138,8 @@ export function serialize(state) {
     nextTaskId: state.nextTaskId,
     inventory: state.inventory,
     market: state.market,
+    city: cityToJSON(state.city),
+    sanctuary: sanctuaryToJSON(state.sanctuary),
   };
 }
 
@@ -216,6 +224,10 @@ export function deserialize(data) {
     nextTaskId: data.nextTaskId || 1,
     inventory: data.inventory || {},
     market: data.market || newMarket(),
+    // Farms from before the city have an empty one waiting.
+    city: cityFromJSON(data.city),
+    // And farms from before the sanctuary have an empty one of those.
+    sanctuary: sanctuaryFromJSON(data.sanctuary),
   };
 
   // The grid's building marks are an index over state.buildings, and an index
@@ -260,6 +272,10 @@ export function deserialize(data) {
   const setOut = reconcileGourdDecor(state);
   if (setOut.dropped) {
     console.warn(`gourd decorations cleared on load: ${setOut.dropped}`);
+  }
+  const homeless = reconcileSanctuary(state);
+  if (homeless.returned || homeless.dropped) {
+    console.warn(`sanctuary repaired on load: ${homeless.returned} brought home, ${homeless.dropped} of a kind that no longer exists`);
   }
   const bales = reconcileHay(state);
   if (bales.adopted || bales.dropped) {

@@ -12,6 +12,8 @@ import { BUILDABLES, BUILD_GROUPS, buildGroup, canAfford, costLabel } from '../s
 import { getPref } from '../engine/prefs.js';
 import { countItem } from '../sim/inventory.js';
 import { on } from '../engine/events.js';
+import { CITY_GROUPS, cityGroup, cityCost, cityDef } from '../sim/city.js';
+import { SANCTUARY_GROUPS, sanctuaryGroup } from '../sim/sanctuary.js';
 
 /**
  * The tools, in the order they sit on the bar.
@@ -50,6 +52,31 @@ export const TOOLS = [
   },
 ];
 
+/**
+ * The tools offered while the city is on screen.
+ *
+ * Only three, because the city has no farmer and no queue: everything in it is
+ * bought and appears at once, so all a hand can do there is look, build and
+ * take down. Planting, watering, harvesting and the rest act on the farm's own
+ * map and have no meaning in a street, so they are not offered rather than
+ * offered and refused.
+ */
+export const CITY_TOOLS = [
+  { id: 'auto', icon: '👆', name: 'Tap', hint: 'See what a building is for' },
+  { id: 'build', icon: '🔨', name: 'Build', hint: 'Roads, buildings and street furniture — paid in money' },
+  { id: 'clear', icon: '🚧', name: 'Demolish', hint: 'Take something down for half its price back' },
+];
+
+/** The sanctuary is built the way the city is, so it gets the same three, and Move. */
+export const SANCTUARY_TOOLS = [
+  { id: 'auto', icon: '👆', name: 'Tap', hint: 'Tap an animal to name it or bring it home' },
+  { id: 'build', icon: '🔨', name: 'Build', hint: 'Enclosures, trees and paths — paid in money' },
+  { id: 'clear', icon: '🚧', name: 'Demolish', hint: 'Take something down for half its price back' },
+  // The farm's own move tool: press on an animal and drag it to another spot,
+  // or into another enclosure with room.
+  { id: 'move', icon: '✊', name: 'Move', hint: 'Drag an animal to another spot or enclosure' },
+];
+
 export function initToolbar(state, { onToolChange, onAction } = {}) {
   const bar = document.getElementById('toolbar');
   const subRow = document.getElementById('sub-row');
@@ -61,6 +88,17 @@ export function initToolbar(state, { onToolChange, onAction } = {}) {
   // itself. Kept between visits: someone laying a row of fences should not have
   // to walk back in through the menu for every one.
   let openGroup = null;
+  // Which map the bar is for. The city has its own tools and its own menu,
+  // and remembers its own place in that menu.
+  let mode = 'farm';
+  // The city and the sanctuary are both built from a menu of things bought
+  // with money. Each keeps its own place in its own menu.
+  const places = {
+    city: { tools: CITY_TOOLS, groups: CITY_GROUPS, group: cityGroup, kind: 'road', open: null },
+    sanctuary: { tools: SANCTUARY_TOOLS, groups: SANCTUARY_GROUPS, group: sanctuaryGroup, kind: 'paddock', open: null },
+  };
+  const place = () => places[mode] || null;
+  const toolList = () => (place() ? place().tools : TOOLS);
 
   /**
    * Draws the bar. Icon-only is a preference because the bar scrolls sideways
@@ -75,7 +113,7 @@ export function initToolbar(state, { onToolChange, onAction } = {}) {
   function renderTools() {
     const labels = getPref('toolLabels');
     bar.classList.toggle('icons-only', !labels);
-    bar.innerHTML = TOOLS.map((t) => (
+    bar.innerHTML = toolList().map((t) => (
       `<button class="tool" data-tool="${t.id}" title="${t.name} — ${t.hint}"`
       + ` aria-label="${t.name}">${t.icon}${labels ? ` ${t.name}` : ''}</button>`
     )).join('');
@@ -88,7 +126,7 @@ export function initToolbar(state, { onToolChange, onAction } = {}) {
   bar.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-tool]');
     if (!btn) return;
-    const chosen = TOOLS.find((t) => t.id === btn.dataset.tool);
+    const chosen = toolList().find((t) => t.id === btn.dataset.tool);
     // A one-shot button fires and changes nothing: the tool in hand stays in
     // hand, so finding the farmer mid-job doesn't cost you your place.
     if (chosen?.action) { if (onAction) onAction(chosen.id); return; }
@@ -101,9 +139,18 @@ export function initToolbar(state, { onToolChange, onAction } = {}) {
     const crop = e.target.closest('button[data-crop]');
     if (crop) { cropType = crop.dataset.crop; render(); return; }
     const group = e.target.closest('button[data-buildgroup]');
-    if (group) { openGroup = group.dataset.buildgroup || null; renderBuildables(); return; }
+    if (group) {
+      if (place()) place().open = group.dataset.buildgroup || null;
+      else openGroup = group.dataset.buildgroup || null;
+      renderBuildables();
+      return;
+    }
     const build = e.target.closest('button[data-build]');
-    if (build) { buildKind = build.dataset.build; render(); }
+    if (build) {
+      if (place()) place().kind = build.dataset.build;
+      else buildKind = build.dataset.build;
+      render();
+    }
   });
 
   function renderSeeds() {
@@ -134,6 +181,7 @@ export function initToolbar(state, { onToolChange, onAction } = {}) {
    * either way, which is the constraint the whole sub-picker exists under.
    */
   function renderBuildables() {
+    if (place()) { renderCityBuildables(); return; }
     const group = buildGroup(openGroup);
     if (!group) {
       subRow.innerHTML = BUILD_GROUPS.map((g) => {
@@ -161,9 +209,34 @@ export function initToolbar(state, { onToolChange, onAction } = {}) {
     }).join('');
   }
 
+  /**
+   * The city's menu: the same two-level shape as the farm's, priced in money.
+   * A building's price depends on how big it is dragged, so the row quotes the
+   * smallest and says "from".
+   */
+  function renderCityBuildables() {
+    const here = place();
+    const group = here.group(here.open);
+    if (!group) {
+      subRow.innerHTML = here.groups.map((g) => (
+        `<button data-buildgroup="${g.id}" title="${g.name}">${g.name} <b>${g.kinds.length}</b></button>`
+      )).join('');
+      return;
+    }
+    const back = '<button class="sub-back" data-buildgroup="" title="Back to the groups">‹</button>';
+    subRow.innerHTML = back + group.kinds.map((kind) => {
+      const def = cityDef(kind);
+      if (!def) return '';
+      const cost = cityCost(kind);
+      const price = `${def.building ? 'from ' : ''}$${cost.toLocaleString('en-US')}`;
+      return `<button class="${kind === here.kind ? 'on' : ''}${state.money >= cost ? '' : ' short'}" ` +
+        `data-build="${kind}" title="${def.hint}">${def.name} <b>${price}</b></button>`;
+    }).join('');
+  }
+
   function render() {
     for (const btn of bar.querySelectorAll('button[data-tool]')) {
-      const t = TOOLS.find((x) => x.id === btn.dataset.tool);
+      const t = toolList().find((x) => x.id === btn.dataset.tool);
       btn.classList.toggle('on', !t?.action && btn.dataset.tool === tool);
     }
 
@@ -177,6 +250,7 @@ export function initToolbar(state, { onToolChange, onAction } = {}) {
   // honest about what's affordable right now.
   on('inventory:changed', () => { if (tool === 'plant' || tool === 'build') render(); });
   on('tasks:changed', () => { if (tool === 'build') renderBuildables(); });
+  on('money:changed', () => { if (place() && tool === 'build') renderBuildables(); });
 
   // Opening a panel drops back to the harmless tool and closes the sub-picker.
   // A panel only covers part of the screen, so leaving Build armed behind it
@@ -196,6 +270,15 @@ export function initToolbar(state, { onToolChange, onAction } = {}) {
     getTool: () => tool,
     getCropType: () => cropType,
     getBuildKind: () => buildKind,
+    getCityKind: () => place()?.kind,
+    getMode: () => mode,
     setTool: (t) => { tool = t; render(); },
+    /** Swaps the bar between the farm's tools and the city's. Drops to Tap. */
+    setMode: (m) => {
+      if (mode === m) return;
+      mode = m;
+      tool = 'auto';
+      renderTools();
+    },
   };
 }

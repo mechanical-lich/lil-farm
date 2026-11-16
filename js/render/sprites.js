@@ -12,6 +12,9 @@
 //   'lanterns' — assets/flora/jackolanterns.png        one row of jack-o'-lantern faces
 //   'leaves'  — assets/flora/leaves.png                one row of November's fallen leaves
 //   'turkeys' — assets/animals/turkeys.png             one column of turkeys, a breed per row
+//   'city'    — assets/city_tilemap_packed.png   the city: walls, roofs, road, street furniture
+//   'cityroad' — built at load from 'city'        the road's thirteen autotile pieces
+//   'factory' — assets/factory_tilemap_packed.png  the factory district: floor, belts, machines
 //
 // Both share the same palette (#84c669 grass, #eaa56c dirt), so tiles from the
 // two sheets sit next to each other seamlessly.
@@ -29,6 +32,7 @@ import { setAnimalVariants } from '../sim/animals.js';
 import { GOURDS } from '../sim/crops.js';
 import { useFlowerSheet } from './flowerart.js';
 import { useAquaticSheet } from './fishart.js';
+import { buildRoadStrip, ROAD_PIECES } from './cityart.js';
 
 /**
  * The soil capsule set — the art tilling is actually drawn with.
@@ -346,6 +350,144 @@ export const EMOTES = {
   alarm: [2, 4, 'emotes'],
 };
 
+/**
+ * The city sheet (assets/city_tilemap_packed.png), catalogued from it drawn
+ * eight times over with a grid. Same 16px tiles and the same dark outline as
+ * the rest of the art.
+ *
+ * Two building sets sit side by side, the second exactly six columns right of
+ * the first, so one function describes each part of both:
+ *
+ *   rows 0-2   a flat roof: a 3x3 nine-slice, a one-wide strip down (col 3), a
+ *              one-tall strip across (cols 4-5 and the band at col 4 row 1), a
+ *              single (col 5 row 1) and two plain fills with a vent and specks
+ *   rows 3-4   a wall: the upper row with a window, the lower row standing on
+ *              its footing with a single door and a wide double one — glass
+ *              double doors on the red brick, a garage door on the brown
+ *
+ * Tan roof over red brick on the left, slate roof over brown brick on the right.
+ */
+const roofSet = (dx) => ({
+  TL: [dx + 0, 0, 'city'], T: [dx + 1, 0, 'city'], TR: [dx + 2, 0, 'city'],
+  L: [dx + 0, 1, 'city'], C: [dx + 1, 1, 'city'], R: [dx + 2, 1, 'city'],
+  BL: [dx + 0, 2, 'city'], B: [dx + 1, 2, 'city'], BR: [dx + 2, 2, 'city'],
+  // One row deep: left cap, the band, right cap.
+  stripL: [dx + 4, 0, 'city'], stripM: [dx + 4, 1, 'city'], stripR: [dx + 5, 0, 'city'],
+  // The middle of a big roof, with something on it now and then.
+  vent: [dx + 4, 2, 'city'], specks: [dx + 5, 2, 'city'],
+});
+
+const wallSet = (dx) => ({
+  upperL: [dx + 0, 3, 'city'], upperM: [dx + 1, 3, 'city'], upperM2: [dx + 2, 3, 'city'],
+  upperM3: [dx + 3, 3, 'city'], window: [dx + 4, 3, 'city'], upperR: [dx + 5, 3, 'city'],
+  lowerL: [dx + 0, 4, 'city'], lowerM: [dx + 1, 4, 'city'],
+  wideL: [dx + 2, 4, 'city'], wideR: [dx + 3, 4, 'city'],
+  door: [dx + 4, 4, 'city'], lowerR: [dx + 5, 4, 'city'],
+});
+
+export const CITY_ROOF = { tan: roofSet(0), slate: roofSet(6) };
+export const CITY_WALL = { red: wallSet(0), brown: wallSet(6) };
+
+/**
+ * Everything else on the city sheet that the game draws. `top` is the row of
+ * art above a tall piece's own tile, drawn over the row behind it the way a
+ * tree's canopy is.
+ *
+ * The road is not here: it is assembled into its own strip at load, from four
+ * quarters of the road on this sheet. See render/cityart.js.
+ */
+export const CITY = {
+  pavement: [4, 7, 'city'],
+  pavementCracked: [4, 8, 'city'],
+
+  lampTop: [2, 7, 'city'], lamp: [2, 8, 'city'],
+  streetLightTop: [1, 7, 'city'], streetLight: [1, 8, 'city'],
+  powerPoleTop: [3, 7, 'city'], powerPole: [3, 8, 'city'],
+  stopSign: [0, 7, 'city'],
+  busSign: [0, 8, 'city'],
+  hydrant: [6, 8, 'city'],
+  bin: [1, 9, 'city'],
+  // A three-tile bench; the two ends meet cleanly, so a bench is two tiles.
+  benchL: [9, 7, 'city'], benchR: [11, 7, 'city'],
+  shelterTopL: [7, 7, 'city'], shelterTopR: [8, 7, 'city'],
+  shelterL: [7, 8, 'city'], shelterR: [8, 8, 'city'],
+
+  topiaryOrangeTop: [7, 5, 'city'], topiaryOrange: [7, 6, 'city'],
+  topiaryGreenTop: [8, 5, 'city'], topiaryGreen: [8, 6, 'city'],
+  planterBox: [9, 5, 'city'],
+  pottedOrange: [10, 5, 'city'], pottedGreen: [11, 5, 'city'],
+  planterL: [9, 6, 'city'], planterM: [10, 6, 'city'], planterR: [11, 6, 'city'],
+
+  // Picket fence: a run across, posts down the side, and the four corners of
+  // an enclosure (the top edge has corners but no middle of its own).
+  picketL: [9, 10, 'city'], picketM: [10, 10, 'city'], picketR: [11, 10, 'city'],
+  // A post line has two pieces, its post at the left edge of the tile or the
+  // right, so the side walls of an enclosure meet the corners above and below
+  // them: the right wall's posts stand where the right-hand corners' do.
+  picketV: [9, 9, 'city'], picketVR: [11, 9, 'city'],
+  picketTL: [9, 8, 'city'], picketTR: [11, 8, 'city'],
+  // Wire fence: a run across with its end posts, and a post line down.
+  chainL: [6, 10, 'city'], chainM: [7, 10, 'city'], chainR: [8, 10, 'city'],
+  chainV: [6, 9, 'city'], chainVR: [8, 9, 'city'],
+
+  // The townsfolk, and two vehicles drawn 2x2 with their wheels in the bottom row.
+  folk: [[0, 9, 'city'], [0, 10, 'city'], [1, 10, 'city']],
+  vehicles: [
+    [[2, 9, 'city'], [3, 9, 'city'], [2, 10, 'city'], [3, 10, 'city']],
+    [[4, 9, 'city'], [5, 9, 'city'], [4, 10, 'city'], [5, 10, 'city']],
+  ],
+};
+
+/**
+ * The factory sheet (assets/factory_tilemap_packed.png), catalogued the same
+ * way. What the game draws from it:
+ *
+ *   row 0      floor: plain orange concrete and two marked variants
+ *   rows 1-5   conveyors: across in rows 2-3 (plain) and 4-5 (yellow-trimmed),
+ *              each a single plus left, middle and right; down in column 4,
+ *              plain in rows 0-2 and trimmed in rows 3-5, each top, middle and
+ *              bottom; and a one-tile belt pointing up in row 1
+ *   rows 6-9   machines, a row per colour — red, yellow, green, blue — and
+ *              three looks of each in columns 3-5
+ *   cols 6-11  pipes across and down, the hazard strip, boxes, a crate and a
+ *              forklift
+ */
+export const FACTORY = {
+  floor: [0, 0, 'factory'], floorChecked: [1, 0, 'factory'], floorHatched: [2, 0, 'factory'],
+
+  belt: {
+    single: [0, 2, 'factory'], left: [1, 2, 'factory'], mid: [2, 2, 'factory'], right: [3, 2, 'factory'],
+    top: [4, 0, 'factory'], midV: [4, 1, 'factory'], bottom: [4, 2, 'factory'],
+  },
+  beltTrim: {
+    single: [0, 4, 'factory'], left: [1, 4, 'factory'], mid: [2, 4, 'factory'], right: [3, 4, 'factory'],
+    top: [4, 3, 'factory'], midV: [4, 4, 'factory'], bottom: [4, 5, 'factory'],
+  },
+  pipe: {
+    single: [11, 8, 'factory'], left: [6, 6, 'factory'], mid: [10, 6, 'factory'], right: [11, 6, 'factory'],
+    top: [9, 7, 'factory'], midV: [9, 7, 'factory'], bottom: [9, 7, 'factory'],
+  },
+  hazard: {
+    single: [11, 10, 'factory'], left: [9, 9, 'factory'], mid: [10, 9, 'factory'], right: [11, 9, 'factory'],
+    top: [11, 10, 'factory'], midV: [11, 10, 'factory'], bottom: [11, 10, 'factory'],
+  },
+
+  // A row of three looks per colour.
+  machines: {
+    red: [[3, 6, 'factory'], [4, 6, 'factory'], [5, 6, 'factory']],
+    yellow: [[3, 7, 'factory'], [4, 7, 'factory'], [5, 7, 'factory']],
+    green: [[3, 8, 'factory'], [4, 8, 'factory'], [5, 8, 'factory']],
+    blue: [[3, 9, 'factory'], [4, 9, 'factory'], [5, 9, 'factory']],
+  },
+
+  crate: [4, 10, 'factory'],
+  boxesTop: [1, 6, 'factory'], boxes: [1, 7, 'factory'],
+  forklift: [2, 8, 'factory'],
+};
+
+/** The road's thirteen pieces, on the strip built at load. */
+export const CITY_ROAD = Object.fromEntries(ROAD_PIECES.map((key, i) => [key, [i, 0, 'cityroad']]));
+
 /** Source rect in the sheet for a [col,row] pair. */
 export function srcRect([col, row]) {
   return { sx: col * TILE, sy: row * TILE, sw: TILE, sh: TILE };
@@ -411,7 +553,7 @@ function loadImage(src) {
  */
 export async function loadSheets() {
   const [farm, town, emotes, shrooms, animals, battle, barn, flowers, decor, aquatic,
-    mythical, balloons, wildlife, exotic, gourds, lanterns, leaves, turkeys] = await Promise.all([
+    mythical, balloons, wildlife, exotic, gourds, lanterns, leaves, turkeys, city, factory] = await Promise.all([
     loadImage('assets/tilemap_packed.png'),
     loadImage('assets/town_tilemap_packed.png'),
     loadImage('assets/emotes.png'),
@@ -430,6 +572,8 @@ export async function loadSheets() {
     loadImage('assets/flora/jackolanterns.png'),
     loadImage('assets/flora/leaves.png'),
     loadImage('assets/animals/turkeys.png'),
+    loadImage('assets/city_tilemap_packed.png'),
+    loadImage('assets/factory_tilemap_packed.png'),
   ]);
   buildCapsules(farm);
 
@@ -460,7 +604,25 @@ export async function loadSheets() {
     // November: the fallen leaves and the turkeys, both drawn by
     // tools/make-thanksgiving.mjs. See sim/thanksgiving.js.
     leaves, turkeys,
+    // The city, and the road's autotile pieces assembled from it.
+    city, cityroad: buildRoadCanvas(city), factory,
   };
+}
+
+/** Runs render/cityart.js over the loaded sheet and hands back a canvas. */
+function buildRoadCanvas(sheet) {
+  const src = document.createElement('canvas');
+  src.width = sheet.width;
+  src.height = sheet.height;
+  const sctx = src.getContext('2d', { willReadFrequently: true });
+  sctx.drawImage(sheet, 0, 0);
+  const strip = buildRoadStrip(sctx.getImageData(0, 0, sheet.width, sheet.height).data, sheet.width);
+
+  const out = document.createElement('canvas');
+  out.width = strip.width;
+  out.height = strip.height;
+  out.getContext('2d').putImageData(new ImageData(strip.rgba, strip.width, strip.height), 0, 0);
+  return out;
 }
 
 /** Resolves which sheet image a sprite reference belongs to. */

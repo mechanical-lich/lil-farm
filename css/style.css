@@ -139,6 +139,41 @@ body {
 
 #hud-status.has-work { border-color: var(--accent); }
 
+/* Farm or city. Icon only: the top row is three chips wide already, and the
+   picture of the other place says where the button goes. */
+#scene-toggle {
+  padding: 8px 9px;
+  font: inherit;
+  font-size: 17px;
+  color: inherit;
+  cursor: pointer;
+}
+#scene-toggle.on { border-color: var(--accent); }
+
+/* The places the button offers, dropped down under it at the right-hand end
+   of the top row. Two buttons, since the third place is the one on screen. */
+#place-menu {
+  position: absolute;
+  top: calc(var(--safe-t) + 52px);
+  right: 8px;
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--panel);
+  border: 3px solid var(--panel-edge);
+  border-radius: 14px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+  z-index: 6;
+}
+#place-menu.open { display: flex; }
+#place-menu button { text-align: left; white-space: nowrap; }
+
+/* Away from the farm the status chip shows a head count, and the farmer's
+   queue count beside it would only crowd the number that matters there. */
+body.in-city #task-count,
+body.in-sanctuary #task-count { display: none; }
+
 #hud-status-text {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -461,6 +496,16 @@ body {
 
 .market-key em { font-style: normal; opacity: 0.55; }
 
+/* What the city is adding to the prices below, when it adds anything. */
+.market-city {
+  display: block;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(111, 155, 209, 0.14);
+  line-height: 1.35;
+}
+
 .panel li.market {
   display: block;
   padding: 8px 0 10px;
@@ -765,6 +810,29 @@ li.market.glut .market-top small { color: #a33d2e; }
   display: block;
   border-bottom: none;
   padding: 8px 0 4px;
+}
+
+/* Whose land the map is: the farm's, the city's or the sanctuary's. Three
+   equal buttons, so the longest word sets nothing and the row fits a phone. */
+.panel li.land-where {
+  display: flex;
+  gap: 6px;
+  border-bottom: none;
+  padding: 2px 0 0;
+}
+
+.panel li.land-where button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 6px 4px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.panel li.land-where button.on {
+  background: var(--accent);
+  border-color: #3f8a34;
+  color: #10240c;
 }
 
 /* Square cells, so the little map reads as the valley's actual shape. */
@@ -1340,6 +1408,82 @@ li.market.glut .market-top small { color: #a33d2e; }
 
 #summary-close {
   width: 100%;
+  background: var(--accent);
+  border-color: #3f8a34;
+  color: #10240c;
+}
+
+/* The naming card. Same furniture as the welcome-back card, plus a field. */
+#namer {
+  position: fixed;
+  inset: 0;
+  display: none;
+  /* Towards the top rather than centred: on a phone the keyboard takes the
+     bottom half of the screen, and a centred card would sit under it. */
+  align-items: start;
+  justify-items: center;
+  padding: calc(var(--safe-t) + 72px) 16px calc(var(--safe-b) + 16px);
+  background: rgba(20, 14, 10, 0.55);
+  z-index: 11;
+}
+
+#namer.open { display: grid; }
+
+#namer-form {
+  width: 100%;
+  max-width: 340px;
+  background: var(--panel);
+  border: 3px solid var(--panel-edge);
+  border-radius: 18px;
+  padding: 18px 18px 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+#namer-form h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+
+#namer-input {
+  width: 100%;
+  box-sizing: border-box;
+  /* 16px and no smaller: below that, Safari zooms the page in on focus and
+     does not zoom back out. */
+  font: inherit;
+  font-size: 16px;
+  padding: 10px 12px;
+  border: 2px solid var(--panel-edge);
+  border-radius: 10px;
+  background: #fffaf0;
+  color: inherit;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+#namer-hint {
+  margin: 8px 2px 14px;
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+#namer-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+#namer-action {
+  width: 100%;
+  margin-top: 12px;
+}
+#namer-action:disabled { opacity: 0.5; }
+#namer-action-note {
+  margin: 6px 2px 0;
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+#namer-save {
   background: var(--accent);
   border-color: #3f8a34;
   color: #10240c;
