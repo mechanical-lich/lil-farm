@@ -593,7 +593,8 @@ outright with a reason — an import replaces a farm that might be weeks old, so
 half-loading is worse than failing. Saves from older versions are migrated on the
 way in; saves from a newer version are refused.
 
-**Debug.** Top up supplies, and start a new farm. These were console-only, which
+**Debug.** Top up supplies, halve your money (two taps — for a farm grown rich
+under older prices), and start a new farm. These were console-only, which
 is no use on the phone the game is actually played on.
 
 ## Task management

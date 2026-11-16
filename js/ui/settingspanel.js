@@ -145,6 +145,19 @@ export function initSettingsPanel(state, { serialize, autosaver, onMessage } = {
     onMessage?.('Supplies topped up');
   });
 
+  // For a farm grown rich under older prices: a way to hand half of it back.
+  // Two taps, since unlike topping up there is no undoing it.
+  const halveBtn = document.getElementById('settings-halve');
+  confirmable(halveBtn, 'Halve my money', 'Really halve your money?', () => {
+    const lost = state.money - Math.floor(state.money / 2);
+    if (lost <= 0) { onMessage?.('No money to halve'); return false; }
+    state.money -= lost;
+    emit('money:changed', { delta: -lost });
+    autosaver?.saveNow?.();
+    onMessage?.(`Money halved — $${state.money.toLocaleString()} left`);
+    return true;
+  });
+
   const resetBtn = document.getElementById('settings-reset');
   confirmable(resetBtn, 'Start a new farm', 'Really delete this farm?', () => {
     autosaver?.disable();
@@ -187,7 +200,7 @@ export function initSettingsPanel(state, { serialize, autosaver, onMessage } = {
   }
 
   function resetConfirms() {
-    for (const b of [importBtn, resetBtn]) b._resetConfirm?.();
+    for (const b of [importBtn, halveBtn, resetBtn]) b._resetConfirm?.();
   }
 
   on('inventory:changed', () => { if (open) render(); });
